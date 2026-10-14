@@ -51,7 +51,12 @@ __attribute__((weak)) int port_is_early_luigi_unlocked(void) { return 0; }
 __attribute__((weak)) int port_is_modern_boo_flight(void) { return 0; }
 __attribute__((weak)) int port_is_skip_cutscenes(void) { return 0; }
 __attribute__((weak)) int port_is_infinite_health(void) { return 0; }
+__attribute__((weak)) int port_is_infinite_powerup(void) { return 0; }
 __attribute__((weak)) int port_input_real_a(void) { return 0; }
 __attribute__((weak)) void port_request_warp(const char* stage, int scenario) { (void)stage; (void)scenario; }
 __attribute__((weak)) int port_take_warp_request(char* outStage, size_t maxLen, int* outScenario) { (void)outStage; (void)maxLen; (void)outScenario; return 0; }
+__attribute__((weak)) void port_request_powerup(int type) { (void)type; }
+__attribute__((weak)) int port_take_powerup_request(void) { return -1; }
+__attribute__((weak)) void port_set_current_powerup(int mode) { (void)mode; }
+__attribute__((weak)) int port_get_current_powerup(void) { return 0; }
 }

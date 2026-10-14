@@ -1,4 +1,5 @@
 #include "Game/Enemy/KarikariDirector.hpp"
+#include "port/port.h"
 #include "Game/LiveActor/HitSensor.hpp"
 #include "Game/Player/MarioActor.hpp"
 #include "Game/Player/MarioConst.hpp"
@@ -326,6 +327,15 @@ void MarioActor::updatePlayerMode() {
     if (_3DC == 0) {
         return;
     }
+
+#ifdef TARGET_PC
+    if (port_is_plus_edition() && port_is_infinite_powerup()) {
+        if (_3DC < 600) {
+            _3DC = 1200;
+        }
+        return;
+    }
+#endif
 
     _3DC--;
 

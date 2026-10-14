@@ -25,6 +25,7 @@ struct Settings {
     // Advanced Mods (off by default)
     bool modSkipCutscenes = false;
     bool modInfiniteHealth = false;
+    bool modInfinitePowerup = false;
 
     void load(const std::string& path);
     void save(const std::string& path) const;

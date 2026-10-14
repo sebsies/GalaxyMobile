@@ -143,8 +143,13 @@ int port_is_early_luigi_unlocked(void);
 int port_is_modern_boo_flight(void);
 int port_is_skip_cutscenes(void);
 int port_is_infinite_health(void);
+int port_is_infinite_powerup(void);
 void port_request_warp(const char* stage, int scenario);
 int port_take_warp_request(char* outStage, size_t maxLen, int* outScenario);
+void port_request_powerup(int type);
+int port_take_powerup_request(void);
+void port_set_current_powerup(int mode);
+int port_get_current_powerup(void);
 
 // Frame-time statistics (platform/src/port/perf.cpp), logged every 10 s.
 void port_perf_frame_begin(void);      // the game thread starts a frame

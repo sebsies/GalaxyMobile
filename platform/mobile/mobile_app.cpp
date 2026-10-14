@@ -766,5 +766,39 @@ int port_take_warp_request(char* outStage, size_t maxLen, int* outScenario) {
     }
     return 1;
 }
+
+int port_is_infinite_powerup(void) {
+    if (!mobile_ui::UIOverlay::get().isPlusEdition()) return 0;
+    return mobile_ui::UIOverlay::get().settings().modInfinitePowerup ? 1 : 0;
+}
+
+static std::mutex sPowerupMutex;
+static int sPendingPowerup = -1;
+static bool sHasPendingPowerup = false;
+static std::atomic<int> sCurrentPowerup{0};
+
+void port_request_powerup(int type) {
+    if (!mobile_ui::UIOverlay::get().isPlusEdition()) return;
+    std::lock_guard<std::mutex> lk(sPowerupMutex);
+    sPendingPowerup = type;
+    sHasPendingPowerup = true;
+    LOGI("Queued power-up request type=%d", type);
+}
+
+int port_take_powerup_request(void) {
+    if (!mobile_ui::UIOverlay::get().isPlusEdition()) return -1;
+    std::lock_guard<std::mutex> lk(sPowerupMutex);
+    if (!sHasPendingPowerup) return -1;
+    sHasPendingPowerup = false;
+    return sPendingPowerup;
+}
+
+void port_set_current_powerup(int mode) {
+    sCurrentPowerup.store(mode, std::memory_order_relaxed);
+}
+
+int port_get_current_powerup(void) {
+    return sCurrentPowerup.load(std::memory_order_relaxed);
+}
 }
 

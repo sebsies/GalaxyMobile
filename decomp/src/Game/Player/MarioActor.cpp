@@ -1076,6 +1076,22 @@ void MarioActor::controlMain() {
 void MarioActor::updateBehavior() {
     updateLife();
     updatePlayerMode();
+
+#ifdef TARGET_PC
+    if (port_is_plus_edition()) {
+        port_set_current_powerup(mPlayerMode);
+        if (port_is_infinite_powerup() && mPlayerMode == PlayerMode_Bee && mMario) {
+            mMario->_402 = mConst->getTable()->mAirWalkTime;
+        }
+        if (!MR::isDemoActive()) {
+            int req = port_take_powerup_request();
+            if (req >= 0) {
+                MR::changePlayerItemStatus(req);
+            }
+        }
+    }
+#endif
+
     _37C++;
     if (_EF6) {
         _EF6--;

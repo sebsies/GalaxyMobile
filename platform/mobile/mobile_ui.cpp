@@ -319,11 +319,12 @@ void Settings::load(const std::string& path) {
             else if (!strcmp(key, "dpad_offset_y")) dpadOffsetY = val;
             else if (!strcmp(key, "mod_skip_cutscenes")) modSkipCutscenes = (val > 0.5f);
             else if (!strcmp(key, "mod_infinite_health")) modInfiniteHealth = (val > 0.5f);
+            else if (!strcmp(key, "mod_infinite_powerup")) modInfinitePowerup = (val > 0.5f);
         }
     }
     fclose(f);
-    LOGI("Loaded settings: show=%d, full=%d, op=%.2f, scale=%.2f, dpad=%d, skip=%d, infHp=%d",
-         showControls, fullscreen, opacity, scale, showDpad, modSkipCutscenes, modInfiniteHealth);
+    LOGI("Loaded settings: show=%d, full=%d, op=%.2f, scale=%.2f, dpad=%d, skip=%d, infHp=%d, infPow=%d",
+         showControls, fullscreen, opacity, scale, showDpad, modSkipCutscenes, modInfiniteHealth, modInfinitePowerup);
 }
 
 void Settings::save(const std::string& path) const {
@@ -344,6 +345,7 @@ void Settings::save(const std::string& path) const {
     fprintf(f, "dpad_offset_y=%.1f\n", dpadOffsetY);
     fprintf(f, "mod_skip_cutscenes=%d\n", modSkipCutscenes ? 1 : 0);
     fprintf(f, "mod_infinite_health=%d\n", modInfiniteHealth ? 1 : 0);
+    fprintf(f, "mod_infinite_powerup=%d\n", modInfinitePowerup ? 1 : 0);
     fclose(f);
     LOGI("Saved settings to %s", path.c_str());
 }
@@ -364,6 +366,7 @@ void UIOverlay::setSavePath(const std::string& path) {
     if (!mPlusEdition) {
         mSettings.modSkipCutscenes = false;
         mSettings.modInfiniteHealth = false;
+        mSettings.modInfinitePowerup = false;
         mSettingsTab = 0;
         mWarpMenuOpen = false;
     }
@@ -624,8 +627,8 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
         } else if (mSettingsTab == 0 || !mPlusEdition) {
             totalContentH = 455.0f * uiScale;
         } else {
-            // Advanced Tab: Header + 2 Mods + Warp Menu Card + Info Card
-            totalContentH = 345.0f * uiScale;
+            // Advanced Tab: Header + 3 Switch Mods + Switcher Grid Card + Warp Menu Card + Info Card
+            totalContentH = 516.0f * uiScale;
         }
         float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
 
@@ -798,15 +801,49 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                     } else {
                         // Advanced Tab items
                         // Mod 1: Cutscene Prevention Switch
-                        if (contentRelY >= 48.0f * uiScale && contentRelY <= 104.0f * uiScale) {
+                        if (contentRelY >= 46.0f * uiScale && contentRelY <= 96.0f * uiScale) {
                             mSettings.modSkipCutscenes = !mSettings.modSkipCutscenes;
                         }
                         // Mod 2: Infinite Health Switch
-                        else if (contentRelY >= 106.0f * uiScale && contentRelY <= 162.0f * uiScale) {
+                        else if (contentRelY >= 98.0f * uiScale && contentRelY <= 148.0f * uiScale) {
                             mSettings.modInfiniteHealth = !mSettings.modInfiniteHealth;
                         }
-                        // Mod 3: Galaxy Warp Menu Card
-                        else if (contentRelY >= 164.0f * uiScale && contentRelY <= 232.0f * uiScale) {
+                        // Mod 3: Infinite Power-Up Duration Switch
+                        else if (contentRelY >= 150.0f * uiScale && contentRelY <= 200.0f * uiScale) {
+                            mSettings.modInfinitePowerup = !mSettings.modInfinitePowerup;
+                        }
+                        // Mod 4: Live Power-Up Switcher Card Grid Tap
+                        else if (contentRelY >= 204.0f * uiScale && contentRelY <= 344.0f * uiScale) {
+                            float gridTopRelY = 204.0f * uiScale + 44.0f * uiScale;
+                            float cardX0 = drawerX + padX;
+                            float pStartX = cardX0 + 8.0f * uiScale;
+                            float pillW = (contentW - 16.0f * uiScale - 10.0f * uiScale) / 3.0f;
+                            float pillH = 28.0f * uiScale;
+                            float pillGapY = 4.0f * uiScale;
+                            float pillGapX = 5.0f * uiScale;
+
+                            if (contentRelY >= gridTopRelY && contentRelY <= gridTopRelY + 3.0f * pillH + 2.0f * pillGapY) {
+                                int row = (int)((contentRelY - gridTopRelY) / (pillH + pillGapY));
+                                float inRowY = contentRelY - (gridTopRelY + row * (pillH + pillGapY));
+                                if (row >= 0 && row < 3 && inRowY <= pillH) {
+                                    float relX = px - pStartX;
+                                    if (relX >= 0.0f) {
+                                        int col = (int)(relX / (pillW + pillGapX));
+                                        float inColX = relX - col * (pillW + pillGapX);
+                                        if (col >= 0 && col < 3 && inColX <= pillW) {
+                                            static const int kPowerupMap[3][3] = {
+                                                { 0, 5, 4 },
+                                                { 2, 6, 7 },
+                                                { 3, 1, 10 }
+                                            };
+                                            port_request_powerup(kPowerupMap[row][col]);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // Mod 5: Galaxy Warp Menu Card
+                        else if (contentRelY >= 350.0f * uiScale && contentRelY <= 414.0f * uiScale) {
                             mWarpMenuOpen = true;
                             mWarpScrollY = 0.0f;
                             mWarpScrollTarget = 0.0f;
@@ -1614,7 +1651,7 @@ void UIOverlay::render(int screenW, int screenH) {
         float contentW = drawerW - padX * 2.0f;
         float contentTop = mPlusEdition ? (112.0f * uiScale) : (68.0f * uiScale);
         float contentBottom = h - 56.0f * uiScale;
-        float totalContentH = (mSettingsTab == 0 || !mPlusEdition) ? (455.0f * uiScale) : (278.0f * uiScale);
+        float totalContentH = (mSettingsTab == 0 || !mPlusEdition) ? (455.0f * uiScale) : (516.0f * uiScale);
         float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
 
         // Smooth scroll damping
@@ -1772,7 +1809,7 @@ void UIOverlay::render(int screenW, int screenH) {
             drawText(warpBtnTxt, (doneX0 + doneX1) * 0.5f, doneY + 24.0f * uiScale, 0.34f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
         } else {
             // Standard Settings Drawer (General or Advanced Tab)
-            float totalContentH = (mSettingsTab == 0 || !mPlusEdition) ? (455.0f * uiScale) : (345.0f * uiScale);
+            float totalContentH = (mSettingsTab == 0 || !mPlusEdition) ? (455.0f * uiScale) : (516.0f * uiScale);
             float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
 
             // Smooth scroll damping
@@ -1876,21 +1913,71 @@ void UIOverlay::render(int screenW, int screenH) {
                 });
 
                 // Mod 1: Cutscene Prevention Switch
-                renderRow(48.0f * uiScale, 52.0f * uiScale, [&](float y) {
+                renderRow(46.0f * uiScale, 50.0f * uiScale, [&](float y) {
                     drawText("Cutscene Prevention", drawerX + padX, y + 20.0f * uiScale, 0.40f * uiScale, rgba(0.902f, 0.906f, 0.922f, 1.0f), 0);
                     drawText("Instantly skip video cutscenes", drawerX + padX, y + 36.0f * uiScale, 0.28f * uiScale, rgba(0.761f, 0.776f, 0.812f, 0.85f), 0);
                     drawM3Switch(drawerX + drawerW - padX - swW, y + 10.0f * uiScale, swW, swH, mSettings.modSkipCutscenes);
                 });
 
                 // Mod 2: Infinite Health Switch
-                renderRow(106.0f * uiScale, 52.0f * uiScale, [&](float y) {
+                renderRow(98.0f * uiScale, 50.0f * uiScale, [&](float y) {
                     drawText("Infinite Health", drawerX + padX, y + 20.0f * uiScale, 0.40f * uiScale, rgba(0.902f, 0.906f, 0.922f, 1.0f), 0);
                     drawText("Invincible; teleports out of black holes", drawerX + padX, y + 36.0f * uiScale, 0.28f * uiScale, rgba(0.761f, 0.776f, 0.812f, 0.85f), 0);
                     drawM3Switch(drawerX + drawerW - padX - swW, y + 10.0f * uiScale, swW, swH, mSettings.modInfiniteHealth);
                 });
 
-                // Mod 3: Galaxy Warp Menu Entry Card
-                renderRow(164.0f * uiScale, 64.0f * uiScale, [&](float y) {
+                // Mod 3: Infinite Power-Up Duration Switch
+                renderRow(150.0f * uiScale, 50.0f * uiScale, [&](float y) {
+                    drawText("Infinite Power-Up Duration", drawerX + padX, y + 20.0f * uiScale, 0.40f * uiScale, rgba(0.902f, 0.906f, 0.922f, 1.0f), 0);
+                    drawText("Freeze timers & infinite Bee stamina", drawerX + padX, y + 36.0f * uiScale, 0.28f * uiScale, rgba(0.761f, 0.776f, 0.812f, 0.85f), 0);
+                    drawM3Switch(drawerX + drawerW - padX - swW, y + 10.0f * uiScale, swW, swH, mSettings.modInfinitePowerup);
+                });
+
+                // Mod 4: Live Power-Up Switcher Card
+                renderRow(204.0f * uiScale, 140.0f * uiScale, [&](float y) {
+                    float cX0 = drawerX + padX;
+                    float cX1 = drawerX + drawerW - padX;
+                    drawRoundRect(cX0, y, cX1, y + 136.0f * uiScale, 14.0f * uiScale, rgba(0.13f, 0.18f, 0.28f, 0.95f));
+                    drawRoundRect(cX0, y, cX1, y + 136.0f * uiScale, 14.0f * uiScale, rgba(0.28f, 0.45f, 0.72f, 0.65f));
+
+                    drawText("Live Power-Up Switcher", cX0 + 14.0f * uiScale, y + 20.0f * uiScale, 0.38f * uiScale, rgba(0.92f, 0.95f, 1.0f, 1.0f), 0);
+                    drawText("Tap to morph player form instantly", cX0 + 14.0f * uiScale, y + 36.0f * uiScale, 0.26f * uiScale, rgba(0.68f, 0.78f, 0.92f, 0.85f), 0);
+
+                    int curMode = port_get_current_powerup();
+                    struct PowerupItem {
+                        const char* label;
+                        int type;
+                    };
+                    static const PowerupItem kPowerupGrid[3][3] = {
+                        { {"Normal", 0}, {"Fire", 5}, {"Ice", 4} },
+                        { {"Bee", 2}, {"Flying", 6}, {"Rainbow", 7} },
+                        { {"Boo", 3}, {"Spring", 1}, {"+Life 6HP", 10} }
+                    };
+
+                    float pStartX = cX0 + 8.0f * uiScale;
+                    float pillW = (contentW - 16.0f * uiScale - 10.0f * uiScale) / 3.0f;
+                    float pillH = 28.0f * uiScale;
+                    float pillGapY = 4.0f * uiScale;
+
+                    for (int r = 0; r < 3; r++) {
+                        for (int c = 0; c < 3; c++) {
+                            const auto& item = kPowerupGrid[r][c];
+                            float px0 = pStartX + c * (pillW + 5.0f * uiScale);
+                            float px1 = px0 + pillW;
+                            float py0 = y + 44.0f * uiScale + r * (pillH + pillGapY);
+                            float py1 = py0 + pillH;
+                            bool isActive = (curMode == item.type);
+
+                            Color pBg = isActive ? rgba(0.043f, 0.341f, 0.816f, 1.0f) : rgba(0.18f, 0.22f, 0.30f, 0.90f);
+                            Color pTxt = isActive ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.78f, 0.82f, 0.90f, 0.90f);
+                            drawRoundRect(px0, py0, px1, py1, 8.0f * uiScale, pBg);
+                            drawText(item.label, (px0 + px1) * 0.5f, py0 + 19.0f * uiScale, 0.30f * uiScale, pTxt, 1);
+                        }
+                    }
+                });
+
+                // Mod 5: Galaxy Warp Menu Entry Card
+                renderRow(350.0f * uiScale, 64.0f * uiScale, [&](float y) {
                     float cX0 = drawerX + padX;
                     float cX1 = drawerX + drawerW - padX;
                     drawRoundRect(cX0, y, cX1, y + 58.0f * uiScale, 14.0f * uiScale, rgba(0.13f, 0.18f, 0.28f, 0.95f));
@@ -1907,7 +1994,7 @@ void UIOverlay::render(int screenW, int screenH) {
                 });
 
                 // Info Card
-                renderRow(234.0f * uiScale, 84.0f * uiScale, [&](float y) {
+                renderRow(418.0f * uiScale, 84.0f * uiScale, [&](float y) {
                     drawRoundRect(drawerX + padX, y + 6.0f * uiScale, drawerX + drawerW - padX, y + 80.0f * uiScale, 14.0f * uiScale, rgba(0.14f, 0.17f, 0.22f, 0.95f));
                     drawRoundRect(drawerX + padX, y + 6.0f * uiScale, drawerX + drawerW - padX, y + 80.0f * uiScale, 14.0f * uiScale, rgba(0.24f, 0.32f, 0.45f, 0.60f));
                     drawText("MOD STATUS", drawerX + padX + 16.0f * uiScale, y + 26.0f * uiScale, 0.32f * uiScale, rgba(0.38f, 0.74f, 0.98f, 0.95f), 0);
