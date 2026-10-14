@@ -984,7 +984,7 @@ void MarioActor::control() {
         if (MR::tryStartDemoWithoutCinemaFrame(this, "\x83\x7d\x83\x8a\x83\x49\x95\xcf\x90\x67")) {
             mPowerupCollected = false;
             mTransforming = true;
-            if (mPlayerMode == 6) {
+            if (mPlayerMode == 6 && _9A4) {
                 MR::requestMovementOn(_9A4);
                 changeTeresaAnimation("change", -1);
             }
@@ -2017,7 +2017,7 @@ void MarioActor::calcAnim() {
         u16 val = (_3D8 & 7) < (_3D8 >> 3) ? _3D6 : mPlayerMode;
         if (_3D8 != 0 && mPlayerMode == 0) {
             if ((s32)val != (s32)mPlayerMode && _3D6 == 6) {
-                if (26 < _3D8) {
+                if (26 < _3D8 && _9A4) {
                     _9A4->appear();
                 }
 
@@ -2027,7 +2027,7 @@ void MarioActor::calcAnim() {
                 return;
             }
 
-            if (_3D6 == 6) {
+            if (_3D6 == 6 && _9A4) {
                 _9A4->kill();
                 _483 = 0;
             }
@@ -2035,23 +2035,39 @@ void MarioActor::calcAnim() {
 
         switch (val) {
         case 1:
-            changeDisplayMode(4);
-            _9C8->calcAnim();
+            if (mModels[4] && _9C8) {
+                changeDisplayMode(4);
+                _9C8->calcAnim();
 
-            if (_3DE != 0) {
-                _A6E = 2;
+                if (_3DE != 0) {
+                    _A6E = 2;
+                }
+            } else {
+                changeDisplayMode(0);
             }
 
             break;
         case 4:
-            changeDisplayMode(2);
+            if (mModels[2]) {
+                changeDisplayMode(2);
+            } else {
+                changeDisplayMode(0);
+            }
             break;
         case 5:
-            _3DF = 0;
-            changeDisplayMode(5);
+            if (mModels[5]) {
+                _3DF = 0;
+                changeDisplayMode(5);
+            } else {
+                changeDisplayMode(0);
+            }
             break;
         case 3:
-            changeDisplayMode(3);
+            if (mModels[3]) {
+                changeDisplayMode(3);
+            } else {
+                changeDisplayMode(0);
+            }
             break;
 
         default:

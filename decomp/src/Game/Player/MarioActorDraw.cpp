@@ -359,11 +359,23 @@ void MarioActor::initBoneMario() {
 }
 
 void MarioActor::changeDisplayMode(u8 mode) {
+    if (mode >= 6 || !mModels[mode]) {
+        mode = 0;
+    }
+    if (!mModels[mode]) {
+        return;
+    }
     mCurrModel = mode;
-    mMarioAnim->mXanimePlayer->setModel(mModels[mCurrModel]);
-    mMarioAnim->mXanimePlayerUpper->setModel(mModels[mCurrModel]);
+    if (mMarioAnim && mMarioAnim->mXanimePlayer) {
+        mMarioAnim->mXanimePlayer->setModel(mModels[mCurrModel]);
+    }
+    if (mMarioAnim && mMarioAnim->mXanimePlayerUpper) {
+        mMarioAnim->mXanimePlayerUpper->setModel(mModels[mCurrModel]);
+    }
 
-    mModelManager->mDisplayListMaker->mModel = mModels[mCurrModel];
+    if (mModelManager && mModelManager->mDisplayListMaker) {
+        mModelManager->mDisplayListMaker->mModel = mModels[mCurrModel];
+    }
 
     if (_494 != nullptr) {
         MtxPtr handMtx = MR::getJointMtx(this, "HandR");
@@ -371,7 +383,9 @@ void MarioActor::changeDisplayMode(u8 mode) {
     }
 
     MtxPtr handMtx = MR::getJointMtx(this, "HandR");
-    mSearchLightThrowPos->setBaseMtx(handMtx);
+    if (mSearchLightThrowPos) {
+        mSearchLightThrowPos->setBaseMtx(handMtx);
+    }
 }
 
 void MarioActor::calcViewAndEntry() {

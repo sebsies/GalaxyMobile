@@ -115,24 +115,30 @@ void MarioActor::updateHand() {
     ModelHolder* leftHand = _A48;
     ModelHolder* rightHand = _A4C;
     if (mPlayerMode == PlayerMode_Ice) {
-        leftHand = _A40;
-        rightHand = _A44;
+        if (_A40 && _A44) {
+            leftHand = _A40;
+            rightHand = _A44;
+        }
     } else if (mPlayerMode == PlayerMode_Invincible) {
-        leftHand = _A50;
-        rightHand = _A54;
+        if (_A50 && _A54) {
+            leftHand = _A50;
+            rightHand = _A54;
+        }
     }
 
-    if (left != _A59) {
-        if (_A59 != 0xFF) {
-            MR::hideJoint(MR::getJoint(leftHand, _A59 + 1));
+    if (leftHand && rightHand) {
+        if (left != _A59) {
+            if (_A59 != 0xFF) {
+                MR::hideJoint(MR::getJoint(leftHand, _A59 + 1));
+            }
+            MR::showJoint(MR::getJoint(leftHand, left + 1));
         }
-        MR::showJoint(MR::getJoint(leftHand, left + 1));
-    }
-    if (right != _A5A) {
-        if (_A5A != 0xFF) {
-            MR::hideJoint(MR::getJoint(rightHand, _A5A + 1));
+        if (right != _A5A) {
+            if (_A5A != 0xFF) {
+                MR::hideJoint(MR::getJoint(rightHand, _A5A + 1));
+            }
+            MR::showJoint(MR::getJoint(rightHand, right + 1));
         }
-        MR::showJoint(MR::getJoint(rightHand, right + 1));
     }
 
     _A59 = left;
@@ -147,16 +153,22 @@ void MarioActor::updateHandAtMorph() {
     ModelHolder* holder2 = _A4C;
 
     if (mPlayerMode == 3) {
-        holder1 = _A40;
-        holder2 = _A44;
+        if (_A40 && _A44) {
+            holder1 = _A40;
+            holder2 = _A44;
+        }
     } else if (mPlayerMode == 1) {
-        holder1 = _A50;
-        holder2 = _A54;
+        if (_A50 && _A54) {
+            holder1 = _A50;
+            holder2 = _A54;
+        }
     }
 
-    for (u32 idx = 0; idx <= 7; idx++) {
-        MR::hideJoint(MR::getJoint(holder1, idx + 1));
-        MR::hideJoint(MR::getJoint(holder2, idx + 1));
+    if (holder1 && holder2) {
+        for (u32 idx = 0; idx <= 7; idx++) {
+            MR::hideJoint(MR::getJoint(holder1, idx + 1));
+            MR::hideJoint(MR::getJoint(holder2, idx + 1));
+        }
     }
 
     _A59 = -1;
@@ -169,23 +181,28 @@ void MarioActor::drawHand() const {
     }
 
     if (mPlayerMode == 1) {
-        reinterpret_cast< J3DModelX* >(MR::getJ3DModel(_A50))->directDraw(nullptr);
-        reinterpret_cast< J3DModelX* >(MR::getJ3DModel(_A54))->directDraw(nullptr);
-
+        if (_A50 && _A54) {
+            reinterpret_cast< J3DModelX* >(MR::getJ3DModel(_A50))->directDraw(nullptr);
+            reinterpret_cast< J3DModelX* >(MR::getJ3DModel(_A54))->directDraw(nullptr);
+        }
         return;
     }
 
-    if (MR::isHiddenModel(_A48)) {
+    if (!_A48 || !_A4C || MR::isHiddenModel(_A48)) {
         return;
     }
 
     J3DModelX* model = reinterpret_cast< J3DModelX* >(MR::getJ3DModel(_A48));
-    model->setDynamicDL(mDL[mCurrDL], mDLSize);
-    model->directDraw(nullptr);
+    if (model) {
+        model->setDynamicDL(mDL[mCurrDL], mDLSize);
+        model->directDraw(nullptr);
+    }
 
     model = reinterpret_cast< J3DModelX* >(MR::getJ3DModel(_A4C));
-    model->setDynamicDL(mDL[mCurrDL], mDLSize);
-    model->directDraw(nullptr);
+    if (model) {
+        model->setDynamicDL(mDL[mCurrDL], mDLSize);
+        model->directDraw(nullptr);
+    }
 }
 
 void MarioActor::drawIndirectHand() const {
@@ -193,7 +210,7 @@ void MarioActor::drawIndirectHand() const {
         return;
     }
 
-    if (MR::isHiddenModel(_A40)) {
+    if (!_A40 || !_A44 || MR::isHiddenModel(_A40)) {
         return;
     }
 
@@ -203,10 +220,14 @@ void MarioActor::drawIndirectHand() const {
         return;
     }
 
-    model->setDynamicDL(mDL[mCurrDL], mDLSize);
-    model->directDraw(nullptr);
+    if (model) {
+        model->setDynamicDL(mDL[mCurrDL], mDLSize);
+        model->directDraw(nullptr);
+    }
 
     model = reinterpret_cast< J3DModelX* >(MR::getJ3DModel(_A44));
-    model->setDynamicDL(mDL[mCurrDL], mDLSize);
-    model->directDraw(nullptr);
+    if (model) {
+        model->setDynamicDL(mDL[mCurrDL], mDLSize);
+        model->directDraw(nullptr);
+    }
 }

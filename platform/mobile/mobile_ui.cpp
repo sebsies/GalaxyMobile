@@ -1951,11 +1951,12 @@ void UIOverlay::render(int screenW, int screenH) {
                     struct PowerupItem {
                         const char* label;
                         int type;
+                        int playerMode;
                     };
                     static const PowerupItem kPowerupGrid[3][3] = {
-                        { {"Normal", 0}, {"Fire", 5}, {"Ice", 4} },
-                        { {"Bee", 2}, {"Flying", 6}, {"Rainbow", 7} },
-                        { {"Boo", 3}, {"Spring", 1}, {"+Life 6HP", 10} }
+                        { {"Normal", 0, 0}, {"Fire", 5, 2}, {"Ice", 4, 3} },
+                        { {"Bee", 2, 4}, {"Flying", 6, 7}, {"Rainbow", 7, 1} },
+                        { {"Boo", 3, 6}, {"Spring", 1, 5}, {"+Life 6HP", 10, -1} }
                     };
 
                     float pStartX = cX0 + 8.0f * uiScale;
@@ -1970,7 +1971,7 @@ void UIOverlay::render(int screenW, int screenH) {
                             float px1 = px0 + pillW;
                             float py0 = y + 44.0f * uiScale + r * (pillH + pillGapY);
                             float py1 = py0 + pillH;
-                            bool isActive = (curMode == item.type);
+                            bool isActive = (item.playerMode >= 0 && curMode == item.playerMode);
 
                             Color pBg = isActive ? rgba(0.043f, 0.341f, 0.816f, 1.0f) : rgba(0.18f, 0.22f, 0.30f, 0.90f);
                             Color pTxt = isActive ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.78f, 0.82f, 0.90f, 0.90f);

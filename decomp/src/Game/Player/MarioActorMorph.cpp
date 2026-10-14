@@ -49,6 +49,22 @@ void MarioActor::setPlayerMode(u16 playerMode, bool myBool) {
         return;
     }
 
+    if (playerMode == 4 && (!_9E4 || !_9E8 || !mModels[2])) {
+        return;
+    }
+    if (playerMode == 5 && !mModels[5]) {
+        return;
+    }
+    if (playerMode == 3 && (!_9C0 || !mModels[3])) {
+        return;
+    }
+    if (playerMode == 6 && !_9A4) {
+        return;
+    }
+    if (playerMode == 1 && (!_9C8 || !mModels[4])) {
+        return;
+    }
+
     if (mMario->isStatusActive(MarioStatus_Foo)) {
         mMario->closeStatus(nullptr);
     }
@@ -65,12 +81,14 @@ void MarioActor::setPlayerMode(u16 playerMode, bool myBool) {
         break;
 
     case 6:
-        MR::deleteEffect(_9A4, "Glow");
+        if (_9A4) {
+            MR::deleteEffect(_9A4, "Glow");
 
-        if (playerMode == 0) {
-            MR::offCalcAnim(_9A4);
-        } else {
-            _9A4->kill();
+            if (playerMode == 0) {
+                MR::offCalcAnim(_9A4);
+            } else {
+                _9A4->kill();
+            }
         }
 
         _483 = false;
@@ -92,8 +110,12 @@ void MarioActor::setPlayerMode(u16 playerMode, bool myBool) {
             MR::getGameSceneLayoutHolder()->changeLifeMeterModeGround();
         }
 
-        _9E4->kill();
-        _9E8->kill();
+        if (_9E4) {
+            _9E4->kill();
+        }
+        if (_9E8) {
+            _9E8->kill();
+        }
         break;
 
     case 3:
@@ -148,13 +170,18 @@ void MarioActor::setPlayerMode(u16 playerMode, bool myBool) {
 
         changeHandMaterial();
 
-        MR::stopBrk(_9C8);
-        MR::stopBrk(_A50);
-        MR::stopBrk(_A54);
-
-        MR::startBrk(_9C8, "InvincibleMario");
-        MR::startBrk(_A50, "InvincibleMarioHandL");
-        MR::startBrk(_A54, "InvincibleMarioHandR");
+        if (_9C8) {
+            MR::stopBrk(_9C8);
+            MR::startBrk(_9C8, "InvincibleMario");
+        }
+        if (_A50) {
+            MR::stopBrk(_A50);
+            MR::startBrk(_A50, "InvincibleMarioHandL");
+        }
+        if (_A54) {
+            MR::stopBrk(_A54);
+            MR::startBrk(_A54, "InvincibleMarioHandR");
+        }
 
         MR::removeAllClingingKarikari();
         break;
@@ -201,28 +228,30 @@ void MarioActor::setPlayerMode(u16 playerMode, bool myBool) {
         break;
 
     case 6:
-        _9A4->appear();
+        if (_9A4) {
+            _9A4->appear();
 
-        MR::onCalcAnim(_9A4);
+            MR::onCalcAnim(_9A4);
 
-        runTeresaBaseAnimation();
+            runTeresaBaseAnimation();
 
-        MR::startBrk(_9A4, "Erase");
-        MR::setBrkFrameAndStop(_9A4, 0.0f);
+            MR::startBrk(_9A4, "Erase");
+            MR::setBrkFrameAndStop(_9A4, 0.0f);
 
-        _483 = true;
+            _483 = true;
 
-        _9A8 = 0.0f;
-        _9AC = 0.0f;
+            _9A8 = 0.0f;
+            _9AC = 0.0f;
 
-        rushDropThrowMemoSensor();
+            rushDropThrowMemoSensor();
 
-        mMario->startTeresaMode();
+            mMario->startTeresaMode();
 
-        _9A4->calcAnim();
+            _9A4->calcAnim();
 
-        MR::emitEffect(_9A4, "Glow");
-        MR::emitEffect(_9A4, "Appear");
+            MR::emitEffect(_9A4, "Glow");
+            MR::emitEffect(_9A4, "Appear");
+        }
         break;
 
     case 2:
@@ -246,19 +275,23 @@ void MarioActor::setPlayerMode(u16 playerMode, bool myBool) {
 
         rushDropThrowMemoSensor();
 
-        _9E4->appear();
-        MR::showModel(_9E4);
+        if (_9E4) {
+            _9E4->appear();
+            MR::showModel(_9E4);
+        }
 
         mMario->_402 = mConst->getTable()->mAirWalkTime;
         mMario->_42A = 0;
 
-        _9E8->appear();
-        _9F0 = 0;
+        if (_9E8) {
+            _9E8->appear();
+            _9F0 = 0;
 
-        MR::startBck(_9E8, "Wait");
-        MR::startBva(_9E8, "Wait");
+            MR::startBck(_9E8, "Wait");
+            MR::startBva(_9E8, "Wait");
 
-        MR::stopBtk(_9E8);
+            MR::stopBtk(_9E8);
+        }
         break;
 
     case 7:

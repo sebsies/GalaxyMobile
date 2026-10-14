@@ -732,6 +732,10 @@ namespace MarioAccess {
     }
 
     void changeItemStatus(s32 a1) {
+        if (!getPlayerActor() || !getPlayerActor()->isEnableNerveChange()) {
+            return;
+        }
+
         switch (a1) {
         case 0:
         case 8:
@@ -759,14 +763,12 @@ namespace MarioAccess {
             getPlayerActor()->setPlayerMode(PlayerMode_Invincible, true);
             break;
         case 9:
-            getPlayerActor()->getMario()->mMovementStates._F = true;
-            getPlayerActor()->getMario()->_544 = 3;
+            if (getPlayerActor()->getMario()) {
+                getPlayerActor()->getMario()->mMovementStates._F = true;
+                getPlayerActor()->getMario()->_544 = 3;
+            }
             break;
         case 10:
-            if (!getPlayerActor()->isEnableNerveChange()) {
-                return;
-            }
-
             if (getPlayerActor()->mMaxHealth > 3) {
                 MR::startSound(getPlayerActor(), "SE_OJ_MORPH_ITEM_INVALID");
                 getPlayerActor()->changeMaxLife(6);

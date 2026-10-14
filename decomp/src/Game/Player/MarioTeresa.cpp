@@ -583,6 +583,10 @@ void MarioActor::runTeresaBaseAnimation() {
 }
 
 void MarioActor::changeTeresaAnimation(const char* pAnimation, s32 interpolation) {
+    if (!_9A4) {
+        return;
+    }
+
     if (MR::isBckPlaying(_9A4, "sleep")) {
         MR::deleteEffect(_9A4, "Sleep");
     }
