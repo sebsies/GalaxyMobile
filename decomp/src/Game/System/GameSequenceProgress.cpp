@@ -24,6 +24,9 @@
 #include "Game/Util/SoundUtil.hpp"
 #include "Game/Util/StarPointerUtil.hpp"
 #include "Game/Util/StringUtil.hpp"
+#ifdef TARGET_PC
+#include "port/port.h"
+#endif
 
 namespace {
     static const s32 sTimingPlayingTicoSE = 180;
@@ -117,7 +120,10 @@ void GameSequenceProgress::startScene() {
         }
 
         if (!GameDataFunction::isPassedStoryEvent("\x83\x58\x83\x73\x83\x93\x8c\xa0\x97\x98")) {
-            MR::setPlayerSwingPermission(false);
+#ifdef TARGET_PC
+            if (!port_is_plus_edition() || !port_is_spin_unlocked())
+#endif
+                MR::setPlayerSwingPermission(false);
         }
     }
 

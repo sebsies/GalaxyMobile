@@ -210,6 +210,8 @@ void GameScene::update() {
         int warpScenario = 1;
         if (port_take_warp_request(warpStage, sizeof(warpStage), &warpScenario)) {
             OSReport("port: warping to %s scenario %d\n", warpStage, (int)warpScenario);
+            MR::onGameEventFlagEnableToSpinAndStarPointer();
+            port_set_spin_unlocked(1);
             MR::closeSystemWipeFadeWithCaptureScreen(30);
             MR::requestChangeStageInGameMoving(warpStage, warpScenario);
         }

@@ -800,5 +800,29 @@ void port_set_current_powerup(int mode) {
 int port_get_current_powerup(void) {
     return sCurrentPowerup.load(std::memory_order_relaxed);
 }
+
+static std::atomic<bool> sPendingUnlockSpin{false};
+static std::atomic<int> sSpinUnlocked{0};
+
+void port_request_unlock_spin(void) {
+    if (!mobile_ui::UIOverlay::get().isPlusEdition()) return;
+    sPendingUnlockSpin.store(true, std::memory_order_relaxed);
+    LOGI("Queued early spin unlock request");
 }
+
+int port_take_unlock_spin_request(void) {
+    if (!mobile_ui::UIOverlay::get().isPlusEdition()) return 0;
+    return sPendingUnlockSpin.exchange(false, std::memory_order_relaxed) ? 1 : 0;
+}
+
+void port_set_spin_unlocked(int unlocked) {
+    sSpinUnlocked.store(unlocked, std::memory_order_relaxed);
+}
+
+int port_is_spin_unlocked(void) {
+    if (!mobile_ui::UIOverlay::get().isPlusEdition()) return 0;
+    return sSpinUnlocked.load(std::memory_order_relaxed);
+}
+}
+
 

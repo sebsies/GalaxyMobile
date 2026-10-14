@@ -165,7 +165,9 @@ namespace MR {
     }
 
     void setPlayerSwingPermission(bool permission) {
-        MarioAccess::getPlayerActor()->_EEB = permission;
+        if (MarioAccess::getPlayerActor()) {
+            MarioAccess::getPlayerActor()->_EEB = permission;
+        }
     }
 
     void setPlayerStateWait() {

@@ -59,4 +59,8 @@ __attribute__((weak)) void port_request_powerup(int type) { (void)type; }
 __attribute__((weak)) int port_take_powerup_request(void) { return -1; }
 __attribute__((weak)) void port_set_current_powerup(int mode) { (void)mode; }
 __attribute__((weak)) int port_get_current_powerup(void) { return 0; }
+__attribute__((weak)) void port_request_unlock_spin(void) {}
+__attribute__((weak)) int port_take_unlock_spin_request(void) { return 0; }
+__attribute__((weak)) void port_set_spin_unlocked(int unlocked) { (void)unlocked; }
+__attribute__((weak)) int port_is_spin_unlocked(void) { return 0; }
 }

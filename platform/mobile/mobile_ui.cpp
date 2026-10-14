@@ -627,8 +627,8 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
         } else if (mSettingsTab == 0 || !mPlusEdition) {
             totalContentH = 455.0f * uiScale;
         } else {
-            // Advanced Tab: Header + 3 Switch Mods + Switcher Grid Card + Warp Menu Card + Info Card
-            totalContentH = 516.0f * uiScale;
+            // Advanced Tab: Header + 3 Switch Mods + Switcher Grid Card + Warp Card + Early Spin Card + Info Card
+            totalContentH = 576.0f * uiScale;
         }
         float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
 
@@ -843,10 +843,14 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                             }
                         }
                         // Mod 5: Galaxy Warp Menu Card
-                        else if (contentRelY >= 350.0f * uiScale && contentRelY <= 414.0f * uiScale) {
+                        else if (contentRelY >= 350.0f * uiScale && contentRelY <= 410.0f * uiScale) {
                             mWarpMenuOpen = true;
                             mWarpScrollY = 0.0f;
                             mWarpScrollTarget = 0.0f;
+                        }
+                        // Mod 6: Early Spin Ability Card
+                        else if (contentRelY >= 414.0f * uiScale && contentRelY <= 474.0f * uiScale) {
+                            port_request_unlock_spin();
                         }
                     }
 
@@ -1651,7 +1655,7 @@ void UIOverlay::render(int screenW, int screenH) {
         float contentW = drawerW - padX * 2.0f;
         float contentTop = mPlusEdition ? (112.0f * uiScale) : (68.0f * uiScale);
         float contentBottom = h - 56.0f * uiScale;
-        float totalContentH = (mSettingsTab == 0 || !mPlusEdition) ? (455.0f * uiScale) : (516.0f * uiScale);
+        float totalContentH = (mSettingsTab == 0 || !mPlusEdition) ? (455.0f * uiScale) : (576.0f * uiScale);
         float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
 
         // Smooth scroll damping
@@ -1809,7 +1813,7 @@ void UIOverlay::render(int screenW, int screenH) {
             drawText(warpBtnTxt, (doneX0 + doneX1) * 0.5f, doneY + 24.0f * uiScale, 0.34f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
         } else {
             // Standard Settings Drawer (General or Advanced Tab)
-            float totalContentH = (mSettingsTab == 0 || !mPlusEdition) ? (455.0f * uiScale) : (516.0f * uiScale);
+            float totalContentH = (mSettingsTab == 0 || !mPlusEdition) ? (455.0f * uiScale) : (576.0f * uiScale);
             float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
 
             // Smooth scroll damping
@@ -1977,24 +1981,45 @@ void UIOverlay::render(int screenW, int screenH) {
                 });
 
                 // Mod 5: Galaxy Warp Menu Entry Card
-                renderRow(350.0f * uiScale, 64.0f * uiScale, [&](float y) {
+                renderRow(350.0f * uiScale, 60.0f * uiScale, [&](float y) {
                     float cX0 = drawerX + padX;
                     float cX1 = drawerX + drawerW - padX;
-                    drawRoundRect(cX0, y, cX1, y + 58.0f * uiScale, 14.0f * uiScale, rgba(0.13f, 0.18f, 0.28f, 0.95f));
-                    drawRoundRect(cX0, y, cX1, y + 58.0f * uiScale, 14.0f * uiScale, rgba(0.28f, 0.45f, 0.72f, 0.65f));
-                    drawText("Galaxy Warp Menu", cX0 + 14.0f * uiScale, y + 22.0f * uiScale, 0.38f * uiScale, rgba(0.92f, 0.95f, 1.0f, 1.0f), 0);
-                    drawText("Instant stage & scenario select", cX0 + 14.0f * uiScale, y + 42.0f * uiScale, 0.28f * uiScale, rgba(0.68f, 0.78f, 0.92f, 0.85f), 0);
+                    drawRoundRect(cX0, y, cX1, y + 54.0f * uiScale, 14.0f * uiScale, rgba(0.13f, 0.18f, 0.28f, 0.95f));
+                    drawRoundRect(cX0, y, cX1, y + 54.0f * uiScale, 14.0f * uiScale, rgba(0.28f, 0.45f, 0.72f, 0.65f));
+                    drawText("Galaxy Warp Menu", cX0 + 14.0f * uiScale, y + 20.0f * uiScale, 0.38f * uiScale, rgba(0.92f, 0.95f, 1.0f, 1.0f), 0);
+                    drawText("Instant stage & scenario select", cX0 + 14.0f * uiScale, y + 38.0f * uiScale, 0.28f * uiScale, rgba(0.68f, 0.78f, 0.92f, 0.85f), 0);
 
                     float btnW = 74.0f * uiScale;
                     float btnH = 32.0f * uiScale;
                     float btnX0 = cX1 - btnW - 12.0f * uiScale;
-                    float btnY0 = y + 13.0f * uiScale;
+                    float btnY0 = y + 11.0f * uiScale;
                     drawRoundRect(btnX0, btnY0, btnX0 + btnW, btnY0 + btnH, 14.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 1.0f));
                     drawText("Open", btnX0 + btnW * 0.5f, btnY0 + 21.0f * uiScale, 0.35f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
                 });
 
+                // Mod 6: Early Spin Ability Card
+                renderRow(414.0f * uiScale, 60.0f * uiScale, [&](float y) {
+                    float cX0 = drawerX + padX;
+                    float cX1 = drawerX + drawerW - padX;
+                    drawRoundRect(cX0, y, cX1, y + 54.0f * uiScale, 14.0f * uiScale, rgba(0.13f, 0.18f, 0.28f, 0.95f));
+                    drawRoundRect(cX0, y, cX1, y + 54.0f * uiScale, 14.0f * uiScale, rgba(0.28f, 0.45f, 0.72f, 0.65f));
+
+                    drawText("Early Spin Ability", cX0 + 14.0f * uiScale, y + 20.0f * uiScale, 0.38f * uiScale, rgba(0.92f, 0.95f, 1.0f, 1.0f), 0);
+                    drawText("Unlock Spin attack & Launch Star usage", cX0 + 14.0f * uiScale, y + 38.0f * uiScale, 0.28f * uiScale, rgba(0.68f, 0.78f, 0.92f, 0.85f), 0);
+
+                    bool isSpinUnlocked = (port_is_spin_unlocked() != 0);
+                    float btnW = isSpinUnlocked ? 88.0f * uiScale : 74.0f * uiScale;
+                    float btnH = 32.0f * uiScale;
+                    float btnX0 = cX1 - btnW - 12.0f * uiScale;
+                    float btnY0 = y + 11.0f * uiScale;
+                    Color btnBg = isSpinUnlocked ? rgba(0.14f, 0.48f, 0.26f, 0.95f) : rgba(0.043f, 0.341f, 0.816f, 1.0f);
+                    Color btnTxt = isSpinUnlocked ? rgba(0.85f, 1.0f, 0.88f, 1.0f) : rgba(1.0f, 1.0f, 1.0f, 1.0f);
+                    drawRoundRect(btnX0, btnY0, btnX0 + btnW, btnY0 + btnH, 14.0f * uiScale, btnBg);
+                    drawText(isSpinUnlocked ? "Unlocked" : "Unlock", btnX0 + btnW * 0.5f, btnY0 + 21.0f * uiScale, 0.34f * uiScale, btnTxt, 1);
+                });
+
                 // Info Card
-                renderRow(418.0f * uiScale, 84.0f * uiScale, [&](float y) {
+                renderRow(480.0f * uiScale, 84.0f * uiScale, [&](float y) {
                     drawRoundRect(drawerX + padX, y + 6.0f * uiScale, drawerX + drawerW - padX, y + 80.0f * uiScale, 14.0f * uiScale, rgba(0.14f, 0.17f, 0.22f, 0.95f));
                     drawRoundRect(drawerX + padX, y + 6.0f * uiScale, drawerX + drawerW - padX, y + 80.0f * uiScale, 14.0f * uiScale, rgba(0.24f, 0.32f, 0.45f, 0.60f));
                     drawText("MOD STATUS", drawerX + padX + 16.0f * uiScale, y + 26.0f * uiScale, 0.32f * uiScale, rgba(0.38f, 0.74f, 0.98f, 0.95f), 0);

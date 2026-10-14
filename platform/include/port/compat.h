@@ -187,6 +187,10 @@ void port_request_powerup(int type);
 int port_take_powerup_request(void);
 void port_set_current_powerup(int mode);
 int port_get_current_powerup(void);
+void port_request_unlock_spin(void);
+int port_take_unlock_spin_request(void);
+void port_set_spin_unlocked(int unlocked);
+int port_is_spin_unlocked(void);
 int64_t port_host_time_ns(void);
 void port_host_sleep_ns(int64_t ns);
 // Delivers pending interrupts (a safe point; only from the thread holding the

@@ -150,6 +150,10 @@ void port_request_powerup(int type);
 int port_take_powerup_request(void);
 void port_set_current_powerup(int mode);
 int port_get_current_powerup(void);
+void port_request_unlock_spin(void);
+int port_take_unlock_spin_request(void);
+void port_set_spin_unlocked(int unlocked);
+int port_is_spin_unlocked(void);
 
 // Frame-time statistics (platform/src/port/perf.cpp), logged every 10 s.
 void port_perf_frame_begin(void);      // the game thread starts a frame

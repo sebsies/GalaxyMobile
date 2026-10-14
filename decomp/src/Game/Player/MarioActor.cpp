@@ -1080,6 +1080,7 @@ void MarioActor::updateBehavior() {
 #ifdef TARGET_PC
     if (port_is_plus_edition()) {
         port_set_current_powerup(mPlayerMode);
+        port_set_spin_unlocked(_EEB ? 1 : 0);
         if (port_is_infinite_powerup() && mPlayerMode == PlayerMode_Bee && mMario) {
             mMario->_402 = mConst->getTable()->mAirWalkTime;
         }
@@ -1087,6 +1088,11 @@ void MarioActor::updateBehavior() {
             int req = port_take_powerup_request();
             if (req >= 0) {
                 MR::changePlayerItemStatus(req);
+            }
+            if (port_take_unlock_spin_request()) {
+                MR::onGameEventFlagEnableToSpinAndStarPointer();
+                _EEB = true;
+                port_set_spin_unlocked(1);
             }
         }
     }
