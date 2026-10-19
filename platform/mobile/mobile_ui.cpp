@@ -360,6 +360,18 @@ void Settings::save(const std::string& path) const {
 UIOverlay::UIOverlay() {
     mPointerX = 0.0f; // Screen center
     mPointerY = 0.0f; // Screen center
+    mTabIndicatorX = 0.0f;
+    mTabIndicatorW = 0.0f;
+    mTabTargetX = 0.0f;
+    mTabTargetW = 0.0f;
+    mSwAnimShowControls = 1.0f;
+    mSwAnimShowDpad = 1.0f;
+    mSwAnimFullscreen = 0.0f;
+    mSwAnimHdUi = 1.0f;
+    mSwAnimSkipCutscenes = 0.0f;
+    mSwAnimInfiniteHp = 0.0f;
+    mSwAnimInfinitePowerup = 0.0f;
+    mSwAnimHaptics = 0.0f;
 }
 
 UIOverlay& UIOverlay::get() {
@@ -374,14 +386,44 @@ void UIOverlay::setSavePath(const std::string& path) {
         mSettings.modSkipCutscenes = false;
         mSettings.modInfiniteHealth = false;
         mSettings.modInfinitePowerup = false;
-        mSettingsTab = 0;
         mWarpMenuOpen = false;
     }
+    mSwAnimShowControls = mSettings.showControls ? 1.0f : 0.0f;
+    mSwAnimShowDpad = mSettings.showDpad ? 1.0f : 0.0f;
+    mSwAnimFullscreen = mSettings.fullscreen ? 1.0f : 0.0f;
+    mSwAnimHdUi = mSettings.hdUiTextures ? 1.0f : 0.0f;
+    mSwAnimSkipCutscenes = mSettings.modSkipCutscenes ? 1.0f : 0.0f;
+    mSwAnimInfiniteHp = mSettings.modInfiniteHealth ? 1.0f : 0.0f;
+    mSwAnimInfinitePowerup = mSettings.modInfinitePowerup ? 1.0f : 0.0f;
+    mSwAnimHaptics = mSettings.modAdvancedHaptics ? 1.0f : 0.0f;
 }
 
 bool UIOverlay::needsRedraw() {
     float target = mSettingsOpen ? 1.0f : 0.0f;
-    if (fabsf(mDrawerAnim - target) > 0.001f) {
+    if (fabsf(mDrawerAnim - target) > 0.0005f) {
+        return true;
+    }
+    if (fabsf(mDrawerScrollY - mDrawerScrollTarget) > 0.5f) {
+        return true;
+    }
+    if (mWarpMenuOpen && fabsf(mWarpScrollY - mWarpScrollTarget) > 0.5f) {
+        return true;
+    }
+    if (fabsf(mTabIndicatorX - mTabTargetX) > 0.5f || fabsf(mTabIndicatorW - mTabTargetW) > 0.5f) {
+        return true;
+    }
+    auto switchActive = [](float cur, bool target) {
+        float tgt = target ? 1.0f : 0.0f;
+        return fabsf(cur - tgt) > 0.005f;
+    };
+    if (switchActive(mSwAnimShowControls, mSettings.showControls) ||
+        switchActive(mSwAnimShowDpad, mSettings.showDpad) ||
+        switchActive(mSwAnimFullscreen, mSettings.fullscreen) ||
+        switchActive(mSwAnimHdUi, mSettings.hdUiTextures) ||
+        switchActive(mSwAnimSkipCutscenes, mSettings.modSkipCutscenes) ||
+        switchActive(mSwAnimInfiniteHp, mSettings.modInfiniteHealth) ||
+        switchActive(mSwAnimInfinitePowerup, mSettings.modInfinitePowerup) ||
+        switchActive(mSwAnimHaptics, mSettings.modAdvancedHaptics)) {
         return true;
     }
     bool d = mDirty;
@@ -513,7 +555,7 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
     float tabY = 22.0f * uiScale;
 
     // Side Sheet Drawer Dimensions
-    float drawerW = std::min(w * 0.44f, 390.0f * uiScale);
+    float drawerW = std::min(w * 0.54f, 480.0f * uiScale);
     float drawerX = (mDrawerAnim - 1.0f) * drawerW;
 
     // Check Settings Tab tap (when drawer is closed or nearly closed)
@@ -623,7 +665,7 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
     if (mSettingsOpen || mDrawerAnim > 0.05f) {
         float padX = 22.0f * uiScale;
         float contentW = drawerW - padX * 2.0f;
-        float contentTop = mPlusEdition ? (112.0f * uiScale) : (68.0f * uiScale);
+        float contentTop = 114.0f * uiScale;
         float contentBottom = h - 56.0f * uiScale;
 
         // Calculate total content height based on active view
@@ -636,16 +678,12 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                 }
             }
             totalContentH = matchingCount * (78.0f * uiScale) + 16.0f * uiScale;
-        } else if (!mPlusEdition) {
-            totalContentH = 655.0f * uiScale;
         } else if (mSettingsTab == 0) {
-            totalContentH = 555.0f * uiScale;
+            totalContentH = 474.0f * uiScale;
         } else if (mSettingsTab == 1) {
-            // Graphics Tab: Resolution Preset Selector & Info
-            totalContentH = 410.0f * uiScale;
+            totalContentH = 384.0f * uiScale;
         } else {
-            // Advanced Tab: Header + 4 Switch Mods + Switcher Grid Card + Warp Card + Early Spin Card + Info Card
-            totalContentH = 630.0f * uiScale;
+            totalContentH = mPlusEdition ? (650.0f * uiScale) : (460.0f * uiScale);
         }
         float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
 
@@ -750,59 +788,54 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                     float py = AMotionEvent_getY(event, pointerIndex);
                     float contentRelY = py - contentTop + mDrawerScrollY;
 
-                    if (mSettingsTab == 0 || !mPlusEdition) {
-                        // General Tab items
-                        // Row 0: Visibility Switch
-                        if (contentRelY >= 0.0f && contentRelY <= 48.0f * uiScale) {
+                    if (mSettingsTab == 0) {
+                        // Tab 0: Controls
+                        // Row 1: Visibility Switch (Card 1: 32..78)
+                        if (contentRelY >= 32.0f * uiScale && contentRelY <= 78.0f * uiScale) {
                             mSettings.showControls = !mSettings.showControls;
+                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                         }
-                        // Row 1: Camera D-Pad Switch
-                        else if (contentRelY >= 50.0f * uiScale && contentRelY <= 98.0f * uiScale) {
+                        // Row 2: Camera D-Pad Switch (Card 1: 80..126)
+                        else if (contentRelY >= 80.0f * uiScale && contentRelY <= 126.0f * uiScale) {
                             mSettings.showDpad = !mSettings.showDpad;
+                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                         }
-                        // Row 2: D-Pad Position Segmented
-                        else if (contentRelY >= 104.0f * uiScale && contentRelY <= 156.0f * uiScale) {
+                        // Row 3: D-Pad Position Segmented (Card 1: 130..180)
+                        else if (contentRelY >= 130.0f * uiScale && contentRelY <= 180.0f * uiScale) {
                             float midX = drawerX + padX + contentW * 0.5f;
-                            if (px < midX) {
-                                mSettings.dpadOnRight = false;
-                                mSettings.dpadOffsetX = 0.0f;
-                                mSettings.dpadOffsetY = 0.0f;
-                            } else {
-                                mSettings.dpadOnRight = true;
-                                mSettings.dpadOffsetX = 0.0f;
-                                mSettings.dpadOffsetY = 0.0f;
-                            }
+                            mSettings.dpadOnRight = (px >= midX);
+                            mSettings.dpadOffsetX = 0.0f;
+                            mSettings.dpadOffsetY = 0.0f;
+                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                         }
-                        // Row 3: Fullscreen Switch
-                        else if (contentRelY >= 160.0f * uiScale && contentRelY <= 208.0f * uiScale) {
-                            mSettings.fullscreen = !mSettings.fullscreen;
-                        }
-                        // Row 4: Joystick Mode Segmented
-                        else if (contentRelY >= 212.0f * uiScale && contentRelY <= 266.0f * uiScale) {
+                        // Row 4: Joystick Mode Segmented (Card 1: 184..236)
+                        else if (contentRelY >= 184.0f * uiScale && contentRelY <= 236.0f * uiScale) {
                             float midX = drawerX + padX + contentW * 0.5f;
-                            if (px < midX) mSettings.dynamicStick = true;
-                            else mSettings.dynamicStick = false;
+                            mSettings.dynamicStick = (px < midX);
+                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                         }
-                        // Row 5: Controls Opacity Segmented
-                        else if (contentRelY >= 270.0f * uiScale && contentRelY <= 324.0f * uiScale) {
+                        // Row 5: Controls Opacity Segmented (Card 2: 288..342)
+                        else if (contentRelY >= 288.0f * uiScale && contentRelY <= 342.0f * uiScale) {
                             float segW = contentW / 4.0f;
                             int idx = (int)((px - (drawerX + padX)) / segW);
                             if (idx <= 0) mSettings.opacity = 0.25f;
                             else if (idx == 1) mSettings.opacity = 0.50f;
                             else if (idx == 2) mSettings.opacity = 0.75f;
                             else mSettings.opacity = 1.00f;
+                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                         }
-                        // Row 6: Button Size Segmented
-                        else if (contentRelY >= 328.0f * uiScale && contentRelY <= 382.0f * uiScale) {
+                        // Row 6: Button Size Segmented (Card 2: 348..402)
+                        else if (contentRelY >= 348.0f * uiScale && contentRelY <= 402.0f * uiScale) {
                             float segW = contentW / 3.0f;
                             int idx = (int)((px - (drawerX + padX)) / segW);
                             if (idx <= 0) mSettings.scale = 0.85f;
                             else if (idx == 1) mSettings.scale = 1.00f;
                             else mSettings.scale = 1.25f;
+                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                         }
-                        // Row 7: Layout Reposition / Reset
-                        else if (contentRelY >= 386.0f * uiScale && contentRelY <= 442.0f * uiScale) {
-                            float splitX = drawerX + padX + contentW * 0.56f;
+                        // Row 7: Layout Reposition / Reset (Card 2: 408..458)
+                        else if (contentRelY >= 408.0f * uiScale && contentRelY <= 458.0f * uiScale) {
+                            float splitX = drawerX + padX + contentW * 0.52f;
                             if (px < splitX) {
                                 mSettingsOpen = false;
                                 mEditLayoutMode = true;
@@ -814,18 +847,17 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                                 mSettings.dpadOffsetX = 0.0f;
                                 mSettings.dpadOffsetY = 0.0f;
                             }
-                        }
-                        // Row 8: Open Installer Button
-                        else if (contentRelY >= 450.0f * uiScale && contentRelY <= 546.0f * uiScale) {
-                            port_open_installer();
-                        }
-                        // Row 9: Install / Open GalaxyMobile+ (Vanilla only)
-                        else if (!mPlusEdition && contentRelY >= 550.0f * uiScale && contentRelY <= 646.0f * uiScale) {
-                            port_install_plus();
+                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                         }
                     } else if (mSettingsTab == 1) {
-                        // Graphics Tab: Resolution Preset Selector
-                        if (contentRelY >= 30.0f * uiScale && contentRelY <= 96.0f * uiScale) {
+                        // Tab 1: Display
+                        // Row 1: Fullscreen Hor+ Switch (Card 1: 32..80)
+                        if (contentRelY >= 32.0f * uiScale && contentRelY <= 80.0f * uiScale) {
+                            mSettings.fullscreen = !mSettings.fullscreen;
+                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                        }
+                        // Row 2: Resolution Preset Selector (Card 2: 130..180)
+                        else if (contentRelY >= 130.0f * uiScale && contentRelY <= 180.0f * uiScale) {
                             float cardX0 = drawerX + padX;
                             float cX0 = cardX0 + 8.0f * uiScale;
                             float chipW = (contentW - 16.0f * uiScale - 9.0f * uiScale) / 4.0f;
@@ -838,75 +870,94 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                                 }
                             }
                         }
-                        // HD UI & HUD Textures Switch (Super Mario 3D All-Stars)
-                        else if (contentRelY >= 104.0f * uiScale && contentRelY <= 158.0f * uiScale) {
+                        // Row 3: HD UI & HUD Textures Switch (Card 3: 310..364)
+                        else if (contentRelY >= 310.0f * uiScale && contentRelY <= 364.0f * uiScale) {
                             mSettings.hdUiTextures = !mSettings.hdUiTextures;
                             mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                         }
                     } else {
-                        // Advanced Tab items
-                        // Mod 1: Cutscene Prevention Switch
-                        if (contentRelY >= 46.0f * uiScale && contentRelY <= 96.0f * uiScale) {
-                            mSettings.modSkipCutscenes = !mSettings.modSkipCutscenes;
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // Mod 2: Infinite Health Switch
-                        else if (contentRelY >= 98.0f * uiScale && contentRelY <= 148.0f * uiScale) {
-                            mSettings.modInfiniteHealth = !mSettings.modInfiniteHealth;
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // Mod 3: Infinite Power-Up Duration Switch
-                        else if (contentRelY >= 150.0f * uiScale && contentRelY <= 200.0f * uiScale) {
-                            mSettings.modInfinitePowerup = !mSettings.modInfinitePowerup;
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // Mod 4: Advanced Haptic Feedback Switch
-                        else if (contentRelY >= 202.0f * uiScale && contentRelY <= 252.0f * uiScale) {
-                            mSettings.modAdvancedHaptics = !mSettings.modAdvancedHaptics;
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // Mod 5: Live Power-Up Switcher Card Grid Tap
-                        else if (contentRelY >= 256.0f * uiScale && contentRelY <= 396.0f * uiScale) {
-                            float gridTopRelY = 256.0f * uiScale + 44.0f * uiScale;
-                            float cardX0 = drawerX + padX;
-                            float pStartX = cardX0 + 8.0f * uiScale;
-                            float pillW = (contentW - 16.0f * uiScale - 10.0f * uiScale) / 3.0f;
-                            float pillH = 28.0f * uiScale;
-                            float pillGapY = 4.0f * uiScale;
-                            float pillGapX = 5.0f * uiScale;
+                        // Tab 2: System (Vanilla) or Advanced (Plus)
+                        if (mPlusEdition) {
+                            // Mod 1: Cutscene Prevention Switch
+                            if (contentRelY >= 32.0f * uiScale && contentRelY <= 78.0f * uiScale) {
+                                mSettings.modSkipCutscenes = !mSettings.modSkipCutscenes;
+                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            }
+                            // Mod 2: Infinite Health Switch
+                            else if (contentRelY >= 80.0f * uiScale && contentRelY <= 126.0f * uiScale) {
+                                mSettings.modInfiniteHealth = !mSettings.modInfiniteHealth;
+                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            }
+                            // Mod 3: Infinite Power-Up Duration Switch
+                            else if (contentRelY >= 128.0f * uiScale && contentRelY <= 174.0f * uiScale) {
+                                mSettings.modInfinitePowerup = !mSettings.modInfinitePowerup;
+                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            }
+                            // Mod 4: Advanced Haptic Feedback Switch
+                            else if (contentRelY >= 176.0f * uiScale && contentRelY <= 228.0f * uiScale) {
+                                mSettings.modAdvancedHaptics = !mSettings.modAdvancedHaptics;
+                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            }
+                            // Mod 5: Live Power-Up Switcher Card Grid Tap (290..400)
+                            else if (contentRelY >= 290.0f * uiScale && contentRelY <= 400.0f * uiScale) {
+                                float gridTopRelY = 294.0f * uiScale;
+                                float cardX0 = drawerX + padX;
+                                float pStartX = cardX0 + 8.0f * uiScale;
+                                float pillW = (contentW - 16.0f * uiScale - 10.0f * uiScale) / 3.0f;
+                                float pillH = 30.0f * uiScale;
+                                float pillGapY = 5.0f * uiScale;
+                                float pillGapX = 5.0f * uiScale;
 
-                            if (contentRelY >= gridTopRelY && contentRelY <= gridTopRelY + 3.0f * pillH + 2.0f * pillGapY) {
-                                int row = (int)((contentRelY - gridTopRelY) / (pillH + pillGapY));
-                                float inRowY = contentRelY - (gridTopRelY + row * (pillH + pillGapY));
-                                if (row >= 0 && row < 3 && inRowY <= pillH) {
-                                    float relX = px - pStartX;
-                                    if (relX >= 0.0f) {
-                                        int col = (int)(relX / (pillW + pillGapX));
-                                        float inColX = relX - col * (pillW + pillGapX);
-                                        if (col >= 0 && col < 3 && inColX <= pillW) {
-                                            static const int kPowerupMap[3][3] = {
-                                                { 0, 5, 4 },
-                                                { 2, 6, 7 },
-                                                { 3, 1, 10 }
-                                            };
-                                            port_request_powerup(kPowerupMap[row][col]);
-                                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                                if (contentRelY >= gridTopRelY && contentRelY <= gridTopRelY + 3.0f * (pillH + pillGapY)) {
+                                    int row = (int)((contentRelY - gridTopRelY) / (pillH + pillGapY));
+                                    float inRowY = contentRelY - (gridTopRelY + row * (pillH + pillGapY));
+                                    if (row >= 0 && row < 3 && inRowY <= pillH) {
+                                        float relX = px - pStartX;
+                                        if (relX >= 0.0f) {
+                                            int col = (int)(relX / (pillW + pillGapX));
+                                            float inColX = relX - col * (pillW + pillGapX);
+                                            if (col >= 0 && col < 3 && inColX <= pillW) {
+                                                static const int kPowerupMap[3][3] = {
+                                                    { 0, 5, 4 },
+                                                    { 2, 6, 7 },
+                                                    { 3, 1, 10 }
+                                                };
+                                                port_request_powerup(kPowerupMap[row][col]);
+                                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
-                        // Mod 6: Galaxy Warp Menu Card
-                        else if (contentRelY >= 402.0f * uiScale && contentRelY <= 462.0f * uiScale) {
-                            mWarpMenuOpen = true;
-                            mWarpScrollY = 0.0f;
-                            mWarpScrollTarget = 0.0f;
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // Mod 7: Early Spin Ability Card
-                        else if (contentRelY >= 466.0f * uiScale && contentRelY <= 526.0f * uiScale) {
-                            port_request_unlock_spin();
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            // Mod 6: Galaxy Warp Menu Card
+                            else if (contentRelY >= 442.0f * uiScale && contentRelY <= 488.0f * uiScale) {
+                                mWarpMenuOpen = true;
+                                mWarpScrollY = 0.0f;
+                                mWarpScrollTarget = 0.0f;
+                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            }
+                            // Mod 7: Early Spin Ability Card
+                            else if (contentRelY >= 492.0f * uiScale && contentRelY <= 540.0f * uiScale) {
+                                port_request_unlock_spin();
+                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            }
+                        } else {
+                            // Vanilla System Tab items
+                            // Open Installer Button (Card 1: 80..126)
+                            if (contentRelY >= 80.0f * uiScale && contentRelY <= 126.0f * uiScale) {
+                                port_open_installer();
+                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            }
+                            // Open / Install GalaxyMobile+ (Card 2: 214..260)
+                            else if (contentRelY >= 214.0f * uiScale && contentRelY <= 260.0f * uiScale) {
+                                port_install_plus();
+                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            }
+                            // Haptic Feedback Switch (Card 3: 300..352)
+                            else if (contentRelY >= 300.0f * uiScale && contentRelY <= 352.0f * uiScale) {
+                                mSettings.modAdvancedHaptics = !mSettings.modAdvancedHaptics;
+                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            }
                         }
                     }
 
@@ -933,10 +984,10 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
 
             // Close [X] button at top-right of drawer
             float closeBtnX = drawerX + drawerW - 36.0f * uiScale;
-            float closeBtnY = 44.0f * uiScale;
+            float closeBtnY = 36.0f * uiScale;
             float dx = px - closeBtnX;
             float dy = py - closeBtnY;
-            if (dx * dx + dy * dy <= 26.0f * uiScale * 26.0f * uiScale) {
+            if (dx * dx + dy * dy <= 28.0f * uiScale * 28.0f * uiScale) {
                 closeSettings();
                 return true;
             }
@@ -998,8 +1049,8 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                     return true;
                 }
             } else {
-                // Tab Bar Tap (General vs Graphics vs Advanced) - only in Plus Edition
-                if (mPlusEdition && py >= 58.0f * uiScale && py <= 104.0f * uiScale) {
+                // Tab Bar Tap (Controls vs Display vs System/Advanced) - Available in BOTH Vanilla and Plus
+                if (py >= 58.0f * uiScale && py <= 106.0f * uiScale) {
                     float tabW = contentW / 3.0f;
                     float relX = px - (drawerX + padX);
                     int newTab = (int)(relX / tabW);
@@ -1310,9 +1361,43 @@ void UIOverlay::render(int screenW, int screenH) {
         mDirty = true;
     }
 
-    float drawerW = std::min(w * 0.44f, 390.0f * uiScale);
+    float drawerW = std::min(w * 0.54f, 480.0f * uiScale);
     float drawerX = (mDrawerAnim - 1.0f) * drawerW;
     float cogRot = mDrawerAnim * 1.5707963f; // Smooth 90-degree cogwheel turn
+
+    // Fluid Switch Knob Animations
+    auto updateSwAnim = [&](float& anim, bool state) {
+        float tgt = state ? 1.0f : 0.0f;
+        if (fabsf(anim - tgt) > 0.001f) {
+            anim += (tgt - anim) * (1.0f - expf(-26.0f * dt));
+            mDirty = true;
+        } else {
+            anim = tgt;
+        }
+    };
+    updateSwAnim(mSwAnimShowControls, mSettings.showControls);
+    updateSwAnim(mSwAnimShowDpad, mSettings.showDpad);
+    updateSwAnim(mSwAnimFullscreen, mSettings.fullscreen);
+    updateSwAnim(mSwAnimHdUi, mSettings.hdUiTextures);
+    updateSwAnim(mSwAnimSkipCutscenes, mSettings.modSkipCutscenes);
+    updateSwAnim(mSwAnimInfiniteHp, mSettings.modInfiniteHealth);
+    updateSwAnim(mSwAnimInfinitePowerup, mSettings.modInfinitePowerup);
+    updateSwAnim(mSwAnimHaptics, mSettings.modAdvancedHaptics);
+
+    // Fluid Tab Indicator Animation
+    float padX = 22.0f * uiScale;
+    float contentW = drawerW - padX * 2.0f;
+    float tabW = contentW / 3.0f;
+    mTabTargetX = drawerX + padX + mSettingsTab * tabW + 3.0f * uiScale;
+    mTabTargetW = tabW - 6.0f * uiScale;
+    if (mTabIndicatorW < 1.0f) {
+        mTabIndicatorX = mTabTargetX;
+        mTabIndicatorW = mTabTargetW;
+    } else if (fabsf(mTabIndicatorX - mTabTargetX) > 0.2f || fabsf(mTabIndicatorW - mTabTargetW) > 0.2f) {
+        mTabIndicatorX += (mTabTargetX - mTabIndicatorX) * (1.0f - expf(-24.0f * dt));
+        mTabIndicatorW += (mTabTargetW - mTabIndicatorW) * (1.0f - expf(-24.0f * dt));
+        mDirty = true;
+    }
 
     auto addQuad = [&](float x0, float y0, float x1, float y1, float u0, float v0, float u1, float v1,
                        const Color& c, float mode, float param, float aspect = 1.0f, float extra = 0.0f) {
@@ -1346,6 +1431,11 @@ void UIOverlay::render(int screenW, int screenH) {
             float rNorm = std::min(1.0f, radius / (rw * 0.5f));
             addQuad(x0, y0, x1, y1, -1.0f, -aspect, 1.0f, aspect, c, 0.0f, rNorm, aspect, 1.0f);
         }
+    };
+
+    auto drawCard = [&](float x0, float y0, float x1, float y1, float radius, const Color& bg, const Color& border) {
+        drawRoundRect(x0, y0, x1, y1, radius, border);
+        drawRoundRect(x0 + 1.2f * uiScale, y0 + 1.2f * uiScale, x1 - 1.2f * uiScale, y1 - 1.2f * uiScale, std::max(0.0f, radius - 1.2f * uiScale), bg);
     };
 
     auto drawCogwheel = [&](float cx, float cy, float r, const Color& c, float rot = 0.0f) {
@@ -1423,43 +1513,80 @@ void UIOverlay::render(int screenW, int screenH) {
         }
     };
 
-    auto drawM3Switch = [&](float x, float y, float swW, float swH, bool on) {
-        float r = swH * 0.5f;
-        if (on) {
-            // Track: Primary Container (#0B57D0)
-            drawRoundRect(x, y, x + swW, y + swH, r, rgba(0.043f, 0.341f, 0.816f, 1.0f));
-            // Thumb: High-contrast white disc at right
-            float thumbR = r * 0.70f;
-            drawCircle(x + swW - r, y + r, thumbR, rgba(1.0f, 1.0f, 1.0f, 1.0f));
-        } else {
-            // Track: Surface Container Highest (#303239) with subtle outline
-            drawRoundRect(x, y, x + swW, y + swH, r, rgba(0.188f, 0.196f, 0.224f, 0.95f));
-            drawRoundRect(x + 1.0f, y + 1.0f, x + swW - 1.0f, y + swH - 1.0f, r - 1.0f, rgba(0.267f, 0.278f, 0.310f, 0.60f));
-            // Thumb: Outline disc at left
-            float thumbR = r * 0.56f;
-            drawCircle(x + r, y + r, thumbR, rgba(0.60f, 0.64f, 0.72f, 1.0f));
+    auto drawStatusChip = [&](float x, float y, const char* label, const Color& chipBg, const Color& textCol, const Color& dotCol) {
+        float strW = 0.0f;
+        for (const char* p = label; *p; p++) {
+            char ch = *p;
+            if (ch >= 32 && ch < 127) strW += (face.glyphs[ch - 32].advance * 0.25f) * (0.28f * uiScale);
         }
+        float chipW = strW + 28.0f * uiScale;
+        float chipH = 22.0f * uiScale;
+        drawRoundRect(x, y, x + chipW, y + chipH, 11.0f * uiScale, chipBg);
+        drawCircle(x + 9.0f * uiScale, y + chipH * 0.5f, 3.2f * uiScale, dotCol);
+        drawText(label, x + 16.0f * uiScale, y + 15.0f * uiScale, 0.28f * uiScale, textCol, 0);
+    };
+
+    auto drawM3Switch = [&](float x, float y, float swW, float swH, float anim) {
+        float r = swH * 0.5f;
+        float t = std::max(0.0f, std::min(1.0f, anim));
+        Color trackOffBg = rgba(0.188f, 0.196f, 0.224f, 0.95f);
+        Color trackOffBorder = rgba(0.55f, 0.58f, 0.64f, 0.65f);
+        Color trackOnBg = rgba(0.043f, 0.380f, 0.880f, 1.0f);
+        Color trackOnBorder = rgba(0.220f, 0.741f, 0.969f, 0.95f);
+
+        Color curTrackBg = {
+            trackOffBg.r + (trackOnBg.r - trackOffBg.r) * t,
+            trackOffBg.g + (trackOnBg.g - trackOffBg.g) * t,
+            trackOffBg.b + (trackOnBg.b - trackOffBg.b) * t,
+            trackOffBg.a + (trackOnBg.a - trackOffBg.a) * t
+        };
+        Color curTrackBorder = {
+            trackOffBorder.r + (trackOnBorder.r - trackOffBorder.r) * t,
+            trackOffBorder.g + (trackOnBorder.g - trackOffBorder.g) * t,
+            trackOffBorder.b + (trackOnBorder.b - trackOffBorder.b) * t,
+            trackOffBorder.a + (trackOnBorder.a - trackOffBorder.a) * t
+        };
+
+        drawRoundRect(x, y, x + swW, y + swH, r, curTrackBorder);
+        drawRoundRect(x + 1.2f * uiScale, y + 1.2f * uiScale, x + swW - 1.2f * uiScale, y + swH - 1.2f * uiScale, r - 1.2f * uiScale, curTrackBg);
+
+        float thumbMinR = r * 0.52f;
+        float thumbMaxR = r * 0.72f;
+        float curThumbR = thumbMinR + (thumbMaxR - thumbMinR) * t;
+
+        float thumbMinX = x + r;
+        float thumbMaxX = x + swW - r;
+        float curThumbX = thumbMinX + (thumbMaxX - thumbMinX) * t;
+
+        Color thumbOffCol = rgba(0.70f, 0.74f, 0.80f, 1.0f);
+        Color thumbOnCol = rgba(1.0f, 1.0f, 1.0f, 1.0f);
+        Color curThumbCol = {
+            thumbOffCol.r + (thumbOnCol.r - thumbOffCol.r) * t,
+            thumbOffCol.g + (thumbOnCol.g - thumbOffCol.g) * t,
+            thumbOffCol.b + (thumbOnCol.b - thumbOffCol.b) * t,
+            1.0f
+        };
+
+        drawCircle(curThumbX, y + r, curThumbR, curThumbCol);
     };
 
     auto drawSegmentedGroup = [&](float x, float y, float grpW, float grpH, const char** labels, int count, int activeIdx) {
         float r = 12.0f * uiScale;
-        // Group container: Surface Container High (#26282E) with outline
-        drawRoundRect(x, y, x + grpW, y + grpH, r, rgba(0.149f, 0.157f, 0.180f, 0.95f));
-        drawRoundRect(x, y, x + grpW, y + grpH, r, rgba(0.267f, 0.278f, 0.310f, 0.50f));
+        drawRoundRect(x, y, x + grpW, y + grpH, r, rgba(0.271f, 0.286f, 0.322f, 0.55f));
+        drawRoundRect(x + 1.0f, y + 1.0f, x + grpW - 1.0f, y + grpH - 1.0f, r - 1.0f, rgba(0.141f, 0.153f, 0.180f, 0.95f));
 
-        float segW = grpW / (float)count;
+        float segW = (grpW - 4.0f * uiScale) / (float)count;
         for (int i = 0; i < count; i++) {
-            float sx0 = x + i * segW;
+            float sx0 = x + 2.0f * uiScale + i * segW;
             float sx1 = sx0 + segW;
             bool active = (i == activeIdx);
             if (active) {
-                // Active pill: Primary Container (#0B57D0)
-                drawRoundRect(sx0 + 2.0f, y + 2.0f, sx1 - 2.0f, y + grpH - 2.0f, r - 2.0f, rgba(0.043f, 0.341f, 0.816f, 1.0f));
-                drawText(labels[i], (sx0 + sx1) * 0.5f, y + grpH * 0.64f, 0.36f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                drawRoundRect(sx0, y + 2.0f * uiScale, sx1, y + grpH - 2.0f * uiScale, r - 2.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 1.0f));
+                drawText(labels[i], (sx0 + sx1) * 0.5f, y + grpH * 0.64f, 0.34f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
             } else {
-                drawText(labels[i], (sx0 + sx1) * 0.5f, y + grpH * 0.64f, 0.36f * uiScale, rgba(0.761f, 0.776f, 0.812f, 0.95f), 1);
-                if (i > 0 && (i - 1) != activeIdx) {
-                    drawRoundRect(sx0 - 0.5f, y + 6.0f, sx0 + 0.5f, y + grpH - 6.0f, 0.0f, rgba(0.267f, 0.278f, 0.310f, 0.40f));
+                drawText(labels[i], (sx0 + sx1) * 0.5f, y + grpH * 0.64f, 0.34f * uiScale, rgba(0.720f, 0.745f, 0.784f, 0.85f), 1);
+                if (i > 0 && (i - 1) != activeIdx && !active) {
+                    drawRoundRect(sx0 - 0.5f, y + 6.0f * uiScale, sx0 + 0.5f, y + grpH - 6.0f * uiScale, 0.0f, rgba(0.271f, 0.286f, 0.322f, 0.40f));
                 }
             }
         }
@@ -1705,20 +1832,33 @@ void UIOverlay::render(int screenW, int screenH) {
     // -------------------------------------------------------------
     if (mDrawerAnim > 0.001f) {
         // Scrim backdrop (smoothly fades with animation)
-        drawRoundRect(0, 0, w, h, 0.0f, rgba(0.0f, 0.0f, 0.0f, mDrawerAnim * 0.52f));
+        drawRoundRect(0, 0, w, h, 0.0f, rgba(0.0f, 0.0f, 0.0f, mDrawerAnim * 0.58f));
 
-        // Side Sheet container: Surface Container (#1B1D23) with 28dp rounded right corners
-        drawRoundRect(drawerX - 60.0f, 0.0f, drawerX + drawerW, h, 28.0f * uiScale, rgba(0.106f, 0.114f, 0.137f, 0.98f));
+        // Side Sheet container: Surface Container (#181A20) with 28dp rounded right corners
+        drawRoundRect(drawerX - 60.0f, 0.0f, drawerX + drawerW, h, 28.0f * uiScale, rgba(0.094f, 0.102f, 0.125f, 0.98f));
         // Right edge outline border
-        drawRoundRect(drawerX + drawerW - 2.0f, 0.0f, drawerX + drawerW, h, 0.0f, rgba(0.267f, 0.278f, 0.310f, 0.55f));
+        drawRoundRect(drawerX + drawerW - 2.0f, 0.0f, drawerX + drawerW, h, 0.0f, rgba(0.271f, 0.286f, 0.322f, 0.55f));
 
         float padX = 22.0f * uiScale;
         float contentW = drawerW - padX * 2.0f;
-        float contentTop = mPlusEdition ? (112.0f * uiScale) : (68.0f * uiScale);
+        float contentTop = 114.0f * uiScale;
         float contentBottom = h - 56.0f * uiScale;
-        float totalContentH = (!mPlusEdition) ? (655.0f * uiScale) :
-                             (mSettingsTab == 0) ? (555.0f * uiScale) :
-                             (mSettingsTab == 1) ? (410.0f * uiScale) : (630.0f * uiScale);
+        float totalContentH = 0.0f;
+        if (mWarpMenuOpen) {
+            int matchingCount = 0;
+            for (int i = 0; i < kNumGalaxies; i++) {
+                if (mWarpCategoryIndex == 0 || kGalaxies[i].category == mWarpCategoryIndex) {
+                    matchingCount++;
+                }
+            }
+            totalContentH = matchingCount * (78.0f * uiScale) + 16.0f * uiScale;
+        } else if (mSettingsTab == 0) {
+            totalContentH = 474.0f * uiScale;
+        } else if (mSettingsTab == 1) {
+            totalContentH = 384.0f * uiScale;
+        } else {
+            totalContentH = mPlusEdition ? (650.0f * uiScale) : (460.0f * uiScale);
+        }
         float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
 
         // Smooth scroll damping
@@ -1732,6 +1872,14 @@ void UIOverlay::render(int screenW, int screenH) {
         mDrawerScrollTarget = std::max(0.0f, std::min(mDrawerScrollTarget, maxScroll));
 
         float swW = 50.0f * uiScale, swH = 28.0f * uiScale;
+
+        // Colors
+        Color cCardBg = rgba(0.125f, 0.137f, 0.165f, 0.95f);
+        Color cCardBorder = rgba(0.271f, 0.286f, 0.322f, 0.55f);
+        Color cDivider = rgba(0.271f, 0.286f, 0.322f, 0.35f);
+        Color cHeader = rgba(0.220f, 0.741f, 0.969f, 0.95f); // Cyan accent
+        Color cTextPrimary = rgba(0.925f, 0.933f, 0.949f, 1.0f);
+        Color cTextSecondary = rgba(0.720f, 0.745f, 0.784f, 0.85f);
 
         // ---------------------------------------------------------
         // A. Content Layer (Warp Sub-View vs Settings Tabs)
@@ -1747,7 +1895,6 @@ void UIOverlay::render(int screenW, int screenH) {
             float totalWarpH = matchingCount * (78.0f * uiScale) + 16.0f * uiScale;
             float maxWarpScroll = std::max(0.0f, totalWarpH - (contentBottom - contentTop));
 
-            // Smooth scroll damping
             if (fabsf(mWarpScrollY - mWarpScrollTarget) > 0.5f) {
                 mWarpScrollY += (mWarpScrollTarget - mWarpScrollY) * (1.0f - expf(-18.0f * dt));
                 mDirty = true;
@@ -1769,25 +1916,23 @@ void UIOverlay::render(int screenW, int screenH) {
                     float cardX0 = drawerX + padX;
                     float cardX1 = drawerX + drawerW - padX;
 
-                    // Card background & border
-                    Color cardBg = isSel ? rgba(0.12f, 0.22f, 0.36f, 0.96f) : rgba(0.13f, 0.15f, 0.18f, 0.92f);
-                    Color cardBorder = isSel ? rgba(0.38f, 0.74f, 0.98f, 0.90f) : rgba(0.24f, 0.26f, 0.30f, 0.45f);
-                    drawRoundRect(cardX0, cardY, cardX1, cardY + cardH, 12.0f * uiScale, cardBg);
-                    drawRoundRect(cardX0, cardY, cardX1, cardY + cardH, 12.0f * uiScale, cardBorder);
+                    Color bg = isSel ? rgba(0.12f, 0.22f, 0.36f, 0.96f) : cCardBg;
+                    Color brd = isSel ? rgba(0.220f, 0.741f, 0.969f, 0.90f) : cCardBorder;
+                    drawCard(cardX0, cardY, cardX1, cardY + cardH, 14.0f * uiScale, bg, brd);
 
                     // Galaxy Title
-                    drawText(kGalaxies[i].displayName, cardX0 + 12.0f * uiScale, cardY + 20.0f * uiScale, 0.38f * uiScale, rgba(0.95f, 0.96f, 0.98f, 1.0f), 0);
+                    drawText(kGalaxies[i].displayName, cardX0 + 14.0f * uiScale, cardY + 22.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
 
                     // Category Badge tag on right
                     const char* catName = kCategoryNames[kGalaxies[i].category];
-                    drawText(catName, cardX1 - 12.0f * uiScale, cardY + 18.0f * uiScale, 0.27f * uiScale, rgba(0.58f, 0.72f, 0.90f, 0.85f), 2);
+                    drawText(catName, cardX1 - 14.0f * uiScale, cardY + 20.0f * uiScale, 0.28f * uiScale, rgba(0.58f, 0.72f, 0.90f, 0.85f), 2);
 
                     // Scenario selector pills
                     int maxSc = kGalaxies[i].maxScenarios;
                     float pillW = 28.0f * uiScale;
                     float pillGap = 5.0f * uiScale;
-                    float pStartX = cardX0 + 12.0f * uiScale;
-                    float pY = cardY + 34.0f * uiScale;
+                    float pStartX = cardX0 + 14.0f * uiScale;
+                    float pY = cardY + 36.0f * uiScale;
                     float pH = 26.0f * uiScale;
 
                     for (int s = 1; s <= maxSc; s++) {
@@ -1805,9 +1950,9 @@ void UIOverlay::render(int screenW, int screenH) {
                     }
 
                     // Quick [ WARP ] pill on right
-                    float qWarpX0 = cardX1 - 70.0f * uiScale;
-                    float qWarpX1 = cardX1 - 8.0f * uiScale;
-                    float qWarpY = cardY + 34.0f * uiScale;
+                    float qWarpX0 = cardX1 - 74.0f * uiScale;
+                    float qWarpX1 = cardX1 - 10.0f * uiScale;
+                    float qWarpY = cardY + 36.0f * uiScale;
                     Color qBg = isSel ? rgba(0.14f, 0.48f, 0.26f, 0.95f) : rgba(0.18f, 0.22f, 0.28f, 0.75f);
                     Color qTxt = isSel ? rgba(0.85f, 1.0f, 0.88f, 1.0f) : rgba(0.65f, 0.70f, 0.78f, 0.75f);
                     drawRoundRect(qWarpX0, qWarpY, qWarpX1, qWarpY + pH, 8.0f * uiScale, qBg);
@@ -1825,16 +1970,16 @@ void UIOverlay::render(int screenW, int screenH) {
             }
 
             // Fixed Top Header for Warp Sub-View
-            drawRoundRect(drawerX - 60.0f, 0.0f, drawerX + drawerW, contentTop, 0.0f, rgba(0.106f, 0.114f, 0.137f, 1.0f));
+            drawRoundRect(drawerX - 60.0f, 0.0f, drawerX + drawerW, contentTop, 0.0f, rgba(0.094f, 0.102f, 0.125f, 1.0f));
 
             // [< Back] button pill at top-left
             float backBtnX0 = drawerX + padX;
-            float backBtnX1 = drawerX + padX + 74.0f * uiScale;
+            float backBtnX1 = drawerX + padX + 80.0f * uiScale;
             drawRoundRect(backBtnX0, 20.0f * uiScale, backBtnX1, 48.0f * uiScale, 14.0f * uiScale, rgba(0.18f, 0.22f, 0.28f, 0.95f));
             drawText("< Back", (backBtnX0 + backBtnX1) * 0.5f, 38.0f * uiScale, 0.34f * uiScale, rgba(0.85f, 0.92f, 1.0f, 1.0f), 1);
 
             // Title
-            drawText("Galaxy Warp", backBtnX1 + 14.0f * uiScale, 38.0f * uiScale, 0.48f * uiScale, rgba(0.92f, 0.94f, 0.98f, 1.0f), 0);
+            drawText("Galaxy Warp", backBtnX1 + 14.0f * uiScale, 38.0f * uiScale, 0.48f * uiScale, cTextPrimary, 0);
 
             // Close [X] circular button at top-right
             float closeBtnX = drawerX + drawerW - 36.0f * uiScale;
@@ -1860,11 +2005,11 @@ void UIOverlay::render(int screenW, int screenH) {
             }
 
             // Divider below header
-            drawRoundRect(drawerX + padX, contentTop - 1.0f, drawerX + drawerW - padX, contentTop, 0.5f, rgba(0.267f, 0.278f, 0.310f, 0.45f));
+            drawRoundRect(drawerX + padX, contentTop - 1.0f, drawerX + drawerW - padX, contentTop, 0.5f, cDivider);
 
             // Fixed Bottom Bar for Warp Sub-View: Prominent Action Button
-            drawRoundRect(drawerX - 60.0f, contentBottom, drawerX + drawerW, h, 0.0f, rgba(0.106f, 0.114f, 0.137f, 1.0f));
-            drawRoundRect(drawerX + padX, contentBottom, drawerX + drawerW - padX, contentBottom + 1.0f, 0.5f, rgba(0.267f, 0.278f, 0.310f, 0.45f));
+            drawRoundRect(drawerX - 60.0f, contentBottom, drawerX + drawerW, h, 0.0f, rgba(0.094f, 0.102f, 0.125f, 1.0f));
+            drawRoundRect(drawerX + padX, contentBottom, drawerX + drawerW - padX, contentBottom + 1.0f, 0.5f, cDivider);
 
             float doneY = h - 48.0f * uiScale;
             float doneX0 = drawerX + padX;
@@ -1875,355 +2020,374 @@ void UIOverlay::render(int screenW, int screenH) {
             snprintf(warpBtnTxt, sizeof(warpBtnTxt), "WARP: %s (STAR %d)", kGalaxies[mWarpSelectedGalaxy].displayName, mWarpSelectedScenario);
             drawText(warpBtnTxt, (doneX0 + doneX1) * 0.5f, doneY + 24.0f * uiScale, 0.34f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
         } else {
-            // Standard Settings Drawer (General or Advanced Tab)
-            float totalContentH = (!mPlusEdition) ? (655.0f * uiScale) :
-                             (mSettingsTab == 0) ? (555.0f * uiScale) :
-                             (mSettingsTab == 1) ? (410.0f * uiScale) : (630.0f * uiScale);
-            float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
+            // Standard Settings Drawer (Controls, Display, System/Advanced)
+            auto renderCardBlock = [&](float relY, float cardH, auto func) {
+                float drawY = contentTop + relY - mDrawerScrollY;
+                if (drawY + cardH >= contentTop - 16.0f && drawY <= contentBottom + 16.0f) {
+                    func(drawY);
+                }
+            };
 
-            // Smooth scroll damping
-            if (fabsf(mDrawerScrollY - mDrawerScrollTarget) > 0.5f) {
-                mDrawerScrollY += (mDrawerScrollTarget - mDrawerScrollY) * (1.0f - expf(-18.0f * dt));
-                mDirty = true;
-            } else {
-                mDrawerScrollY = mDrawerScrollTarget;
-            }
-            mDrawerScrollY = std::max(0.0f, std::min(mDrawerScrollY, maxScroll));
-            mDrawerScrollTarget = std::max(0.0f, std::min(mDrawerScrollTarget, maxScroll));
+            float cX0 = drawerX + padX;
+            float cX1 = drawerX + drawerW - padX;
 
-            float swW = 50.0f * uiScale, swH = 28.0f * uiScale;
+            if (mSettingsTab == 0) {
+                // =========================================================
+                // Tab 0: Controls
+                // =========================================================
 
-            if (mSettingsTab == 0 || !mPlusEdition) {
-                // General Tab Settings Items
-                auto renderRow = [&](float relY, float rowH, auto func) {
-                    float drawY = contentTop + relY - mDrawerScrollY;
-                    if (drawY + rowH >= contentTop - 12.0f && drawY <= contentBottom + 12.0f) {
-                        func(drawY);
-                    }
-                };
+                // Card 1: On-Screen Controls (HUD)
+                renderCardBlock(6.0f * uiScale, 244.0f * uiScale, [&](float y) {
+                    drawCard(cX0, y, cX1, y + 244.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
 
-                // Row 0: Visibility Switch
-                renderRow(8.0f * uiScale, 46.0f * uiScale, [&](float y) {
-                    drawText("On-Screen Controls", drawerX + padX, y + 20.0f * uiScale, 0.40f * uiScale, rgba(0.902f, 0.906f, 0.922f, 1.0f), 0);
-                    drawText("Show HUD buttons", drawerX + padX, y + 36.0f * uiScale, 0.29f * uiScale, rgba(0.761f, 0.776f, 0.812f, 0.85f), 0);
-                    drawM3Switch(drawerX + drawerW - padX - swW, y + 10.0f * uiScale, swW, swH, mSettings.showControls);
+                    // Card Header
+                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
+                    drawText("ON-SCREEN CONTROLS (HUD)", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+
+                    // Row 1: Show Controls
+                    float r1Y = y + 34.0f * uiScale;
+                    drawText("Show Controls", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
+                    drawText("Display virtual thumbstick & buttons", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                    drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimShowControls);
+
+                    // Divider
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 80.0f * uiScale, cX1 - 14.0f * uiScale, y + 81.0f * uiScale, 0.5f, cDivider);
+
+                    // Row 2: Camera D-Pad
+                    float r2Y = y + 82.0f * uiScale;
+                    drawText("Camera D-Pad", cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
+                    drawText("Directional camera rotation dial", cX0 + 14.0f * uiScale, r2Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                    drawM3Switch(cX1 - swW - 14.0f * uiScale, r2Y + 8.0f * uiScale, swW, swH, mSwAnimShowDpad);
+
+                    // Divider
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 128.0f * uiScale, cX1 - 14.0f * uiScale, y + 129.0f * uiScale, 0.5f, cDivider);
+
+                    // Row 3: D-Pad Position
+                    float r3Y = y + 130.0f * uiScale;
+                    drawText("D-Pad Placement", cX0 + 14.0f * uiScale, r3Y + 14.0f * uiScale, 0.34f * uiScale, cTextPrimary, 0);
+                    const char* dpadSideOpts[2] = {"Left Hand", "Right Hand"};
+                    drawSegmentedGroup(cX0 + 14.0f * uiScale, r3Y + 18.0f * uiScale, contentW - 28.0f * uiScale, 30.0f * uiScale, dpadSideOpts, 2, mSettings.dpadOnRight ? 1 : 0);
+
+                    // Divider
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 184.0f * uiScale, cX1 - 14.0f * uiScale, y + 185.0f * uiScale, 0.5f, cDivider);
+
+                    // Row 4: Joystick Mode
+                    float r4Y = y + 186.0f * uiScale;
+                    drawText("Joystick Placement", cX0 + 14.0f * uiScale, r4Y + 14.0f * uiScale, 0.34f * uiScale, cTextPrimary, 0);
+                    const char* joyOpts[2] = {"Dynamic (Touch)", "Fixed Anchor"};
+                    drawSegmentedGroup(cX0 + 14.0f * uiScale, r4Y + 18.0f * uiScale, contentW - 28.0f * uiScale, 30.0f * uiScale, joyOpts, 2, mSettings.dynamicStick ? 0 : 1);
                 });
 
-                // Row 1: Camera D-Pad Switch
-                renderRow(58.0f * uiScale, 46.0f * uiScale, [&](float y) {
-                    drawText("Camera D-Pad", drawerX + padX, y + 20.0f * uiScale, 0.40f * uiScale, rgba(0.902f, 0.906f, 0.922f, 1.0f), 0);
-                    drawText("Limited camera rotation & reset", drawerX + padX, y + 36.0f * uiScale, 0.29f * uiScale, rgba(0.761f, 0.776f, 0.812f, 0.85f), 0);
-                    drawM3Switch(drawerX + drawerW - padX - swW, y + 10.0f * uiScale, swW, swH, mSettings.showDpad);
-                });
+                // Card 2: Customize Touch Controls
+                renderCardBlock(258.0f * uiScale, 206.0f * uiScale, [&](float y) {
+                    drawCard(cX0, y, cX1, y + 206.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
 
-                // Row 2: D-Pad Position Segmented Button
-                renderRow(108.0f * uiScale, 54.0f * uiScale, [&](float y) {
-                    drawText("D-Pad Position", drawerX + padX, y + 14.0f * uiScale, 0.38f * uiScale, rgba(0.902f, 0.906f, 0.922f, 1.0f), 0);
-                    const char* dpadSideOpts[2] = {"Left Side", "Right Side"};
-                    drawSegmentedGroup(drawerX + padX, y + 22.0f * uiScale, contentW, 34.0f * uiScale, dpadSideOpts, 2, mSettings.dpadOnRight ? 1 : 0);
-                });
+                    // Card Header
+                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
+                    drawText("CUSTOMIZE TOUCH CONTROLS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
 
-                // Row 3: Fullscreen Switch
-                renderRow(166.0f * uiScale, 46.0f * uiScale, [&](float y) {
-                    drawText("Fullscreen", drawerX + padX, y + 20.0f * uiScale, 0.40f * uiScale, rgba(0.902f, 0.906f, 0.922f, 1.0f), 0);
-                    drawText("Native ultrawide (expand Hor+ FOV)", drawerX + padX, y + 36.0f * uiScale, 0.29f * uiScale, rgba(0.761f, 0.776f, 0.812f, 0.85f), 0);
-                    drawM3Switch(drawerX + drawerW - padX - swW, y + 10.0f * uiScale, swW, swH, mSettings.fullscreen);
-                });
-
-                // Row 4: Joystick Mode Segmented Button
-                renderRow(216.0f * uiScale, 54.0f * uiScale, [&](float y) {
-                    drawText("Joystick Mode", drawerX + padX, y + 14.0f * uiScale, 0.38f * uiScale, rgba(0.902f, 0.906f, 0.922f, 1.0f), 0);
-                    const char* joyOpts[2] = {"Dynamic", "Fixed"};
-                    drawSegmentedGroup(drawerX + padX, y + 22.0f * uiScale, contentW, 34.0f * uiScale, joyOpts, 2, mSettings.dynamicStick ? 0 : 1);
-                });
-
-                // Row 5: Controls Opacity Segmented Button
-                renderRow(274.0f * uiScale, 54.0f * uiScale, [&](float y) {
-                    drawText("Controls Opacity", drawerX + padX, y + 14.0f * uiScale, 0.38f * uiScale, rgba(0.902f, 0.906f, 0.922f, 1.0f), 0);
+                    // Row 1: Opacity
+                    float r1Y = y + 32.0f * uiScale;
+                    drawText("Opacity Level", cX0 + 14.0f * uiScale, r1Y + 14.0f * uiScale, 0.34f * uiScale, cTextPrimary, 0);
                     const char* opOpts[4] = {"25%", "50%", "75%", "100%"};
                     int opIdx = (fabsf(mSettings.opacity - 0.25f) < 0.12f) ? 0 : (fabsf(mSettings.opacity - 0.50f) < 0.12f) ? 1 : (fabsf(mSettings.opacity - 0.75f) < 0.12f) ? 2 : 3;
-                    drawSegmentedGroup(drawerX + padX, y + 22.0f * uiScale, contentW, 34.0f * uiScale, opOpts, 4, opIdx);
-                });
+                    drawSegmentedGroup(cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, contentW - 28.0f * uiScale, 30.0f * uiScale, opOpts, 4, opIdx);
 
-                // Row 6: Button Size Segmented Button
-                renderRow(332.0f * uiScale, 54.0f * uiScale, [&](float y) {
-                    drawText("Button Size", drawerX + padX, y + 14.0f * uiScale, 0.38f * uiScale, rgba(0.902f, 0.906f, 0.922f, 1.0f), 0);
-                    const char* scOpts[3] = {"Small", "Medium", "Large"};
+                    // Divider
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 88.0f * uiScale, cX1 - 14.0f * uiScale, y + 89.0f * uiScale, 0.5f, cDivider);
+
+                    // Row 2: Button Scale
+                    float r2Y = y + 92.0f * uiScale;
+                    drawText("Button Size", cX0 + 14.0f * uiScale, r2Y + 14.0f * uiScale, 0.34f * uiScale, cTextPrimary, 0);
+                    const char* scOpts[3] = {"Small (85%)", "Medium (100%)", "Large (125%)"};
                     int scIdx = (fabsf(mSettings.scale - 0.85f) < 0.08f) ? 0 : (fabsf(mSettings.scale - 1.25f) < 0.08f) ? 2 : 1;
-                    drawSegmentedGroup(drawerX + padX, y + 22.0f * uiScale, contentW, 34.0f * uiScale, scOpts, 3, scIdx);
+                    drawSegmentedGroup(cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, contentW - 28.0f * uiScale, 30.0f * uiScale, scOpts, 3, scIdx);
+
+                    // Divider
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 148.0f * uiScale, cX1 - 14.0f * uiScale, y + 149.0f * uiScale, 0.5f, cDivider);
+
+                    // Row 3: Layout Repositioning
+                    float r3Y = y + 152.0f * uiScale;
+                    float b1X0 = cX0 + 14.0f * uiScale;
+                    float b1X1 = cX0 + 14.0f * uiScale + (contentW - 36.0f * uiScale) * 0.58f;
+                    float b2X0 = b1X1 + 8.0f * uiScale;
+                    float b2X1 = cX1 - 14.0f * uiScale;
+                    drawRoundRect(b1X0, r3Y + 6.0f * uiScale, b1X1, r3Y + 40.0f * uiScale, 16.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 0.95f));
+                    drawText("Reposition Layout", (b1X0 + b1X1) * 0.5f, r3Y + 28.0f * uiScale, 0.34f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+
+                    drawRoundRect(b2X0, r3Y + 6.0f * uiScale, b2X1, r3Y + 40.0f * uiScale, 16.0f * uiScale, rgba(0.35f, 0.15f, 0.18f, 0.95f));
+                    drawText("Reset", (b2X0 + b2X1) * 0.5f, r3Y + 28.0f * uiScale, 0.34f * uiScale, rgba(1.0f, 0.72f, 0.72f, 1.0f), 1);
+                });
+            } else if (mSettingsTab == 1) {
+                // =========================================================
+                // Tab 1: Display
+                // =========================================================
+
+                // Card 1: Viewport & Horizon
+                renderCardBlock(6.0f * uiScale, 88.0f * uiScale, [&](float y) {
+                    drawCard(cX0, y, cX1, y + 88.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+
+                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
+                    drawText("DISPLAY & VIEWPORT", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+
+                    float r1Y = y + 34.0f * uiScale;
+                    drawText("Native Ultrawide (Hor+)", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
+                    drawText("Expand horizontal FOV to fill entire phone screen", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                    drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimFullscreen);
                 });
 
-                // Row 7: Layout Reposition & Reset Buttons
-                renderRow(390.0f * uiScale, 54.0f * uiScale, [&](float y) {
-                    drawText("Controls Layout", drawerX + padX, y + 14.0f * uiScale, 0.38f * uiScale, rgba(0.902f, 0.906f, 0.922f, 1.0f), 0);
-                    float btnY = y + 22.0f * uiScale;
-                    float b1X0 = drawerX + padX;
-                    float b1X1 = drawerX + padX + contentW * 0.56f - 4.0f * uiScale;
-                    float b2X0 = drawerX + padX + contentW * 0.56f + 4.0f * uiScale;
-                    float b2X1 = drawerX + drawerW - padX;
-                    drawRoundRect(b1X0, btnY, b1X1, btnY + 34.0f * uiScale, 14.0f * uiScale, rgba(0.18f, 0.23f, 0.31f, 0.95f));
-                    drawText("Reposition", (b1X0 + b1X1) * 0.5f, btnY + 22.0f * uiScale, 0.36f * uiScale, rgba(0.659f, 0.780f, 0.980f, 1.0f), 1);
-                    drawRoundRect(b2X0, btnY, b2X1, btnY + 34.0f * uiScale, 14.0f * uiScale, rgba(0.35f, 0.15f, 0.17f, 0.95f));
-                    drawText("Reset", (b2X0 + b2X1) * 0.5f, btnY + 22.0f * uiScale, 0.36f * uiScale, rgba(1.0f, 0.72f, 0.72f, 1.0f), 1);
-                });
+                // Card 2: 3D Render Resolution Preset
+                renderCardBlock(102.0f * uiScale, 176.0f * uiScale, [&](float y) {
+                    drawCard(cX0, y, cX1, y + 176.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
 
-                // Row 8: Game Installer & Dump Setup Card
-                renderRow(452.0f * uiScale, 94.0f * uiScale, [&](float y) {
-                    float cX0 = drawerX + padX;
-                    float cX1 = drawerX + drawerW - padX;
-                    float cardH = 88.0f * uiScale;
-                    drawRoundRect(cX0, y, cX1, y + cardH, 14.0f * uiScale, rgba(0.13f, 0.18f, 0.28f, 0.95f));
-                    drawRoundRect(cX0, y, cX1, y + cardH, 14.0f * uiScale, rgba(0.28f, 0.45f, 0.72f, 0.65f));
+                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
+                    drawText("3D RENDER RESOLUTION PRESET", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
 
-                    drawText("GAME INSTALLER & DUMP SETUP", cX0 + 12.0f * uiScale, y + 18.0f * uiScale, 0.32f * uiScale, rgba(0.38f, 0.74f, 0.98f, 0.95f), 0);
+                    // 4-way Preset Segmented Button
+                    float r1Y = y + 34.0f * uiScale;
+                    static const char* kPresetNames[4] = { "720p HD", "900p HD+", "1080p FHD", "Native Ultra" };
+                    drawSegmentedGroup(cX0 + 14.0f * uiScale, r1Y, contentW - 28.0f * uiScale, 36.0f * uiScale, kPresetNames, 4, mSettings.graphicsPreset);
 
-                    bool hasData = (port_has_game_data() != 0);
-                    if (hasData) {
-                        drawText("Status: Ready (/sdcard/GalaxyData)", cX0 + 12.0f * uiScale, y + 34.0f * uiScale, 0.28f * uiScale, rgba(0.20f, 0.85f, 0.45f, 1.0f), 0);
-                        drawText("Game dump installed. Tap to manage or re-cook.", cX0 + 12.0f * uiScale, y + 47.0f * uiScale, 0.24f * uiScale, rgba(0.72f, 0.76f, 0.82f, 0.80f), 0);
-                    } else {
-                        drawText("Status: Missing - Setup Required", cX0 + 12.0f * uiScale, y + 34.0f * uiScale, 0.28f * uiScale, rgba(0.98f, 0.55f, 0.20f, 1.0f), 0);
-                        drawText("Select .rvz, .wbfs, .iso or .zip to install.", cX0 + 12.0f * uiScale, y + 47.0f * uiScale, 0.24f * uiScale, rgba(0.72f, 0.76f, 0.82f, 0.80f), 0);
+                    // Live Status Box
+                    float boxY = y + 78.0f * uiScale;
+                    float boxH = 86.0f * uiScale;
+                    drawRoundRect(cX0 + 14.0f * uiScale, boxY, cX1 - 14.0f * uiScale, boxY + boxH, 12.0f * uiScale, rgba(0.165f, 0.180f, 0.215f, 0.95f));
+
+                    const char* resChip = "1080p FHD • Recommended";
+                    const char* resSub = "Internal 1920x1080 render target. Optimal balance.";
+                    Color badgeBg = rgba(0.10f, 0.28f, 0.44f, 0.90f);
+                    Color badgeTxt = rgba(0.40f, 0.85f, 1.0f, 1.0f);
+                    Color badgeDot = rgba(0.220f, 0.741f, 0.969f, 1.0f);
+
+                    if (mSettings.graphicsPreset == 0) {
+                        resChip = "720p HD • Power Saver";
+                        resSub = "Internal 1280x720 render target. Cooler battery operation.";
+                        badgeBg = rgba(0.12f, 0.32f, 0.20f, 0.90f);
+                        badgeTxt = rgba(0.50f, 0.95f, 0.60f, 1.0f);
+                        badgeDot = rgba(0.290f, 0.871f, 0.502f, 1.0f);
+                    } else if (mSettings.graphicsPreset == 1) {
+                        resChip = "900p HD+ • Performance";
+                        resSub = "Internal 1600x900 render target. High fluidity.";
+                        badgeBg = rgba(0.35f, 0.28f, 0.10f, 0.90f);
+                        badgeTxt = rgba(1.0f, 0.85f, 0.40f, 1.0f);
+                        badgeDot = rgba(0.984f, 0.749f, 0.141f, 1.0f);
+                    } else if (mSettings.graphicsPreset == 3) {
+                        resChip = "Native Display • Ultra Fidelity";
+                        resSub = "Full 1440p+ QHD native device pixel grid. Maximum crispness.";
+                        badgeBg = rgba(0.34f, 0.18f, 0.42f, 0.90f);
+                        badgeTxt = rgba(0.92f, 0.65f, 1.0f, 1.0f);
+                        badgeDot = rgba(0.85f, 0.45f, 0.98f, 1.0f);
                     }
 
-                    float btnX0 = cX0 + 12.0f * uiScale;
-                    float btnX1 = cX1 - 12.0f * uiScale;
-                    float btnY0 = y + 54.0f * uiScale;
-                    float btnY1 = y + 82.0f * uiScale;
-                    drawRoundRect(btnX0, btnY0, btnX1, btnY1, 10.0f * uiScale, rgba(0.20f, 0.45f, 0.85f, 0.95f));
-                    drawText("OPEN INSTALLER", (btnX0 + btnX1) * 0.5f, btnY0 + 18.0f * uiScale, 0.34f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                    drawStatusChip(cX0 + 26.0f * uiScale, boxY + 14.0f * uiScale, resChip, badgeBg, badgeTxt, badgeDot);
+                    drawText(resSub, cX0 + 26.0f * uiScale, boxY + 54.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                    drawText("Directly scales internal 3D scene geometry & shader buffers.", cX0 + 26.0f * uiScale, boxY + 70.0f * uiScale, 0.24f * uiScale, rgba(0.55f, 0.60f, 0.70f, 0.75f), 0);
                 });
 
-                if (!mPlusEdition) {
-                    // Row 9: GalaxyMobile+ Edition Card
-                    renderRow(552.0f * uiScale, 94.0f * uiScale, [&](float y) {
-                        float cX0 = drawerX + padX;
-                        float cX1 = drawerX + drawerW - padX;
-                        float cardH = 88.0f * uiScale;
-                        drawRoundRect(cX0, y, cX1, y + cardH, 14.0f * uiScale, rgba(0.18f, 0.13f, 0.28f, 0.95f));
-                        drawRoundRect(cX0, y, cX1, y + cardH, 14.0f * uiScale, rgba(0.55f, 0.35f, 0.85f, 0.65f));
+                // Card 3: Texture Remaster
+                renderCardBlock(286.0f * uiScale, 88.0f * uiScale, [&](float y) {
+                    drawCard(cX0, y, cX1, y + 88.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
 
-                        drawText("GALAXYMOBILE+ EDITION", cX0 + 12.0f * uiScale, y + 18.0f * uiScale, 0.32f * uiScale, rgba(0.78f, 0.55f, 1.00f, 0.95f), 0);
+                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
+                    drawText("TEXTURE ENHANCEMENTS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+
+                    float r1Y = y + 34.0f * uiScale;
+                    drawText("HD UI & HUD (3D All-Stars)", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
+                    drawText("Crisp native 1080p text, icons, buttons & health meter", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                    drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimHdUi);
+                });
+            } else {
+                // =========================================================
+                // Tab 2: System (Vanilla) or Advanced (Plus)
+                // =========================================================
+                if (mPlusEdition) {
+                    // Plus Edition Advanced Tab
+                    // Card 1: Gameplay Cheats & Mods
+                    renderCardBlock(6.0f * uiScale, 236.0f * uiScale, [&](float y) {
+                        drawCard(cX0, y, cX1, y + 236.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+
+                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
+                        drawText("GAMEPLAY CHEATS & MODS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+
+                        // Mod 1: Skip Cutscenes
+                        float r1Y = y + 34.0f * uiScale;
+                        drawText("Skip Cutscenes", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
+                        drawText("Bypass intro & story event cinematics", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                        drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimSkipCutscenes);
+
+                        drawRoundRect(cX0 + 14.0f * uiScale, y + 80.0f * uiScale, cX1 - 14.0f * uiScale, y + 81.0f * uiScale, 0.5f, cDivider);
+
+                        // Mod 2: Infinite Health
+                        float r2Y = y + 82.0f * uiScale;
+                        drawText("Infinite Health", cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
+                        drawText("Invulnerable Mario (locked at 6 HP max)", cX0 + 14.0f * uiScale, r2Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                        drawM3Switch(cX1 - swW - 14.0f * uiScale, r2Y + 8.0f * uiScale, swW, swH, mSwAnimInfiniteHp);
+
+                        drawRoundRect(cX0 + 14.0f * uiScale, y + 128.0f * uiScale, cX1 - 14.0f * uiScale, y + 129.0f * uiScale, 0.5f, cDivider);
+
+                        // Mod 3: Infinite Powerup
+                        float r3Y = y + 130.0f * uiScale;
+                        drawText("Infinite Power-Up Duration", cX0 + 14.0f * uiScale, r3Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
+                        drawText("Never lose Fire, Bee, Boo, Ice timer", cX0 + 14.0f * uiScale, r3Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                        drawM3Switch(cX1 - swW - 14.0f * uiScale, r3Y + 8.0f * uiScale, swW, swH, mSwAnimInfinitePowerup);
+
+                        drawRoundRect(cX0 + 14.0f * uiScale, y + 176.0f * uiScale, cX1 - 14.0f * uiScale, y + 177.0f * uiScale, 0.5f, cDivider);
+
+                        // Mod 4: Haptic Feedback
+                        float r4Y = y + 178.0f * uiScale;
+                        drawText("Tactile Haptic Feedback", cX0 + 14.0f * uiScale, r4Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
+                        drawText("Vibrations on button presses & gameplay events", cX0 + 14.0f * uiScale, r4Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                        drawM3Switch(cX1 - swW - 14.0f * uiScale, r4Y + 8.0f * uiScale, swW, swH, mSwAnimHaptics);
+                    });
+
+                    // Card 2: Live Power-Up Morph Switcher
+                    renderCardBlock(250.0f * uiScale, 158.0f * uiScale, [&](float y) {
+                        drawCard(cX0, y, cX1, y + 158.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+
+                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
+                        drawText("LIVE POWER-UP SWITCHER", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+                        drawText("Tap any form to morph Mario instantly during gameplay", cX0 + 14.0f * uiScale, y + 38.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+
+                        int curMode = port_get_current_powerup();
+                        struct PowerupItem {
+                            const char* label;
+                            int type;
+                            int playerMode;
+                        };
+                        static const PowerupItem kPowerupGrid[3][3] = {
+                            { {"Normal", 0, 0}, {"Fire", 5, 2}, {"Ice", 4, 3} },
+                            { {"Bee", 2, 4}, {"Flying", 6, 7}, {"Rainbow", 7, 1} },
+                            { {"Boo", 3, 6}, {"Spring", 1, 5}, {"+Life 6HP", 10, -1} }
+                        };
+
+                        float pStartX = cX0 + 14.0f * uiScale;
+                        float pillW = (contentW - 28.0f * uiScale - 10.0f * uiScale) / 3.0f;
+                        float pillH = 30.0f * uiScale;
+                        float pillGapY = 5.0f * uiScale;
+
+                        for (int r = 0; r < 3; r++) {
+                            for (int c = 0; c < 3; c++) {
+                                const auto& item = kPowerupGrid[r][c];
+                                float px0 = pStartX + c * (pillW + 5.0f * uiScale);
+                                float px1 = px0 + pillW;
+                                float py0 = y + 46.0f * uiScale + r * (pillH + pillGapY);
+                                float py1 = py0 + pillH;
+                                bool isActive = (item.playerMode >= 0 && curMode == item.playerMode);
+
+                                Color pBg = isActive ? rgba(0.043f, 0.341f, 0.816f, 1.0f) : rgba(0.18f, 0.22f, 0.30f, 0.90f);
+                                Color pTxt = isActive ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.78f, 0.82f, 0.90f, 0.90f);
+                                drawRoundRect(px0, py0, px1, py1, 8.0f * uiScale, pBg);
+                                drawText(item.label, (px0 + px1) * 0.5f, py0 + 20.0f * uiScale, 0.31f * uiScale, pTxt, 1);
+                            }
+                        }
+                    });
+
+                    // Card 3: Stage Warp & Abilities
+                    renderCardBlock(416.0f * uiScale, 136.0f * uiScale, [&](float y) {
+                        drawCard(cX0, y, cX1, y + 136.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+
+                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
+                        drawText("WARP & ABILITY UNLOCKS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+
+                        // Row 1: Warp
+                        float r1Y = y + 34.0f * uiScale;
+                        drawText("Galaxy Warp Menu", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.36f * uiScale, cTextPrimary, 0);
+                        drawText("Instant stage selector with scenario stars", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+
+                        float btnW = 90.0f * uiScale;
+                        float btnH = 32.0f * uiScale;
+                        drawRoundRect(cX1 - btnW - 14.0f * uiScale, r1Y + 6.0f * uiScale, cX1 - 14.0f * uiScale, r1Y + 6.0f * uiScale + btnH, 16.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 1.0f));
+                        drawText("Open Warp", cX1 - 14.0f * uiScale - btnW * 0.5f, r1Y + 26.0f * uiScale, 0.33f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+
+                        drawRoundRect(cX0 + 14.0f * uiScale, y + 84.0f * uiScale, cX1 - 14.0f * uiScale, y + 85.0f * uiScale, 0.5f, cDivider);
+
+                        // Row 2: Early Spin
+                        float r2Y = y + 86.0f * uiScale;
+                        drawText("Early Spin Ability", cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, 0.36f * uiScale, cTextPrimary, 0);
+                        drawText("Unlock Spin attack & Launch Star usage early", cX0 + 14.0f * uiScale, r2Y + 34.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+
+                        bool isSpinUnlocked = (port_is_spin_unlocked() != 0);
+                        float sBtnW = isSpinUnlocked ? 96.0f * uiScale : 90.0f * uiScale;
+                        Color sBtnBg = isSpinUnlocked ? rgba(0.14f, 0.48f, 0.26f, 0.95f) : rgba(0.043f, 0.341f, 0.816f, 1.0f);
+                        Color sBtnTxt = isSpinUnlocked ? rgba(0.85f, 1.0f, 0.88f, 1.0f) : rgba(1.0f, 1.0f, 1.0f, 1.0f);
+                        drawRoundRect(cX1 - sBtnW - 14.0f * uiScale, r2Y + 6.0f * uiScale, cX1 - 14.0f * uiScale, r2Y + 6.0f * uiScale + btnH, 16.0f * uiScale, sBtnBg);
+                        drawText(isSpinUnlocked ? "Unlocked" : "Unlock Spin", cX1 - 14.0f * uiScale - sBtnW * 0.5f, r2Y + 26.0f * uiScale, 0.33f * uiScale, sBtnTxt, 1);
+                    });
+
+                    // Card 4: System Info
+                    renderCardBlock(560.0f * uiScale, 80.0f * uiScale, [&](float y) {
+                        drawCard(cX0, y, cX1, y + 80.0f * uiScale, 18.0f * uiScale, rgba(0.165f, 0.180f, 0.215f, 0.95f), cCardBorder);
+
+                        drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "GalaxyMobile+ v0.5.0", rgba(0.38f, 0.28f, 0.08f, 0.95f), rgba(1.0f, 0.88f, 0.40f, 1.0f), rgba(0.988f, 0.827f, 0.302f, 1.0f));
+                        drawText("All-Star Edition • Native ARM64 • Vulkan/GLES3", cX0 + 16.0f * uiScale, y + 54.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                        drawText("Mods take effect in real-time during live gameplay.", cX0 + 16.0f * uiScale, y + 68.0f * uiScale, 0.24f * uiScale, rgba(0.55f, 0.60f, 0.70f, 0.75f), 0);
+                    });
+                } else {
+                    // Vanilla Edition System Tab
+                    // Card 1: Game Storage & Cooker Setup
+                    renderCardBlock(6.0f * uiScale, 126.0f * uiScale, [&](float y) {
+                        drawCard(cX0, y, cX1, y + 126.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+
+                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
+                        drawText("GAME STORAGE & DUMP SETUP", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+
+                        bool hasData = (port_has_game_data() != 0);
+                        if (hasData) {
+                            drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Ready (/sdcard/GalaxyData)", rgba(0.12f, 0.32f, 0.20f, 0.90f), rgba(0.50f, 0.95f, 0.60f, 1.0f), rgba(0.290f, 0.871f, 0.502f, 1.0f));
+                        } else {
+                            drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Missing - Setup Required", rgba(0.35f, 0.28f, 0.10f, 0.90f), rgba(1.0f, 0.85f, 0.40f, 1.0f), rgba(0.984f, 0.749f, 0.141f, 1.0f));
+                        }
+                        drawText("Select .rvz, .wbfs, .iso or .zip to install or re-cook.", cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+
+                        float btnY = y + 84.0f * uiScale;
+                        drawRoundRect(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + 34.0f * uiScale, 16.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 0.95f));
+                        drawText("OPEN GAME INSTALLER & COOKER", (cX0 + cX1) * 0.5f, btnY + 22.0f * uiScale, 0.34f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                    });
+
+                    // Card 2: GalaxyMobile+ All-Star Edition Upgrade
+                    renderCardBlock(140.0f * uiScale, 126.0f * uiScale, [&](float y) {
+                        drawCard(cX0, y, cX1, y + 126.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+
+                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, rgba(0.988f, 0.827f, 0.302f, 1.0f));
+                        drawText("GALAXYMOBILE+ ALL-STAR EDITION", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, rgba(0.988f, 0.827f, 0.302f, 1.0f), 0);
 
                         bool plusInstalled = (port_is_plus_installed() != 0);
                         if (plusInstalled) {
-                            drawText("Status: Installed on device", cX0 + 12.0f * uiScale, y + 34.0f * uiScale, 0.28f * uiScale, rgba(0.20f, 0.85f, 0.45f, 1.0f), 0);
-                            drawText("GalaxyMobile+ is ready to launch.", cX0 + 12.0f * uiScale, y + 47.0f * uiScale, 0.24f * uiScale, rgba(0.72f, 0.76f, 0.82f, 0.80f), 0);
+                            drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Installed on Device", rgba(0.12f, 0.32f, 0.20f, 0.90f), rgba(0.50f, 0.95f, 0.60f, 1.0f), rgba(0.290f, 0.871f, 0.502f, 1.0f));
                         } else {
-                            drawText("Status: Bundled Installer Ready", cX0 + 12.0f * uiScale, y + 34.0f * uiScale, 0.28f * uiScale, rgba(0.98f, 0.75f, 0.20f, 1.0f), 0);
-                            drawText("Includes Graphics Presets, HD UI & Cheats.", cX0 + 12.0f * uiScale, y + 47.0f * uiScale, 0.24f * uiScale, rgba(0.72f, 0.76f, 0.82f, 0.80f), 0);
+                            drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Bundled APK Ready (v0.5.0)", rgba(0.35f, 0.28f, 0.10f, 0.90f), rgba(1.0f, 0.85f, 0.40f, 1.0f), rgba(0.984f, 0.749f, 0.141f, 1.0f));
                         }
+                        drawText("Includes Graphics Presets, HD UI, Cheats & Galaxy Warp.", cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
 
-                        float bX0 = cX0 + 12.0f * uiScale;
-                        float bX1 = cX1 - 12.0f * uiScale;
-                        float bY0 = y + 54.0f * uiScale;
-                        float bY1 = y + 82.0f * uiScale;
-                        drawRoundRect(bX0, bY0, bX1, bY1, 10.0f * uiScale, plusInstalled ? rgba(0.18f, 0.55f, 0.35f, 0.95f) : rgba(0.48f, 0.25f, 0.85f, 0.95f));
-                        const char* btnTxt = plusInstalled ? "OPEN GALAXYMOBILE+" : "INSTALL GALAXYMOBILE+";
-                        drawText(btnTxt, (bX0 + bX1) * 0.5f, bY0 + 18.0f * uiScale, 0.34f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                        float btnY = y + 84.0f * uiScale;
+                        Color pBtnBg = plusInstalled ? rgba(0.14f, 0.48f, 0.26f, 0.95f) : rgba(0.38f, 0.20f, 0.68f, 0.95f);
+                        drawRoundRect(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + 34.0f * uiScale, 16.0f * uiScale, pBtnBg);
+                        const char* pBtnTxt = plusInstalled ? "OPEN GALAXYMOBILE+" : "INSTALL GALAXYMOBILE+";
+                        drawText(pBtnTxt, (cX0 + cX1) * 0.5f, btnY + 22.0f * uiScale, 0.34f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                    });
+
+                    // Card 3: Vibration & Haptics
+                    renderCardBlock(274.0f * uiScale, 88.0f * uiScale, [&](float y) {
+                        drawCard(cX0, y, cX1, y + 88.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+
+                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
+                        drawText("VIBRATION & HAPTICS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+
+                        float r1Y = y + 34.0f * uiScale;
+                        drawText("Haptic Feedback", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
+                        drawText("Tactile vibration response on touch controls", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                        drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimHaptics);
+                    });
+
+                    // Card 4: System Info
+                    renderCardBlock(370.0f * uiScale, 80.0f * uiScale, [&](float y) {
+                        drawCard(cX0, y, cX1, y + 80.0f * uiScale, 18.0f * uiScale, rgba(0.165f, 0.180f, 0.215f, 0.95f), cCardBorder);
+
+                        drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "GalaxyMobile v0.5.0", rgba(0.10f, 0.28f, 0.44f, 0.90f), rgba(0.40f, 0.85f, 1.0f, 1.0f), cHeader);
+                        drawText("Vanilla Edition • Native ARM64 • Vulkan/GLES3", cX0 + 16.0f * uiScale, y + 54.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                        drawText("Optimized for all Android 11+ Snapdragon & Dimensity chipsets.", cX0 + 16.0f * uiScale, y + 68.0f * uiScale, 0.24f * uiScale, rgba(0.55f, 0.60f, 0.70f, 0.75f), 0);
                     });
                 }
-            } else if (mSettingsTab == 1) {
-                // Graphics Tab Settings Items
-                auto renderRow = [&](float relY, float rowH, auto func) {
-                    float drawY = contentTop + relY - mDrawerScrollY;
-                    if (drawY + rowH >= contentTop - 12.0f && drawY <= contentBottom + 12.0f) {
-                        func(drawY);
-                    }
-                };
-
-                // Section Header: GAME RESOLUTION
-                renderRow(6.0f * uiScale, 28.0f * uiScale, [&](float y) {
-                    drawText("GAME RESOLUTION", drawerX + padX, y + 18.0f * uiScale, 0.34f * uiScale, rgba(0.40f, 0.75f, 1.0f, 0.95f), 0);
-                });
-
-                // Row 1: 4-way Preset Segmented Button (Low, Medium, High [Default], Ultra)
-                renderRow(38.0f * uiScale, 60.0f * uiScale, [&](float y) {
-                    float cX0 = drawerX + padX;
-                    float cX1 = drawerX + drawerW - padX;
-                    drawRoundRect(cX0, y, cX1, y + 54.0f * uiScale, 14.0f * uiScale, rgba(0.13f, 0.18f, 0.28f, 0.95f));
-                    drawRoundRect(cX0, y, cX1, y + 54.0f * uiScale, 14.0f * uiScale, rgba(0.28f, 0.45f, 0.72f, 0.65f));
-
-                    static const char* kPresetNames[4] = { "Low", "Medium", "High", "Ultra" };
-                    float segStartX = cX0 + 8.0f * uiScale;
-                    float segW = (contentW - 16.0f * uiScale - 9.0f * uiScale) / 4.0f;
-                    float segH = 38.0f * uiScale;
-                    float segY = y + 8.0f * uiScale;
-
-                    for (int p = 0; p < 4; p++) {
-                        float sX0 = segStartX + p * (segW + 3.0f * uiScale);
-                        float sX1 = sX0 + segW;
-                        bool isSel = (mSettings.graphicsPreset == p);
-                        Color bg = isSel ? rgba(0.043f, 0.341f, 0.816f, 1.0f) : rgba(0.18f, 0.22f, 0.30f, 0.80f);
-                        Color txt = isSel ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.70f, 0.75f, 0.85f, 0.85f);
-                        drawRoundRect(sX0, segY, sX1, segY + segH, 10.0f * uiScale, bg);
-                        drawText(kPresetNames[p], (sX0 + sX1) * 0.5f, segY + 24.0f * uiScale, 0.33f * uiScale, txt, 1);
-                    }
-                });
-
-                // Row 2: HD UI & HUD Textures Switch (Super Mario 3D All-Stars)
-                renderRow(106.0f * uiScale, 50.0f * uiScale, [&](float y) {
-                    drawText("HD UI & HUD (3D All-Stars)", drawerX + padX, y + 20.0f * uiScale, 0.40f * uiScale, rgba(0.902f, 0.906f, 0.922f, 1.0f), 0);
-                    drawText("Crisp 1080p native text, icons & health meter", drawerX + padX, y + 36.0f * uiScale, 0.28f * uiScale, rgba(0.761f, 0.776f, 0.812f, 0.85f), 0);
-                    drawM3Switch(drawerX + drawerW - padX - swW, y + 10.0f * uiScale, swW, swH, mSettings.hdUiTextures);
-                });
-
-                // Row 3: Active Target Resolution Card
-                renderRow(166.0f * uiScale, 78.0f * uiScale, [&](float y) {
-                    float cX0 = drawerX + padX;
-                    float cX1 = drawerX + drawerW - padX;
-                    drawRoundRect(cX0, y, cX1, y + 70.0f * uiScale, 14.0f * uiScale, rgba(0.13f, 0.18f, 0.28f, 0.95f));
-                    drawRoundRect(cX0, y, cX1, y + 70.0f * uiScale, 14.0f * uiScale, rgba(0.28f, 0.45f, 0.72f, 0.65f));
-
-                    const char* pRes = "Resolution: 1080p FHD (1920x1080 - Default)";
-                    Color tagCol = rgba(0.38f, 0.74f, 0.98f, 1.0f);
-                    if (mSettings.graphicsPreset == 0) {
-                        pRes = "Resolution: 720p HD (1280x720 - Battery Saver)";
-                        tagCol = rgba(0.40f, 0.85f, 0.50f, 1.0f);
-                    } else if (mSettings.graphicsPreset == 1) {
-                        pRes = "Resolution: 900p HD+ (1600x900 - Performance)";
-                        tagCol = rgba(0.95f, 0.80f, 0.35f, 1.0f);
-                    } else if (mSettings.graphicsPreset == 3) {
-                        pRes = "Resolution: Native Display (1440p+ QHD+)";
-                        tagCol = rgba(0.98f, 0.55f, 0.95f, 1.0f);
-                    }
-
-                    drawText("ACTIVE RESOLUTION", cX0 + 16.0f * uiScale, y + 22.0f * uiScale, 0.32f * uiScale, tagCol, 0);
-                    drawText(pRes, cX0 + 16.0f * uiScale, y + 42.0f * uiScale, 0.30f * uiScale, rgba(0.92f, 0.95f, 1.0f, 0.95f), 0);
-                    drawText("Directly changes internal 3D rendering resolution.", cX0 + 16.0f * uiScale, y + 58.0f * uiScale, 0.26f * uiScale, rgba(0.72f, 0.78f, 0.88f, 0.80f), 0);
-                });
-            } else {
-                // Advanced Tab Settings Items (Gameplay Mods + Warp Menu Card + Save State Card)
-                auto renderRow = [&](float relY, float rowH, auto func) {
-                    float drawY = contentTop + relY - mDrawerScrollY;
-                    if (drawY + rowH >= contentTop - 12.0f && drawY <= contentBottom + 12.0f) {
-                        func(drawY);
-                    }
-                };
-
-                // Section Header: ADVANCED MODS
-                renderRow(10.0f * uiScale, 30.0f * uiScale, [&](float y) {
-                    drawText("GAMEPLAY MODIFICATIONS", drawerX + padX, y + 18.0f * uiScale, 0.35f * uiScale, rgba(0.40f, 0.75f, 1.0f, 0.95f), 0);
-                });
-
-                // Mod 1: Cutscene Prevention Switch
-                renderRow(46.0f * uiScale, 50.0f * uiScale, [&](float y) {
-                    drawText("Skip Cutscenes", drawerX + padX, y + 20.0f * uiScale, 0.40f * uiScale, rgba(0.902f, 0.906f, 0.922f, 1.0f), 0);
-                    drawText("Bypass intro & story event scenes", drawerX + padX, y + 36.0f * uiScale, 0.28f * uiScale, rgba(0.761f, 0.776f, 0.812f, 0.85f), 0);
-                    drawM3Switch(drawerX + drawerW - padX - swW, y + 10.0f * uiScale, swW, swH, mSettings.modSkipCutscenes);
-                });
-
-                // Mod 2: Infinite Health Switch
-                renderRow(98.0f * uiScale, 50.0f * uiScale, [&](float y) {
-                    drawText("Infinite Health", drawerX + padX, y + 20.0f * uiScale, 0.40f * uiScale, rgba(0.902f, 0.906f, 0.922f, 1.0f), 0);
-                    drawText("Invulnerable Mario (max 6 HP locked)", drawerX + padX, y + 36.0f * uiScale, 0.28f * uiScale, rgba(0.761f, 0.776f, 0.812f, 0.85f), 0);
-                    drawM3Switch(drawerX + drawerW - padX - swW, y + 10.0f * uiScale, swW, swH, mSettings.modInfiniteHealth);
-                });
-
-                // Mod 3: Infinite Power-Up Duration Switch
-                renderRow(150.0f * uiScale, 50.0f * uiScale, [&](float y) {
-                    drawText("Infinite Power-Up Duration", drawerX + padX, y + 20.0f * uiScale, 0.40f * uiScale, rgba(0.902f, 0.906f, 0.922f, 1.0f), 0);
-                    drawText("Never lose Fire, Bee, Boo, Ice timer", drawerX + padX, y + 36.0f * uiScale, 0.28f * uiScale, rgba(0.761f, 0.776f, 0.812f, 0.85f), 0);
-                    drawM3Switch(drawerX + drawerW - padX - swW, y + 10.0f * uiScale, swW, swH, mSettings.modInfinitePowerup);
-                });
-
-                // Mod 4: Advanced Haptic Feedback Switch
-                renderRow(202.0f * uiScale, 50.0f * uiScale, [&](float y) {
-                    drawText("Advanced Haptic Feedback", drawerX + padX, y + 20.0f * uiScale, 0.40f * uiScale, rgba(0.902f, 0.906f, 0.922f, 1.0f), 0);
-                    drawText("Tactile button clicks & rumble vibration", drawerX + padX, y + 36.0f * uiScale, 0.28f * uiScale, rgba(0.761f, 0.776f, 0.812f, 0.85f), 0);
-                    drawM3Switch(drawerX + drawerW - padX - swW, y + 10.0f * uiScale, swW, swH, mSettings.modAdvancedHaptics);
-                });
-
-                // Mod 5: Live Power-Up Switcher Card
-                renderRow(256.0f * uiScale, 140.0f * uiScale, [&](float y) {
-                    float cX0 = drawerX + padX;
-                    float cX1 = drawerX + drawerW - padX;
-                    drawRoundRect(cX0, y, cX1, y + 136.0f * uiScale, 14.0f * uiScale, rgba(0.13f, 0.18f, 0.28f, 0.95f));
-                    drawRoundRect(cX0, y, cX1, y + 136.0f * uiScale, 14.0f * uiScale, rgba(0.28f, 0.45f, 0.72f, 0.65f));
-
-                    drawText("Live Power-Up Switcher", cX0 + 14.0f * uiScale, y + 20.0f * uiScale, 0.38f * uiScale, rgba(0.92f, 0.95f, 1.0f, 1.0f), 0);
-                    drawText("Tap to morph player form instantly", cX0 + 14.0f * uiScale, y + 36.0f * uiScale, 0.26f * uiScale, rgba(0.68f, 0.78f, 0.92f, 0.85f), 0);
-
-                    int curMode = port_get_current_powerup();
-                    struct PowerupItem {
-                        const char* label;
-                        int type;
-                        int playerMode;
-                    };
-                    static const PowerupItem kPowerupGrid[3][3] = {
-                        { {"Normal", 0, 0}, {"Fire", 5, 2}, {"Ice", 4, 3} },
-                        { {"Bee", 2, 4}, {"Flying", 6, 7}, {"Rainbow", 7, 1} },
-                        { {"Boo", 3, 6}, {"Spring", 1, 5}, {"+Life 6HP", 10, -1} }
-                    };
-
-                    float pStartX = cX0 + 8.0f * uiScale;
-                    float pillW = (contentW - 16.0f * uiScale - 10.0f * uiScale) / 3.0f;
-                    float pillH = 28.0f * uiScale;
-                    float pillGapY = 4.0f * uiScale;
-
-                    for (int r = 0; r < 3; r++) {
-                        for (int c = 0; c < 3; c++) {
-                            const auto& item = kPowerupGrid[r][c];
-                            float px0 = pStartX + c * (pillW + 5.0f * uiScale);
-                            float px1 = px0 + pillW;
-                            float py0 = y + 44.0f * uiScale + r * (pillH + pillGapY);
-                            float py1 = py0 + pillH;
-                            bool isActive = (item.playerMode >= 0 && curMode == item.playerMode);
-
-                            Color pBg = isActive ? rgba(0.043f, 0.341f, 0.816f, 1.0f) : rgba(0.18f, 0.22f, 0.30f, 0.90f);
-                            Color pTxt = isActive ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.78f, 0.82f, 0.90f, 0.90f);
-                            drawRoundRect(px0, py0, px1, py1, 8.0f * uiScale, pBg);
-                            drawText(item.label, (px0 + px1) * 0.5f, py0 + 19.0f * uiScale, 0.30f * uiScale, pTxt, 1);
-                        }
-                    }
-                });
-
-                // Mod 6: Galaxy Warp Menu Entry Card
-                renderRow(402.0f * uiScale, 60.0f * uiScale, [&](float y) {
-                    float cX0 = drawerX + padX;
-                    float cX1 = drawerX + drawerW - padX;
-                    drawRoundRect(cX0, y, cX1, y + 54.0f * uiScale, 14.0f * uiScale, rgba(0.13f, 0.18f, 0.28f, 0.95f));
-                    drawRoundRect(cX0, y, cX1, y + 54.0f * uiScale, 14.0f * uiScale, rgba(0.28f, 0.45f, 0.72f, 0.65f));
-                    drawText("Galaxy Warp Menu", cX0 + 14.0f * uiScale, y + 20.0f * uiScale, 0.38f * uiScale, rgba(0.92f, 0.95f, 1.0f, 1.0f), 0);
-                    drawText("Instant stage & scenario select", cX0 + 14.0f * uiScale, y + 38.0f * uiScale, 0.28f * uiScale, rgba(0.68f, 0.78f, 0.92f, 0.85f), 0);
-
-                    float btnW = 74.0f * uiScale;
-                    float btnH = 32.0f * uiScale;
-                    float btnX0 = cX1 - btnW - 12.0f * uiScale;
-                    float btnY0 = y + 11.0f * uiScale;
-                    drawRoundRect(btnX0, btnY0, btnX0 + btnW, btnY0 + btnH, 14.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 1.0f));
-                    drawText("Open", btnX0 + btnW * 0.5f, btnY0 + 21.0f * uiScale, 0.35f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
-                });
-
-                // Mod 7: Early Spin Ability Card
-                renderRow(466.0f * uiScale, 60.0f * uiScale, [&](float y) {
-                    float cX0 = drawerX + padX;
-                    float cX1 = drawerX + drawerW - padX;
-                    drawRoundRect(cX0, y, cX1, y + 54.0f * uiScale, 14.0f * uiScale, rgba(0.13f, 0.18f, 0.28f, 0.95f));
-                    drawRoundRect(cX0, y, cX1, y + 54.0f * uiScale, 14.0f * uiScale, rgba(0.28f, 0.45f, 0.72f, 0.65f));
-
-                    drawText("Early Spin Ability", cX0 + 14.0f * uiScale, y + 20.0f * uiScale, 0.38f * uiScale, rgba(0.92f, 0.95f, 1.0f, 1.0f), 0);
-                    drawText("Unlock Spin attack & Launch Star usage", cX0 + 14.0f * uiScale, y + 38.0f * uiScale, 0.28f * uiScale, rgba(0.68f, 0.78f, 0.92f, 0.85f), 0);
-
-                    bool isSpinUnlocked = (port_is_spin_unlocked() != 0);
-                    float btnW = isSpinUnlocked ? 88.0f * uiScale : 74.0f * uiScale;
-                    float btnH = 32.0f * uiScale;
-                    float btnX0 = cX1 - btnW - 12.0f * uiScale;
-                    float btnY0 = y + 11.0f * uiScale;
-                    Color btnBg = isSpinUnlocked ? rgba(0.14f, 0.48f, 0.26f, 0.95f) : rgba(0.043f, 0.341f, 0.816f, 1.0f);
-                    Color btnTxt = isSpinUnlocked ? rgba(0.85f, 1.0f, 0.88f, 1.0f) : rgba(1.0f, 1.0f, 1.0f, 1.0f);
-                    drawRoundRect(btnX0, btnY0, btnX0 + btnW, btnY0 + btnH, 14.0f * uiScale, btnBg);
-                    drawText(isSpinUnlocked ? "Unlocked" : "Unlock", btnX0 + btnW * 0.5f, btnY0 + 21.0f * uiScale, 0.34f * uiScale, btnTxt, 1);
-                });
-
-                // Info Card
-                renderRow(532.0f * uiScale, 84.0f * uiScale, [&](float y) {
-                    drawRoundRect(drawerX + padX, y + 6.0f * uiScale, drawerX + drawerW - padX, y + 80.0f * uiScale, 14.0f * uiScale, rgba(0.14f, 0.17f, 0.22f, 0.95f));
-                    drawRoundRect(drawerX + padX, y + 6.0f * uiScale, drawerX + drawerW - padX, y + 80.0f * uiScale, 14.0f * uiScale, rgba(0.24f, 0.32f, 0.45f, 0.60f));
-                    drawText("MOD STATUS", drawerX + padX + 16.0f * uiScale, y + 26.0f * uiScale, 0.32f * uiScale, rgba(0.38f, 0.74f, 0.98f, 0.95f), 0);
-                    drawText("Mods take effect in real-time during gameplay.", drawerX + padX + 16.0f * uiScale, y + 44.0f * uiScale, 0.27f * uiScale, rgba(0.80f, 0.84f, 0.90f, 0.85f), 0);
-                    drawText("Turn toggles ON to activate each special ability.", drawerX + padX + 16.0f * uiScale, y + 62.0f * uiScale, 0.27f * uiScale, rgba(0.80f, 0.84f, 0.90f, 0.85f), 0);
-                });
             }
 
             // Scrollbar Thumb (rendered inside content area)
@@ -2235,49 +2399,58 @@ void UIOverlay::render(int screenW, int screenH) {
             }
 
             // Fixed Top Header & Tab Bar Mask Overlay
-            drawRoundRect(drawerX - 60.0f, 0.0f, drawerX + drawerW, contentTop, 0.0f, rgba(0.106f, 0.114f, 0.137f, 1.0f));
+            drawRoundRect(drawerX - 60.0f, 0.0f, drawerX + drawerW, contentTop, 0.0f, rgba(0.094f, 0.102f, 0.125f, 1.0f));
 
             // Header Title & Cogwheel
-            drawCogwheel(drawerX + padX + 16.0f * uiScale, 36.0f * uiScale, 15.0f * uiScale, rgba(0.659f, 0.780f, 0.980f, 1.0f), cogRot);
-            drawText(mPlusEdition ? "GalaxyMobile+" : "Settings", drawerX + padX + 40.0f * uiScale, 44.0f * uiScale, 0.54f * uiScale, rgba(0.902f, 0.906f, 0.922f, 1.0f), 0);
+            drawCogwheel(drawerX + padX + 16.0f * uiScale, 36.0f * uiScale, 15.0f * uiScale, cHeader, cogRot);
+            const char* appTitle = mPlusEdition ? "GalaxyMobile+" : "GalaxyMobile";
+            drawText(appTitle, drawerX + padX + 40.0f * uiScale, 44.0f * uiScale, 0.52f * uiScale, cTextPrimary, 0);
+
+            // Version chip pill badge next to title
+            float strW = 0.0f;
+            for (const char* p = appTitle; *p; p++) {
+                char ch = *p;
+                if (ch >= 32 && ch < 127) strW += (face.glyphs[ch - 32].advance * 0.25f) * (0.52f * uiScale);
+            }
+            float vChipX = drawerX + padX + 46.0f * uiScale + strW;
+            drawRoundRect(vChipX, 26.0f * uiScale, vChipX + 54.0f * uiScale, 48.0f * uiScale, 11.0f * uiScale, rgba(0.18f, 0.24f, 0.35f, 0.85f));
+            drawText("v0.5.0", vChipX + 27.0f * uiScale, 42.0f * uiScale, 0.30f * uiScale, cHeader, 1);
 
             // Close [X] circular tonal button
             float closeBtnX = drawerX + drawerW - 36.0f * uiScale;
             float closeBtnY = 36.0f * uiScale;
-            drawCircle(closeBtnX, closeBtnY, 17.0f * uiScale, rgba(0.188f, 0.196f, 0.224f, 0.95f));
+            drawCircle(closeBtnX, closeBtnY, 18.0f * uiScale, rgba(0.188f, 0.196f, 0.224f, 0.95f));
             drawCloseIcon(closeBtnX, closeBtnY, 9.0f * uiScale, rgba(0.761f, 0.776f, 0.812f, 0.95f));
 
-            if (mPlusEdition) {
-                // Material 3 Tab Dock ([ General ]  [ Graphics ]  [ Advanced ])
-                float tabBoxY0 = 62.0f * uiScale;
-                float tabBoxY1 = 98.0f * uiScale;
-                drawRoundRect(drawerX + padX, tabBoxY0, drawerX + drawerW - padX, tabBoxY1, 18.0f * uiScale, rgba(0.149f, 0.160f, 0.190f, 0.95f));
-                drawRoundRect(drawerX + padX, tabBoxY0, drawerX + drawerW - padX, tabBoxY1, 18.0f * uiScale, rgba(0.24f, 0.26f, 0.30f, 0.50f));
+            // Material 3 Tab Dock ([ Controls ]  [ Display ]  [ System / Advanced ])
+            float tabBoxY0 = 62.0f * uiScale;
+            float tabBoxY1 = 102.0f * uiScale;
+            drawRoundRect(drawerX + padX, tabBoxY0, drawerX + drawerW - padX, tabBoxY1, 20.0f * uiScale, rgba(0.141f, 0.153f, 0.180f, 0.95f));
+            drawRoundRect(drawerX + padX, tabBoxY0, drawerX + drawerW - padX, tabBoxY1, 20.0f * uiScale, rgba(0.271f, 0.286f, 0.322f, 0.45f));
 
-                float tabW = contentW / 3.0f;
-                static const char* kTabTitles[3] = { "General", "Graphics", "Advanced" };
-                for (int t = 0; t < 3; t++) {
-                    float tX0 = drawerX + padX + t * tabW + 2.0f * uiScale;
-                    float tX1 = drawerX + padX + (t + 1) * tabW - 2.0f * uiScale;
-                    float tMidX = (tX0 + tX1) * 0.5f;
-                    if (mSettingsTab == t) {
-                        drawRoundRect(tX0, tabBoxY0 + 2.0f * uiScale, tX1, tabBoxY1 - 2.0f * uiScale, 16.0f * uiScale, rgba(0.14f, 0.28f, 0.48f, 0.95f));
-                        drawText(kTabTitles[t], tMidX, tabBoxY0 + 23.0f * uiScale, 0.35f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
-                    } else {
-                        drawText(kTabTitles[t], tMidX, tabBoxY0 + 23.0f * uiScale, 0.35f * uiScale, rgba(0.68f, 0.71f, 0.77f, 0.75f), 1);
-                    }
-                }
+            // Animated Sliding Pill Indicator
+            drawRoundRect(mTabIndicatorX, tabBoxY0 + 3.0f * uiScale, mTabIndicatorX + mTabIndicatorW, tabBoxY1 - 3.0f * uiScale, 17.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 0.95f));
 
-                // Divider below tab bar
-                drawRoundRect(drawerX + padX, contentTop - 1.0f, drawerX + drawerW - padX, contentTop, 0.5f, rgba(0.267f, 0.278f, 0.310f, 0.45f));
-            } else {
-                // Divider below header in standard edition
-                drawRoundRect(drawerX + padX, contentTop - 1.0f, drawerX + drawerW - padX, contentTop, 0.5f, rgba(0.267f, 0.278f, 0.310f, 0.45f));
+            const char* kTabTitles[3];
+            kTabTitles[0] = "Controls";
+            kTabTitles[1] = "Display";
+            kTabTitles[2] = mPlusEdition ? "Advanced" : "System";
+
+            for (int t = 0; t < 3; t++) {
+                float tX0 = drawerX + padX + t * tabW;
+                float tX1 = tX0 + tabW;
+                float tMidX = (tX0 + tX1) * 0.5f;
+                bool isSel = (mSettingsTab == t);
+                Color tCol = isSel ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.720f, 0.745f, 0.784f, 0.75f);
+                drawText(kTabTitles[t], tMidX, tabBoxY0 + 26.0f * uiScale, 0.35f * uiScale, tCol, 1);
             }
 
+            // Divider below tab bar
+            drawRoundRect(drawerX + padX, contentTop - 1.0f, drawerX + drawerW - padX, contentTop, 0.5f, cDivider);
+
             // Fixed Bottom Bar Mask Overlay & [ Done ] Button
-            drawRoundRect(drawerX - 60.0f, contentBottom, drawerX + drawerW, h, 0.0f, rgba(0.106f, 0.114f, 0.137f, 1.0f));
-            drawRoundRect(drawerX + padX, contentBottom, drawerX + drawerW - padX, contentBottom + 1.0f, 0.5f, rgba(0.267f, 0.278f, 0.310f, 0.45f));
+            drawRoundRect(drawerX - 60.0f, contentBottom, drawerX + drawerW, h, 0.0f, rgba(0.094f, 0.102f, 0.125f, 1.0f));
+            drawRoundRect(drawerX + padX, contentBottom, drawerX + drawerW - padX, contentBottom + 1.0f, 0.5f, cDivider);
 
             float doneY = h - 48.0f * uiScale;
             float doneX0 = drawerX + padX;

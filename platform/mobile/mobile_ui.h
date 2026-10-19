@@ -82,7 +82,7 @@ private:
     float mInitialDpadOfsX = 0.0f, mInitialDpadOfsY = 0.0f;
 
     // Settings Navigation & Scrolling
-    int mSettingsTab = 0;              // 0 = General, 1 = Advanced
+    int mSettingsTab = 0;              // 0 = Controls, 1 = Display, 2 = System/Advanced
     float mDrawerScrollY = 0.0f;       // Current scroll offset (pixels)
     float mDrawerScrollTarget = 0.0f;
     bool mDrawerIsScrolling = false;
@@ -90,6 +90,22 @@ private:
     float mDrawerTouchStartY = 0.0f;
     float mDrawerTouchStartX = 0.0f;
     float mDrawerScrollStartOffset = 0.0f;
+
+    // Fluid M3 Tab Indicator Animation
+    float mTabIndicatorX = 0.0f;
+    float mTabIndicatorW = 0.0f;
+    float mTabTargetX = 0.0f;
+    float mTabTargetW = 0.0f;
+
+    // Fluid M3 Switch Knob Animations (0.0 = OFF, 1.0 = ON)
+    float mSwAnimShowControls = 1.0f;
+    float mSwAnimShowDpad = 1.0f;
+    float mSwAnimFullscreen = 0.0f;
+    float mSwAnimHdUi = 1.0f;
+    float mSwAnimSkipCutscenes = 0.0f;
+    float mSwAnimInfiniteHp = 0.0f;
+    float mSwAnimInfinitePowerup = 0.0f;
+    float mSwAnimHaptics = 0.0f;
 
     // Warp Menu Sub-View (Plus Edition)
     bool mWarpMenuOpen = false;
