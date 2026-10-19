@@ -19,7 +19,7 @@
     <!-- debuggable + extractNativeLibs: required for wrap.sh to preload libreserve.so -->
     <application
         android:label="GalaxyMobile+"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@mipmap/ic_launcher_plus"
         android:banner="@drawable/banner"
         android:hasCode="true"
         android:debuggable="true"
