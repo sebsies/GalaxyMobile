@@ -40,7 +40,10 @@ struct FstEntry {
     u32 parent;  // dirs: parent entry
     u32 next;    // dirs: index after the last child
     std::string hostPath;
+    std::string hdPath;
+    std::string activePath;
     s64 size = -1;
+    s64 hdSize = -1;
     int fd = -1;
 };
 
@@ -249,14 +252,28 @@ static bool loadFst() {
             stack.push_back(i);
         } else {
             fe.hostPath = sDataRoot + "/files/" + full;
+            fe.activePath = fe.hostPath;
+            std::string hd = sDataRoot + "/plus_hd/" + full;
+            struct stat st;
+            if (stat(hd.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+                fe.hdPath = hd;
+                fe.hdSize = (s64)st.st_size;
+            }
         }
     }
     port_log("dvd: fst loaded, %u entries, root %s", count, sDataRoot.c_str());
     return true;
 }
 
+static std::mutex sFstMutex;
+
 static s64 entrySize(u32 entry) {
+    PortHostAllocScope scope;
+    std::lock_guard<std::mutex> lk(sFstMutex);
     FstEntry& fe = sFst[entry];
+    if (port_is_hd_ui_enabled() && !fe.hdPath.empty()) {
+        return fe.hdSize;
+    }
     if (fe.size < 0) {
         struct stat st;
         fe.size = (stat(fe.hostPath.c_str(), &st) == 0) ? (s64)st.st_size : 0;
@@ -333,11 +350,21 @@ static DVDCommandBlock* sActive = nullptr;     // being read by the worker
 static OSThreadQueue sSyncQueue;
 
 static int openEntry(u32 entry) {
+    PortHostAllocScope scope;
+    std::lock_guard<std::mutex> lk(sFstMutex);
     FstEntry& fe = sFst[entry];
+    const std::string& neededPath = (port_is_hd_ui_enabled() && !fe.hdPath.empty()) ? fe.hdPath : fe.hostPath;
+    if (fe.fd >= 0 && fe.activePath != neededPath) {
+        close(fe.fd);
+        fe.fd = -1;
+    }
     if (fe.fd < 0) {
-        fe.fd = open(fe.hostPath.c_str(), O_RDONLY | O_CLOEXEC);
+        fe.activePath = neededPath;
+        fe.fd = open(neededPath.c_str(), O_RDONLY | O_CLOEXEC);
         if (fe.fd < 0) {
-            port_log("dvd: open %s failed: %s", fe.hostPath.c_str(), strerror(errno));
+            port_log("dvd: open %s failed: %s", neededPath.c_str(), strerror(errno));
+        } else if (!fe.hdPath.empty() && neededPath == fe.hdPath) {
+            port_log("dvd: [Plus HD] loaded %s", neededPath.c_str());
         }
     }
     return fe.fd;
@@ -440,6 +467,7 @@ void DVDInit(void) {
 }
 
 BOOL DVDFastOpen(s32 entrynum, DVDFileInfo* fileInfo) {
+    PortHostAllocScope scope;
     if (entrynum < 0 || (u32)entrynum >= sFst.size() || sFst[entrynum].isDir) {
         return FALSE;
     }
@@ -452,6 +480,7 @@ BOOL DVDFastOpen(s32 entrynum, DVDFileInfo* fileInfo) {
 }
 
 BOOL DVDOpen(const char* fileName, DVDFileInfo* fileInfo) {
+    PortHostAllocScope scope;
     s32 entry = DVDConvertPathToEntrynum(fileName);
     if (entry < 0) {
         port_log("dvd: file not found: %s", fileName);

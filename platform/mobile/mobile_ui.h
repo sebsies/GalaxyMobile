@@ -22,10 +22,17 @@ struct Settings {
     float dpadOffsetX = 0.0f;
     float dpadOffsetY = 0.0f;
 
-    // Advanced Mods (off by default)
+    // Graphics Preset: 0=Low (720p), 1=Medium (900p), 2=High (1080p normal, default), 3=Ultra (Native + Shading/Reflections)
+    int graphicsPreset = 2;
+
+    // HD UI & HUD Textures (Super Mario 3D All-Stars high-res assets, ON by default in Plus)
+    bool hdUiTextures = true;
+
+    // Advanced Mods (all OFF by default, user preferences saved and restored across sessions)
     bool modSkipCutscenes = false;
     bool modInfiniteHealth = false;
     bool modInfinitePowerup = false;
+    bool modAdvancedHaptics = false;
 
     void load(const std::string& path);
     void save(const std::string& path) const;
@@ -49,6 +56,7 @@ public:
     bool needsRedraw();
     bool isSettingsOpen() const { return mSettingsOpen || mDrawerAnim > 0.01f; }
     void closeSettings();
+    void openSettings();
     Settings& settings() { return mSettings; }
     void setPlusEdition(bool plus) { mPlusEdition = plus; }
     bool isPlusEdition() const { return mPlusEdition; }
@@ -114,6 +122,8 @@ private:
     bool mBtnDpadRight = false;
     bool mBtnDpadUp = false;
     bool mBtnDpadDown = false;
+    uint32_t mPrevButtons = 0;
+    bool mPrevSpinPressed = false;
 
     // Persistent in-game Star Pointer state (normalized -1..1, default to screen center 0, 0)
     float mPointerX = 0.0f;

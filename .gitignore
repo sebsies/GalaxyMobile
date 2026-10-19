@@ -18,8 +18,10 @@ __pycache__/
 *.ciso
 cooked/
 extracted/
+hd_ui_extracted/
 movies.tar
 screen*.png
+smg_*.png
 
 # APK output
 out-mobile/apk/

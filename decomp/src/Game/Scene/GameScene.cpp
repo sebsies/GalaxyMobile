@@ -27,7 +27,10 @@
 #include "Game/Screen/OdhConverter.hpp"
 #include "Game/Screen/ScreenAlphaCapture.hpp"
 #include "Game/System/GalaxyMapController.hpp"
+#include "Game/System/GameDataFunction.hpp"
 #include "Game/System/GameSequenceFunction.hpp"
+#include "Game/Scene/ScenePlayingResult.hpp"
+#include <time.h>
 #include "Game/Camera/CameraDirector.hpp"
 #ifdef TARGET_PC
 #include "Game/Camera/CameraHolder.hpp"
@@ -183,6 +186,8 @@ void GameScene::start() {
     }
 }
 
+
+
 void GameScene::update() {
 #ifdef TARGET_PC
     {
@@ -216,6 +221,8 @@ void GameScene::update() {
             MR::requestChangeStageInGameMoving(warpStage, warpScenario);
         }
     }
+
+
     {
         // Debug: PETARI_STAGE="Galaxy[:scenario]" enters that galaxy once
         // ordinary gameplay has run for two seconds (for testing levels).

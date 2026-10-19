@@ -10,6 +10,7 @@
 #include "Game/Util/ActorSensorUtil.hpp"
 #include "Game/Util/DemoUtil.hpp"
 #include "Game/Util/EffectUtil.hpp"
+#include "Game/Util/EventUtil.hpp"
 #include "Game/Util/HashUtil.hpp"
 #include "Game/Util/LiveActorUtil.hpp"
 #include "Game/Util/MapUtil.hpp"
@@ -106,8 +107,10 @@ void MarioActor::setPlayerMode(u16 playerMode, bool myBool) {
     case 4:
         stopAnimation("\x83\x6e\x83\x60\x94\xf2\x8d\x73\x92\x86");
 
-        if (!mMario->isSwimming()) {
-            MR::getGameSceneLayoutHolder()->changeLifeMeterModeGround();
+        if (mMario && !mMario->isSwimming()) {
+            if (MR::getGameSceneLayoutHolder()) {
+                MR::getGameSceneLayoutHolder()->changeLifeMeterModeGround();
+            }
         }
 
         if (_9E4) {
@@ -217,7 +220,9 @@ void MarioActor::setPlayerMode(u16 playerMode, bool myBool) {
         }
 
         if (_4A4 != nullptr) {
-            _4A4->mHost->kill();
+            if (_4A4->mHost) {
+                _4A4->mHost->kill();
+            }
             _4A4 = nullptr;
         }
         break;
@@ -271,7 +276,9 @@ void MarioActor::setPlayerMode(u16 playerMode, bool myBool) {
         break;
 
     case 4:
-        MR::getGameSceneLayoutHolder()->changeLifeMeterModeBee();
+        if (MR::getGameSceneLayoutHolder()) {
+            MR::getGameSceneLayoutHolder()->changeLifeMeterModeBee();
+        }
 
         rushDropThrowMemoSensor();
 
@@ -343,6 +350,127 @@ void MarioActor::setPlayerMode(u16 playerMode, bool myBool) {
 
     updateHandAtMorph();
 }
+
+#ifdef TARGET_PC
+void MarioActor::applyModPowerup(int req) {
+    if (req == 10) {
+        changeMaxLife(6);
+        mHealth = 6;
+        if (MR::getGameSceneLayoutHolder()) {
+            MR::getGameSceneLayoutHolder()->requestPowerUpHPMeter();
+            MR::getGameSceneLayoutHolder()->requestForceAppearHPMeter();
+        }
+        MR::startSystemSE("SE_SY_SUPER_KINOKO_GET");
+        MR::onGameEventFlagLifeUpAtFirst();
+        mSuperKinokoCollected = false;
+        _3DA = 0;
+        return;
+    }
+
+    u16 targetMode = PlayerMode_Normal;
+    switch (req) {
+    case 0:
+    case 8:
+        targetMode = PlayerMode_Normal;
+        break;
+    case 1:
+        targetMode = PlayerMode_Hopper;
+        break;
+    case 2:
+        targetMode = PlayerMode_Bee;
+        break;
+    case 3:
+        targetMode = PlayerMode_Teresa;
+        break;
+    case 4:
+        targetMode = PlayerMode_Ice;
+        break;
+    case 5:
+        targetMode = PlayerMode_2;
+        break;
+    case 6:
+        targetMode = PlayerMode_Foo;
+        break;
+    case 7:
+        targetMode = PlayerMode_Invincible;
+        break;
+    default:
+        return;
+    }
+
+    // Mark tutorial flags so that engine first-time events / tutorial dialogs never activate
+    MR::onGameEventFlagBeeMarioAtFirst();
+    MR::onGameEventFlagFireMarioAtFirst();
+    MR::onGameEventFlagIceMarioAtFirst();
+    MR::onGameEventFlagHopperMarioAtFirst();
+    MR::onGameEventFlagTeresaMarioAtFirst();
+    MR::onGameEventFlagFlyingMarioAtFirst();
+    MR::onGameEventFlagInvincibleMarioAtFirst();
+
+    // Transition mode cleanly without playing transformation cutscene demo
+    setPlayerMode(targetMode, false);
+
+    if (mPlayerMode != targetMode && targetMode != PlayerMode_Normal) {
+        MR::startSound(this, "SE_OJ_MORPH_ITEM_INVALID");
+        mPowerupCollected = false;
+        _3D8 = 0;
+        return;
+    }
+
+    // Cancel cutscene / transformation demo states
+    mPowerupCollected = false;
+    _3D8 = 0;
+    _3DE = 0;
+    _3DF = 1;
+
+    // Apply display mode and color change immediately
+    switch (targetMode) {
+    case PlayerMode_Invincible:
+        if (mModels[4] && _9C8) {
+            changeDisplayMode(4);
+            _9C8->calcAnim();
+        } else {
+            changeDisplayMode(0);
+        }
+        break;
+    case PlayerMode_Bee:
+        if (mModels[2]) {
+            changeDisplayMode(2);
+        } else {
+            changeDisplayMode(0);
+        }
+        break;
+    case PlayerMode_Hopper:
+        if (mModels[5]) {
+            changeDisplayMode(5);
+        } else {
+            changeDisplayMode(0);
+        }
+        break;
+    case PlayerMode_Ice:
+        if (mModels[3]) {
+            changeDisplayMode(3);
+        } else {
+            changeDisplayMode(0);
+        }
+        break;
+    default:
+        changeDisplayMode(0);
+        u32 frame = 0;
+        if (targetMode == PlayerMode_Foo) {
+            frame = 1;
+        } else if (targetMode == PlayerMode_2) {
+            frame = 2;
+        }
+        MR::startBtp(this, "ColorChange");
+        MR::setBtpFrameAndStop(this, frame);
+        break;
+    }
+
+    playEffect("\x95\xcf\x90\x67");
+    MR::startSystemSE("SE_SY_POWER_UP");
+}
+#endif
 
 void MarioActor::resetPlayerModeOnDamage() {
     if (isActionOk("\x83\x5f\x83\x81\x81\x5b\x83\x57\x89\xf0\x8f\x9c")) {

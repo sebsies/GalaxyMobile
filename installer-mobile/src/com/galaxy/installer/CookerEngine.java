@@ -15,8 +15,13 @@ public class CookerEngine {
 
     static {
         try {
+            System.loadLibrary("python3.10");
+        } catch (Throwable t) {
+            Log.w(TAG, "Optional direct load of libpython3.10.so: " + t.getMessage());
+        }
+        try {
             System.loadLibrary("installer");
-        } catch (UnsatisfiedLinkError e) {
+        } catch (Throwable e) {
             Log.e(TAG, "Failed to load native library: libinstaller.so", e);
         }
     }

@@ -548,7 +548,9 @@ bool MarioActor::tryGetItem(HitSensor* pSensor) {
         break;
     case ATYPE_MORPH_ITEM:
         if (_4A4 != nullptr) {
-            _4A4->mHost->kill();
+            if (_4A4->mHost) {
+                _4A4->mHost->kill();
+            }
         }
 
         _4A4 = pSensor;

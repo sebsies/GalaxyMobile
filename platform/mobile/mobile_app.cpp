@@ -25,6 +25,7 @@
 
 #include "gx/gl_renderer.h"
 #include "mobile_ui.h"
+#include "mobile_haptics.h"
 #include "port/input.h"
 #include "port/port.h"
 
@@ -69,6 +70,7 @@ struct MobileApp {
     float stickOriginX = 0.0f;
     float stickOriginY = 0.0f;
     int spinFrames = 0;
+
 };
 
 MobileApp gMobile;
@@ -228,6 +230,33 @@ bool initEgl(MobileApp& a) {
     return true;
 }
 
+int getDesiredTargetHeight(const MobileApp& a) {
+    if (!mobile_ui::UIOverlay::get().isPlusEdition()) {
+        return (a.screenHeight > 1080) ? std::min(a.screenHeight, 1440) : 1080;
+    }
+    int preset = mobile_ui::UIOverlay::get().settings().graphicsPreset;
+    switch (preset) {
+        case 0: return 720;                                                   // Low: 720p HD
+        case 1: return 900;                                                   // Medium: 900p HD+
+        case 3: return std::max(1080, a.screenHeight);                        // Ultra: Native (QHD+/1440p+)
+        case 2:                                                               // High: 1080p / 1440p
+        default:
+            return (a.screenHeight > 1080) ? std::min(a.screenHeight, 1440) : 1080;
+    }
+}
+
+void updateViewport(MobileApp& a);
+
+static void presentGameImage(MobileApp& a) {
+    updateViewport(a);
+    // Direct high-quality blit
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, a.efbTarget.fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glBlitFramebuffer(0, 0, a.efbTarget.width, a.efbTarget.height,
+                      a.vpX, a.vpY, a.vpX + a.vpW, a.vpY + a.vpH,
+                      GL_COLOR_BUFFER_BIT, GL_LINEAR);
+}
+
 void updateViewport(MobileApp& a) {
     if (mobile_ui::get().settings().fullscreen) {
         a.vpX = 0;
@@ -285,11 +314,8 @@ bool createSurface(MobileApp& a) {
         return false;
     }
 
-    // Allocate offscreen target (aspect-matched when in fullscreen mode)
-    int targetH = 1080;
-    if (a.screenHeight > 1080) {
-        targetH = std::min(a.screenHeight, 1440);
-    }
+    // Allocate offscreen target (preset & aspect-matched when in fullscreen mode)
+    int targetH = getDesiredTargetHeight(a);
     int targetW;
     if (mobile_ui::get().settings().fullscreen) {
         float nativeAspect = (float)a.screenWidth / (float)a.screenHeight;
@@ -477,6 +503,10 @@ void onAppCmd(android_app* app, int32_t cmd) {
     case APP_CMD_RESUME:
         LOGI("APP_CMD_RESUME");
         port_set_paused(0);
+        if (!a->gameBooted && a->dataRoot.empty()) {
+            std::string ext = (a->android && a->android->activity && a->android->activity->externalDataPath) ? a->android->activity->externalDataPath : "/sdcard/Android/data/com.galaxy.mobile/files";
+            a->dataRoot = findGameData(ext);
+        }
         break;
     case APP_CMD_PAUSE:
         LOGI("APP_CMD_PAUSE");
@@ -538,6 +568,7 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
     }
 
     mobile_ui::get().setPlusEdition(isPlus);
+    mobile_haptics::init(app->activity->vm, app->activity->clazz);
     port_skip_set_hold_seconds(isPlus ? 1.0f : 0.0f);
     LOGI("GalaxyMobile edition detected: %s (internalDataPath: %s, externalPath: %s)", isPlus ? "GalaxyMobile+" : "GalaxyMobile (Standard)", internalPath.c_str(), externalPath.c_str());
 
@@ -553,6 +584,7 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
     a.dataRoot = findGameData(ext);
     if (a.dataRoot.empty()) {
         promptStoragePermissionIfMissing(app->activity);
+        mobile_ui::get().openSettings();
     }
 
     bool running = true;
@@ -578,9 +610,13 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
 
         // Boot game once window and data are available
         if (!a.gameBooted) {
+            if (a.dataRoot.empty()) {
+                a.dataRoot = findGameData(ext);
+            }
             if (!a.dataRoot.empty()) {
                 LOGI("Booting game from: %s", a.dataRoot.c_str());
                 a.gameBooted = true;
+                mobile_ui::get().closeSettings();
                 port_boot(a.dataRoot.c_str(), a.saveRoot.c_str());
             } else {
                 static int64_t lastLog = 0;
@@ -605,6 +641,7 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
             a.pad.accY = 0.0f;
         }
         port_input_set(0, &a.pad);
+        mobile_haptics::updateRumble(port_input_rumble(0));
 
 
         // Presentation & Render Loop
@@ -614,11 +651,8 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
         if (newFrame) {
             gPresentedFrames.store(r.frameNumber());
 
-            // Check if offscreen target dimensions need to change (e.g. toggled fullscreen)
-            int desiredTargetH = 1080;
-            if (a.screenHeight > 1080) {
-                desiredTargetH = std::min(a.screenHeight, 1440);
-            }
+            // Check if offscreen target dimensions need to change (e.g. toggled fullscreen or graphics preset)
+            int desiredTargetH = getDesiredTargetHeight(a);
             int desiredTargetW;
             if (mobile_ui::get().settings().fullscreen) {
                 float nativeAspect = (float)a.screenWidth / (float)a.screenHeight;
@@ -630,7 +664,7 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
                 r.destroyTarget(a.efbTarget);
                 a.efbTarget = r.createTarget(desiredTargetW, desiredTargetH);
                 updateViewport(a);
-                LOGI("Resized offscreen EfbTarget: %dx%d (fullscreen=%d)", desiredTargetW, desiredTargetH, mobile_ui::get().settings().fullscreen ? 1 : 0);
+                LOGI("Resized offscreen EfbTarget: %dx%d (fullscreen=%d, preset=%d)", desiredTargetW, desiredTargetH, mobile_ui::get().settings().fullscreen ? 1 : 0, mobile_ui::get().settings().graphicsPreset);
             }
 
             // Monoscopic rendering into offscreen target
@@ -649,15 +683,11 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
             glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
 
-            // Blit game image to viewport (pillarbox or fullscreen)
-            updateViewport(a);
-            glBindFramebuffer(GL_READ_FRAMEBUFFER, a.efbTarget.fbo);
-            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-            glBlitFramebuffer(0, 0, a.efbTarget.width, a.efbTarget.height,
-                              a.vpX, a.vpY, a.vpX + a.vpW, a.vpY + a.vpH,
-                              GL_COLOR_BUFFER_BIT, GL_LINEAR);
+            // Present game image to viewport (blitted or Ultra post-processing shader)
+            presentGameImage(a);
 
-            // Render on-screen controls HUD & Settings overlay
+            // Ensure viewport is full window for mobile UI overlay
+            glViewport(0, 0, a.screenWidth, a.screenHeight);
             mobile_ui::get().render(a.screenWidth, a.screenHeight);
 
             eglSwapBuffers(a.display, a.surface);
@@ -674,15 +704,11 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
                 glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
                 glClear(GL_COLOR_BUFFER_BIT);
 
-                updateViewport(a);
                 if (a.targetReady && r.hasFrame()) {
-                    glBindFramebuffer(GL_READ_FRAMEBUFFER, a.efbTarget.fbo);
-                    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-                    glBlitFramebuffer(0, 0, a.efbTarget.width, a.efbTarget.height,
-                                      a.vpX, a.vpY, a.vpX + a.vpW, a.vpY + a.vpH,
-                                      GL_COLOR_BUFFER_BIT, GL_LINEAR);
+                    presentGameImage(a);
                 }
 
+                glViewport(0, 0, a.screenWidth, a.screenHeight);
                 mobile_ui::get().render(a.screenWidth, a.screenHeight);
                 eglSwapBuffers(a.display, a.surface);
             } else if (!r.hasFrame()) {
@@ -701,6 +727,7 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
     }
 
     LOGI("GalaxyMobile exiting cleanly");
+    mobile_haptics::shutdown();
     destroySurface(a);
     exit(0);
 }
@@ -772,6 +799,11 @@ int port_is_infinite_powerup(void) {
     return mobile_ui::UIOverlay::get().settings().modInfinitePowerup ? 1 : 0;
 }
 
+int port_is_hd_ui_enabled(void) {
+    if (!mobile_ui::UIOverlay::get().isPlusEdition()) return 0;
+    return mobile_ui::UIOverlay::get().settings().hdUiTextures ? 1 : 0;
+}
+
 static std::mutex sPowerupMutex;
 static int sPendingPowerup = -1;
 static bool sHasPendingPowerup = false;
@@ -822,6 +854,167 @@ void port_set_spin_unlocked(int unlocked) {
 int port_is_spin_unlocked(void) {
     if (!mobile_ui::UIOverlay::get().isPlusEdition()) return 0;
     return sSpinUnlocked.load(std::memory_order_relaxed);
+}
+
+int port_has_game_data(void) {
+    if (!gMobile.dataRoot.empty()) {
+        return 1;
+    }
+    std::string ext = "";
+    if (gMobile.android && gMobile.android->activity && gMobile.android->activity->externalDataPath) {
+        ext = gMobile.android->activity->externalDataPath;
+    }
+    std::string found = findGameData(ext);
+    if (!found.empty()) {
+        gMobile.dataRoot = found;
+        return 1;
+    }
+    return 0;
+}
+
+void port_open_installer(void) {
+    if (!gMobile.android || !gMobile.android->activity) {
+        LOGE("port_open_installer: Android activity not initialized");
+        return;
+    }
+    ANativeActivity* activity = gMobile.android->activity;
+    if (!activity->vm || !activity->clazz) {
+        LOGE("port_open_installer: VM or activity clazz is null");
+        return;
+    }
+    JNIEnv* env = nullptr;
+    bool attached = false;
+    if (activity->vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
+        if (activity->vm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+            attached = true;
+        }
+    }
+    if (!env) {
+        LOGE("port_open_installer: failed to get JNIEnv");
+        return;
+    }
+
+    jclass actClass = env->GetObjectClass(activity->clazz);
+    jmethodID getPackageNameMethod = env->GetMethodID(actClass, "getPackageName", "()Ljava/lang/String;");
+    jstring pkgName = (jstring)env->CallObjectMethod(activity->clazz, getPackageNameMethod);
+
+    jclass intentClass = env->FindClass("android/content/Intent");
+    jmethodID intentCtor = env->GetMethodID(intentClass, "<init>", "()V");
+    jobject intent = env->NewObject(intentClass, intentCtor);
+
+    jmethodID setClassNameMethod = env->GetMethodID(intentClass, "setClassName", "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;");
+    jstring clsName = env->NewStringUTF("com.galaxy.installer.InstallerActivity");
+    env->CallObjectMethod(intent, setClassNameMethod, pkgName, clsName);
+
+    jmethodID startActivityMethod = env->GetMethodID(actClass, "startActivity", "(Landroid/content/Intent;)V");
+    env->CallVoidMethod(activity->clazz, startActivityMethod, intent);
+
+    if (env->ExceptionCheck()) {
+        LOGE("port_open_installer: Exception occurred while starting InstallerActivity");
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+    } else {
+        LOGI("port_open_installer: successfully launched InstallerActivity");
+    }
+
+    env->DeleteLocalRef(clsName);
+    env->DeleteLocalRef(pkgName);
+    env->DeleteLocalRef(intent);
+    env->DeleteLocalRef(intentClass);
+    env->DeleteLocalRef(actClass);
+
+    if (attached) {
+        activity->vm->DetachCurrentThread();
+    }
+}
+
+int port_is_plus_installed(void) {
+    if (!gMobile.android || !gMobile.android->activity) return 0;
+    ANativeActivity* activity = gMobile.android->activity;
+    if (!activity->vm || !activity->clazz) return 0;
+    JNIEnv* env = nullptr;
+    bool attached = false;
+    if (activity->vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
+        if (activity->vm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+            attached = true;
+        }
+    }
+    if (!env) return 0;
+
+    jclass actClass = env->GetObjectClass(activity->clazz);
+    jmethodID getPackageManagerMethod = env->GetMethodID(actClass, "getPackageManager", "()Landroid/content/pm/PackageManager;");
+    jobject pm = env->CallObjectMethod(activity->clazz, getPackageManagerMethod);
+
+    jclass pmClass = env->GetObjectClass(pm);
+    jmethodID getPackageInfoMethod = env->GetMethodID(pmClass, "getPackageInfo", "(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;");
+    jstring pkgName = env->NewStringUTF("com.galaxy.mobile.plus");
+
+    jobject pkgInfo = env->CallObjectMethod(pm, getPackageInfoMethod, pkgName, 0);
+    int installed = 0;
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        installed = 0;
+    } else if (pkgInfo != nullptr) {
+        installed = 1;
+        env->DeleteLocalRef(pkgInfo);
+    }
+
+    env->DeleteLocalRef(pkgName);
+    env->DeleteLocalRef(pmClass);
+    env->DeleteLocalRef(pm);
+    env->DeleteLocalRef(actClass);
+
+    if (attached) {
+        activity->vm->DetachCurrentThread();
+    }
+    return installed;
+}
+
+void port_install_plus(void) {
+    if (!gMobile.android || !gMobile.android->activity) return;
+    ANativeActivity* activity = gMobile.android->activity;
+    if (!activity->vm || !activity->clazz) return;
+    JNIEnv* env = nullptr;
+    bool attached = false;
+    if (activity->vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
+        if (activity->vm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+            attached = true;
+        }
+    }
+    if (!env) return;
+
+    jclass actClass = env->GetObjectClass(activity->clazz);
+    jmethodID getClassLoaderMethod = env->GetMethodID(actClass, "getClassLoader", "()Ljava/lang/ClassLoader;");
+    jobject classLoader = env->CallObjectMethod(activity->clazz, getClassLoaderMethod);
+
+    jclass clClass = env->FindClass("java/lang/ClassLoader");
+    jmethodID loadClassMethod = env->GetMethodID(clClass, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+    jstring clsName = env->NewStringUTF("com.galaxy.installer.AppInstaller");
+    jclass appInstallerClass = (jclass)env->CallObjectMethod(classLoader, loadClassMethod, clsName);
+
+    if (env->ExceptionCheck() || !appInstallerClass) {
+        LOGE("port_install_plus: failed to load AppInstaller class");
+        env->ExceptionClear();
+    } else {
+        jmethodID installMethod = env->GetStaticMethodID(appInstallerClass, "installOrOpenPlus", "(Landroid/app/Activity;)V");
+        if (installMethod) {
+            env->CallStaticVoidMethod(appInstallerClass, installMethod, activity->clazz);
+            LOGI("port_install_plus: called AppInstaller.installOrOpenPlus");
+        }
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+        env->DeleteLocalRef(appInstallerClass);
+    }
+
+    env->DeleteLocalRef(clsName);
+    env->DeleteLocalRef(clClass);
+    env->DeleteLocalRef(classLoader);
+    env->DeleteLocalRef(actClass);
+
+    if (attached) {
+        activity->vm->DetachCurrentThread();
+    }
 }
 }
 

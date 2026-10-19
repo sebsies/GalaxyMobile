@@ -449,6 +449,7 @@ public:
 
     // Defined in MarioActorMorph
     void setPlayerMode(u16, bool);
+    void applyModPowerup(int);
     void resetPlayerModeOnDamage();
     void resetPlayerModeOnNoDamage();
     void updatePlayerMode();

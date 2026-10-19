@@ -218,9 +218,13 @@ void MarioActor::calc1stPersonView() {
 }
 
 void MarioActor::hideBeeFur() {
-    if (mMario->isPlayerModeBee()) {
-        _9E8->kill();
-        _9EC->offDraw(-1);
+    if (mMario && mMario->isPlayerModeBee()) {
+        if (_9E8) {
+            _9E8->kill();
+        }
+        if (_9EC) {
+            _9EC->offDraw(-1);
+        }
     }
 
     if (getCarrySensor() != nullptr) {
@@ -934,9 +938,13 @@ bool MarioActor::drawDarkMask() const {
 }
 
 void MarioActor::showBeeFur() {
-    if (mMario->isPlayerModeBee()) {
-        _9E8->appear();
-        _9EC->onDraw(-1);
+    if (mMario && mMario->isPlayerModeBee()) {
+        if (_9E8) {
+            _9E8->appear();
+        }
+        if (_9EC) {
+            _9EC->onDraw(-1);
+        }
     }
 
     if (getCarrySensor() != nullptr) {

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.galaxy.mobile"
-    android:versionCode="13"
-    android:versionName="0.3.1"
+    android:versionCode="14"
+    android:versionName="0.4.0"
     android:installLocation="auto">
 
     <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="34" />
@@ -14,13 +14,14 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- debuggable + extractNativeLibs: required for wrap.sh to preload libreserve.so -->
     <application
         android:label="GalaxyMobile"
         android:icon="@mipmap/ic_launcher"
         android:banner="@drawable/banner"
-        android:hasCode="false"
+        android:hasCode="true"
         android:debuggable="true"
         android:extractNativeLibs="true"
         android:allowBackup="false">
@@ -40,5 +41,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name="com.galaxy.installer.InstallerActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@style/Theme.GalaxyInstaller"
+            android:configChanges="density|keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|uiMode" />
+
+        <provider
+            android:name="com.galaxy.installer.GalaxyFileProvider"
+            android:authorities="com.galaxy.mobile.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

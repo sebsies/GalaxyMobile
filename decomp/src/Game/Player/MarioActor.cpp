@@ -1087,7 +1087,7 @@ void MarioActor::updateBehavior() {
         if (!MR::isDemoActive()) {
             int req = port_take_powerup_request();
             if (req >= 0) {
-                MR::changePlayerItemStatus(req);
+                applyModPowerup(req);
             }
             if (port_take_unlock_spin_request()) {
                 MR::onGameEventFlagEnableToSpinAndStarPointer();
@@ -1854,12 +1854,23 @@ void MarioActor::calcAnimInMovement() {
 
     switch (mCurrModel) {
     case 4:
-        _9C8->movement();
-        _A50->movement();
-        _A54->movement();
+        if (_9C8) {
+            _9C8->movement();
+        }
+        if (_A50) {
+            _A50->movement();
+        }
+        if (_A54) {
+            _A54->movement();
+        }
 
-        MR::setBrkFrame(_A50, MR::getBrkFrame(_9C8));
-        MR::setBrkFrame(_A54, MR::getBrkFrame(_9C8));
+        if (_9C8 && _A50) {
+            MR::setBrkFrame(_A50, MR::getBrkFrame(_9C8));
+        }
+        if (_9C8 && _A54) {
+            MR::setBrkFrame(_A54, MR::getBrkFrame(_9C8));
+        }
+        break;
     }
 
     if (_3DA != 0) {
@@ -1877,7 +1888,7 @@ void MarioActor::calcAnimInMovement() {
     }
 
     if (_3D8 != 0) {
-        if (mPlayerMode == 6 && mMario->mVerticalSpeed < mConst->getTable()->mTeresaWaitHeight) {
+        if (mPlayerMode == 6 && mMario && mMario->mVerticalSpeed < mConst->getTable()->mTeresaWaitHeight) {
             mPosition -= getGravityVec();
         }
 
@@ -1904,9 +1915,15 @@ void MarioActor::calcAnimInMovement() {
         }
 
         if (val == false) {
-            TVec3f frontVec;
-            MR::calcFrontVec(&frontVec, _4A4->mHost);
-            mMario->setFrontVecKeepUp(frontVec);
+            TVec3f frontVec(0.0f, 0.0f, 1.0f);
+            if (_4A4 && _4A4->mHost) {
+                MR::calcFrontVec(&frontVec, _4A4->mHost);
+            } else if (mMario) {
+                frontVec = mMario->mFrontVec;
+            }
+            if (mMario) {
+                mMario->setFrontVecKeepUp(frontVec);
+            }
 
             if (_336 == 0) {
                 MR::zoomInTargetGameCamera();
@@ -2115,28 +2132,40 @@ void MarioActor::calcAnim() {
     if (_3D8 == 0) {
         switch (mPlayerMode) {
         case 4:
-            _9E4->mPosition.set(mPosition);
-
-            MR::updateModelDiffDL(_9E4);
+            if (_9E4) {
+                _9E4->mPosition.set(mPosition);
+                MR::updateModelDiffDL(_9E4);
+            }
             break;
         case 3:
-            _9C0->mPosition.set(mPosition);
-
-            MR::updateModelDiffDL(_9C0);
-            MR::updateModelDiffDL(_A40);
-            MR::updateModelDiffDL(_A44);
+            if (_9C0) {
+                _9C0->mPosition.set(mPosition);
+                MR::updateModelDiffDL(_9C0);
+            }
+            if (_A40) {
+                MR::updateModelDiffDL(_A40);
+            }
+            if (_A44) {
+                MR::updateModelDiffDL(_A44);
+            }
             break;
         case 1:
-            _9C8->mPosition.set(mPosition);
-
-            MR::updateModelDiffDL(_9C8);
-            MR::updateModelDiffDL(_A50);
-            MR::updateModelDiffDL(_A54);
+            if (_9C8) {
+                _9C8->mPosition.set(mPosition);
+                MR::updateModelDiffDL(_9C8);
+            }
+            if (_A50) {
+                MR::updateModelDiffDL(_A50);
+            }
+            if (_A54) {
+                MR::updateModelDiffDL(_A54);
+            }
             break;
         case 5:
-            _A00->mPosition.set(mPosition);
-
-            MR::updateModelDiffDL(_A00);
+            if (_A00) {
+                _A00->mPosition.set(mPosition);
+                MR::updateModelDiffDL(_A00);
+            }
             break;
         default:
             if (mCurrModel != 1) {
@@ -2222,7 +2251,7 @@ void MarioActor::calcAnim() {
         _94A++;
     }
 
-    if (mCurrModel != 0) {
+    if (mCurrModel != 0 && getJ3DModel() && mModels[0] && getJ3DModel()->getBaseTRMtx() && mModels[0]->getBaseTRMtx()) {
         PSMTXCopy(MR::getJointMtx(getJ3DModel(), "HandL0"), MR::getJointMtx(mModels[0], "HandL0"));
         PSMTXCopy(MR::getJointMtx(getJ3DModel(), "HandR0"), MR::getJointMtx(mModels[0], "HandR0"));
         PSMTXCopy(MR::getJointMtx(getJ3DModel(), "FootL"), MR::getJointMtx(mModels[0], "FootL"));

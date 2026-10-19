@@ -57,15 +57,30 @@ void MarioActor::initParts() {
 }
 
 void MarioActor::updateBeeWingAnimation() {
+    if (!mMario) {
+        return;
+    }
     if (mPlayerMode != 4) {
-        getJointCtrl("HandR")->setLocalScale(1.0f);
-        getJointCtrl("HandL")->setLocalScale(1.0f);
+        if (getJointCtrl("HandR")) {
+            getJointCtrl("HandR")->setLocalScale(1.0f);
+        }
+        if (getJointCtrl("HandL")) {
+            getJointCtrl("HandL")->setLocalScale(1.0f);
+        }
 
         return;
     }
 
-    getJointCtrl("HandR")->setLocalScale(0.9f);
-    getJointCtrl("HandL")->setLocalScale(0.9f);
+    if (getJointCtrl("HandR")) {
+        getJointCtrl("HandR")->setLocalScale(0.9f);
+    }
+    if (getJointCtrl("HandL")) {
+        getJointCtrl("HandL")->setLocalScale(0.9f);
+    }
+
+    if (!_9E8) {
+        return;
+    }
 
     if (mMario->checkLvlA() && mMario->_402 && getMovementStates().jumping) {
         if (_9F0 != 1) {

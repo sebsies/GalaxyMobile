@@ -144,6 +144,7 @@ int port_is_modern_boo_flight(void);
 int port_is_skip_cutscenes(void);
 int port_is_infinite_health(void);
 int port_is_infinite_powerup(void);
+int port_is_hd_ui_enabled(void);
 void port_request_warp(const char* stage, int scenario);
 int port_take_warp_request(char* outStage, size_t maxLen, int* outScenario);
 void port_request_powerup(int type);
@@ -154,6 +155,11 @@ void port_request_unlock_spin(void);
 int port_take_unlock_spin_request(void);
 void port_set_spin_unlocked(int unlocked);
 int port_is_spin_unlocked(void);
+int port_has_game_data(void);
+void port_open_installer(void);
+int port_is_plus_installed(void);
+void port_install_plus(void);
+
 
 // Frame-time statistics (platform/src/port/perf.cpp), logged every 10 s.
 void port_perf_frame_begin(void);      // the game thread starts a frame

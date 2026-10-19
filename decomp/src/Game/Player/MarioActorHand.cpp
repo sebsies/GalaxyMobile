@@ -166,8 +166,14 @@ void MarioActor::updateHandAtMorph() {
 
     if (holder1 && holder2) {
         for (u32 idx = 0; idx <= 7; idx++) {
-            MR::hideJoint(MR::getJoint(holder1, idx + 1));
-            MR::hideJoint(MR::getJoint(holder2, idx + 1));
+            J3DJoint* j1 = MR::getJoint(holder1, idx + 1);
+            if (j1) {
+                MR::hideJoint(j1);
+            }
+            J3DJoint* j2 = MR::getJoint(holder2, idx + 1);
+            if (j2) {
+                MR::hideJoint(j2);
+            }
         }
     }
 
