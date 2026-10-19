@@ -10,6 +10,14 @@ GalaxyMobile is a **native Android ARM64 port** of Super Mario Galaxy, compiled 
 
 ---
 
+## Screenshots
+
+| Title Screen | In-Game Settings Drawer | Storybook Intro |
+|:---:|:---:|:---:|
+| ![Title Screen](https://raw.githubusercontent.com/sebsies/GalaxyMobile/main/art/screenshots/title.jpg) | ![Settings Drawer](https://raw.githubusercontent.com/sebsies/GalaxyMobile/main/art/screenshots/settings.jpg) | ![Storybook Intro](https://raw.githubusercontent.com/sebsies/GalaxyMobile/main/art/screenshots/story.jpg) |
+
+---
+
 ## Features
 
 - **True Native Hor+ Ultrawide (No Stretch, No Zoom)**:
