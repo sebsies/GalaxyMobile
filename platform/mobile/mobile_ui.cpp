@@ -2345,7 +2345,7 @@ void UIOverlay::render(int screenW, int screenH) {
                     renderCardBlock(618.0f * uiScale, 80.0f * uiScale, [&](float y) {
                         drawCard(cX0, y, cX1, y + 80.0f * uiScale, 18.0f * uiScale, rgba(0.165f, 0.180f, 0.215f, 0.95f), cCardBorder);
 
-                        drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "GalaxyMobile+ v0.5.0", rgba(0.38f, 0.28f, 0.08f, 0.95f), rgba(1.0f, 0.88f, 0.40f, 1.0f), rgba(0.988f, 0.827f, 0.302f, 1.0f));
+                        drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "GalaxyMobile+ v0.6.0", rgba(0.38f, 0.28f, 0.08f, 0.95f), rgba(1.0f, 0.88f, 0.40f, 1.0f), rgba(0.988f, 0.827f, 0.302f, 1.0f));
                         drawText("All-Star Edition • Native ARM64 • Vulkan/GLES3", cX0 + 16.0f * uiScale, y + 54.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
                         drawText("Mods take effect in real-time during live gameplay.", cX0 + 16.0f * uiScale, y + 68.0f * uiScale, 0.24f * uiScale, rgba(0.55f, 0.60f, 0.70f, 0.75f), 0);
                     });
@@ -2382,7 +2382,7 @@ void UIOverlay::render(int screenW, int screenH) {
                         if (plusInstalled) {
                             drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Installed on Device", rgba(0.12f, 0.32f, 0.20f, 0.90f), rgba(0.50f, 0.95f, 0.60f, 1.0f), rgba(0.290f, 0.871f, 0.502f, 1.0f));
                         } else {
-                            drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Bundled APK Ready (v0.5.0)", rgba(0.35f, 0.28f, 0.10f, 0.90f), rgba(1.0f, 0.85f, 0.40f, 1.0f), rgba(0.984f, 0.749f, 0.141f, 1.0f));
+                            drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Bundled APK Ready (v0.6.0)", rgba(0.35f, 0.28f, 0.10f, 0.90f), rgba(1.0f, 0.85f, 0.40f, 1.0f), rgba(0.984f, 0.749f, 0.141f, 1.0f));
                         }
                         drawText("Includes Graphics Presets, HD UI, Cheats & Galaxy Warp.", cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
 
@@ -2410,7 +2410,7 @@ void UIOverlay::render(int screenW, int screenH) {
                     renderCardBlock(370.0f * uiScale, 80.0f * uiScale, [&](float y) {
                         drawCard(cX0, y, cX1, y + 80.0f * uiScale, 18.0f * uiScale, rgba(0.165f, 0.180f, 0.215f, 0.95f), cCardBorder);
 
-                        drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "GalaxyMobile v0.5.0", rgba(0.10f, 0.28f, 0.44f, 0.90f), rgba(0.40f, 0.85f, 1.0f, 1.0f), cHeader);
+                        drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "GalaxyMobile v0.6.0", rgba(0.10f, 0.28f, 0.44f, 0.90f), rgba(0.40f, 0.85f, 1.0f, 1.0f), cHeader);
                         drawText("Vanilla Edition • Native ARM64 • Vulkan/GLES3", cX0 + 16.0f * uiScale, y + 54.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
                         drawText("Optimized for all Android 11+ Snapdragon & Dimensity chipsets.", cX0 + 16.0f * uiScale, y + 68.0f * uiScale, 0.24f * uiScale, rgba(0.55f, 0.60f, 0.70f, 0.75f), 0);
                     });
@@ -2441,7 +2441,7 @@ void UIOverlay::render(int screenW, int screenH) {
             }
             float vChipX = drawerX + padX + 46.0f * uiScale + strW;
             drawRoundRect(vChipX, 26.0f * uiScale, vChipX + 54.0f * uiScale, 48.0f * uiScale, 11.0f * uiScale, rgba(0.18f, 0.24f, 0.35f, 0.85f));
-            drawText("v0.5.0", vChipX + 27.0f * uiScale, 42.0f * uiScale, 0.30f * uiScale, cHeader, 1);
+            drawText("v0.6.0", vChipX + 27.0f * uiScale, 42.0f * uiScale, 0.30f * uiScale, cHeader, 1);
 
             // Close [X] circular tonal button
             float closeBtnX = drawerX + drawerW - 36.0f * uiScale;
