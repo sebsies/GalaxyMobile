@@ -172,7 +172,7 @@ void GameSystemObjHolder::initDisplay() {
     _14 = new (pStationedHeap, 32) u8[size];
 
     pManager = MainLoopFramework::createManager(nullptr, _C, _10, _14, true);
-    pManager->setClearColor(Color8(30, 30, 200, 0));
+    pManager->setClearColor(Color8(0, 0, 0, 0));
 
     mCaptureScreenDirector = new CaptureScreenDirector();
     mScreenPreserver = new ScreenPreserver();

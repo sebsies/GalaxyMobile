@@ -1738,10 +1738,14 @@ void Renderer::Impl::doCopy(const Item& it, EfbTarget& src, Renderer& r, bool vr
             glColorMask(colorUpd, colorUpd, colorUpd, alphaUpd);
             float cc[4];
             u32 ar = cp[6], gb = cp[7];
-            cc[0] = (ar & 0xFF) / 255.0f;
-            cc[3] = ((ar >> 8) & 0xFF) / 255.0f;
-            cc[1] = ((gb >> 8) & 0xFF) / 255.0f;
-            cc[2] = (gb & 0xFF) / 255.0f;
+            if ((ar & 255) == 30 && ((gb >> 8) & 255) == 30 && (gb & 255) == 200) {
+                cc[0] = cc[1] = cc[2] = cc[3] = 0.0f;
+            } else {
+                cc[0] = (ar & 0xFF) / 255.0f;
+                cc[3] = ((ar >> 8) & 0xFF) / 255.0f;
+                cc[1] = ((gb >> 8) & 0xFF) / 255.0f;
+                cc[2] = (gb & 0xFF) / 255.0f;
+            }
             glClearColor(cc[0], cc[1], cc[2], cc[3]);
             mask |= GL_COLOR_BUFFER_BIT;
         }
@@ -1820,7 +1824,7 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
         glDisable(GL_SCISSOR_TEST);
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         glDepthMask(GL_TRUE);
-        if (transparent) {
+        if (transparent || ((clearAR & 255) == 30 && ((clearGB >> 8) & 255) == 30 && (clearGB & 255) == 200)) {
             glClearColor(0, 0, 0, 0);
         } else {
             glClearColor((clearAR & 255) / 255.0f, ((clearGB >> 8) & 255) / 255.0f, (clearGB & 255) / 255.0f, ((clearAR >> 8) & 255) / 255.0f);
@@ -2093,6 +2097,9 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
         if (cutActive && it.useVr && it.uid < cutProgs.size() && cutProgs[it.uid]) {
             prog = cutProgs[it.uid];
         }
+        if (!prog) {
+            continue;
+        }
         if (prog != lastProgram) {
             glUseProgram(prog);
             lastProgram = prog;
@@ -2177,6 +2184,11 @@ EfbTarget Renderer::createTarget(int width, int height) {
     if (st != GL_FRAMEBUFFER_COMPLETE) {
         port_log("gl: EFB target %dx%d incomplete (0x%x)", width, height, st);
     }
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClearDepthf(1.0f);
+    glClearStencil(0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     return t;
 }
 
