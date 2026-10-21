@@ -40,7 +40,7 @@ void MarioActor::setPlayerMode(u16 playerMode, bool myBool) {
 
         if (playerMode == 7) {
             _3DC = 3600;
-            MR::startStageBGM("BGM_FLYING_A", false);
+            MR::startSubBGM("BGM_FLYING_A", false);
         }
 
         if (playerMode != 0) {
@@ -144,6 +144,7 @@ void MarioActor::setPlayerMode(u16 playerMode, bool myBool) {
         break;
 
     case 7:
+        MR::stopSubBGM(30);
         MR::startCurrentStageBGM();
         break;
     }
@@ -190,6 +191,10 @@ void MarioActor::setPlayerMode(u16 playerMode, bool myBool) {
         break;
 
     case 0:
+        if (_3D6 == 7) {
+            MR::stopSubBGM(30);
+            MR::startCurrentStageBGM();
+        }
         MR::startBtp(this, "ElementEnd");
 
         if (myBool) {
@@ -302,7 +307,7 @@ void MarioActor::setPlayerMode(u16 playerMode, bool myBool) {
         break;
 
     case 7:
-        MR::startStageBGM("BGM_FLYING_A", false);
+        MR::startSubBGM("BGM_FLYING_A", false);
         _3DC = 3600;
         break;
     }

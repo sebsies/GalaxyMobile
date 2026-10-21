@@ -689,7 +689,7 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
         } else if (mSettingsTab == 1) {
             totalContentH = 384.0f * uiScale;
         } else {
-            totalContentH = mPlusEdition ? (700.0f * uiScale) : (460.0f * uiScale);
+            totalContentH = mPlusEdition ? (720.0f * uiScale) : (460.0f * uiScale);
         }
         float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
 
@@ -907,11 +907,18 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                             // Mod 5: Flight Everywhere (Red Star) Switch
                             else if (contentRelY >= 224.0f * uiScale && contentRelY <= 274.0f * uiScale) {
                                 mSettings.modFlightEverywhere = !mSettings.modFlightEverywhere;
+                                if (mSettings.modFlightEverywhere) {
+                                    port_request_powerup(6);
+                                } else {
+                                    if (port_get_current_powerup() == 7) {
+                                        port_request_powerup(0);
+                                    }
+                                }
                                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                             }
-                            // Mod 6: Live Power-Up Switcher Card Grid Tap (338..450)
-                            else if (contentRelY >= 338.0f * uiScale && contentRelY <= 450.0f * uiScale) {
-                                float gridTopRelY = 342.0f * uiScale;
+                            // Mod 6: Live Power-Up Switcher Card Grid Tap (338..454)
+                            else if (contentRelY >= 338.0f * uiScale && contentRelY <= 454.0f * uiScale) {
+                                float gridTopRelY = 344.0f * uiScale;
                                 float cardX0 = drawerX + padX;
                                 float pStartX = cardX0 + 8.0f * uiScale;
                                 float pillW = (contentW - 16.0f * uiScale - 10.0f * uiScale) / 3.0f;
@@ -941,14 +948,14 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                                 }
                             }
                                                         // Mod 7: Galaxy Warp Menu Card
-                            else if (contentRelY >= 490.0f * uiScale && contentRelY <= 536.0f * uiScale) {
+                            else if (contentRelY >= 496.0f * uiScale && contentRelY <= 544.0f * uiScale) {
                                 mWarpMenuOpen = true;
                                 mWarpScrollY = 0.0f;
                                 mWarpScrollTarget = 0.0f;
                                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                             }
                             // Mod 8: Early Spin Ability Card
-                            else if (contentRelY >= 540.0f * uiScale && contentRelY <= 590.0f * uiScale) {
+                            else if (contentRelY >= 548.0f * uiScale && contentRelY <= 600.0f * uiScale) {
                                 port_request_unlock_spin();
                                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                             }
@@ -1869,7 +1876,7 @@ void UIOverlay::render(int screenW, int screenH) {
         } else if (mSettingsTab == 1) {
             totalContentH = 384.0f * uiScale;
         } else {
-            totalContentH = mPlusEdition ? (700.0f * uiScale) : (460.0f * uiScale);
+            totalContentH = mPlusEdition ? (720.0f * uiScale) : (460.0f * uiScale);
         }
         float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
 
@@ -2303,7 +2310,7 @@ void UIOverlay::render(int screenW, int screenH) {
                     });
 
                     // Card 3: Stage Warp & Abilities
-                    renderCardBlock(464.0f * uiScale, 136.0f * uiScale, [&](float y) {
+                    renderCardBlock(470.0f * uiScale, 136.0f * uiScale, [&](float y) {
                         drawCard(cX0, y, cX1, y + 136.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
 
                         drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
@@ -2335,7 +2342,7 @@ void UIOverlay::render(int screenW, int screenH) {
                     });
 
                     // Card 4: System Info
-                    renderCardBlock(560.0f * uiScale, 80.0f * uiScale, [&](float y) {
+                    renderCardBlock(618.0f * uiScale, 80.0f * uiScale, [&](float y) {
                         drawCard(cX0, y, cX1, y + 80.0f * uiScale, 18.0f * uiScale, rgba(0.165f, 0.180f, 0.215f, 0.95f), cCardBorder);
 
                         drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "GalaxyMobile+ v0.5.0", rgba(0.38f, 0.28f, 0.08f, 0.95f), rgba(1.0f, 0.88f, 0.40f, 1.0f), rgba(0.988f, 0.827f, 0.302f, 1.0f));

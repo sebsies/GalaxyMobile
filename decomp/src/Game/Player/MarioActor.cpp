@@ -518,6 +518,11 @@ void MarioActor::initAfterPlacement() {
     _9F4 = getGravityVector();
     updateCameraInfo();
     calcBaseFrontVec(-_240);
+#ifdef TARGET_PC
+    if (port_is_plus_edition() && port_is_flight_everywhere()) {
+        port_request_powerup(6);
+    }
+#endif
 }
 
 void MarioActor::initAfterOpeningDemo() {
@@ -1081,9 +1086,6 @@ void MarioActor::updateBehavior() {
     if (port_is_plus_edition()) {
         port_set_current_powerup(mPlayerMode);
         port_set_spin_unlocked(_EEB ? 1 : 0);
-        if (port_is_flight_everywhere() && mPlayerMode != PlayerMode_Foo && !MR::isDemoActive()) {
-            applyModPowerup(6);
-        }
         if (port_is_infinite_powerup() && mPlayerMode == PlayerMode_Bee && mMario) {
             mMario->_402 = mConst->getTable()->mAirWalkTime;
         }
