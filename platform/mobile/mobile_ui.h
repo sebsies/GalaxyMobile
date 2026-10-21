@@ -33,6 +33,7 @@ struct Settings {
     bool modInfiniteHealth = false;
     bool modInfinitePowerup = false;
     bool modAdvancedHaptics = false;
+    bool modFlightEverywhere = false;
 
     void load(const std::string& path);
     void save(const std::string& path) const;
@@ -106,6 +107,7 @@ private:
     float mSwAnimInfiniteHp = 0.0f;
     float mSwAnimInfinitePowerup = 0.0f;
     float mSwAnimHaptics = 0.0f;
+    float mSwAnimFlightEverywhere = 0.0f;
 
     // Warp Menu Sub-View (Plus Edition)
     bool mWarpMenuOpen = false;

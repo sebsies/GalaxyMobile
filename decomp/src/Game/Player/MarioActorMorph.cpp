@@ -490,7 +490,7 @@ void MarioActor::updatePlayerMode() {
     }
 
 #ifdef TARGET_PC
-    if (port_is_plus_edition() && port_is_infinite_powerup()) {
+    if (port_is_plus_edition() && (port_is_infinite_powerup() || (port_is_flight_everywhere() && mPlayerMode == PlayerMode_Foo))) {
         if (_3DC < 600) {
             _3DC = 1200;
         }

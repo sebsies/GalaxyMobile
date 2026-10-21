@@ -799,6 +799,11 @@ int port_is_infinite_powerup(void) {
     return mobile_ui::UIOverlay::get().settings().modInfinitePowerup ? 1 : 0;
 }
 
+int port_is_flight_everywhere(void) {
+    if (!mobile_ui::UIOverlay::get().isPlusEdition()) return 0;
+    return mobile_ui::UIOverlay::get().settings().modFlightEverywhere ? 1 : 0;
+}
+
 int port_is_hd_ui_enabled(void) {
     if (!mobile_ui::UIOverlay::get().isPlusEdition()) return 0;
     return mobile_ui::UIOverlay::get().settings().hdUiTextures ? 1 : 0;

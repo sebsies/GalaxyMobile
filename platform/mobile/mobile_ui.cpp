@@ -324,6 +324,7 @@ void Settings::load(const std::string& path) {
             else if (!strcmp(key, "graphics_preset")) graphicsPreset = std::max(0, std::min(3, (int)val));
             else if (!strcmp(key, "hd_ui_textures")) hdUiTextures = (val > 0.5f);
             else if (!strcmp(key, "mod_advanced_haptics")) modAdvancedHaptics = (val > 0.5f);
+            else if (!strcmp(key, "mod_flight_everywhere")) modFlightEverywhere = (val > 0.5f);
         }
     }
     fclose(f);
@@ -353,6 +354,7 @@ void Settings::save(const std::string& path) const {
     fprintf(f, "graphics_preset=%d\n", graphicsPreset);
     fprintf(f, "hd_ui_textures=%d\n", hdUiTextures ? 1 : 0);
     fprintf(f, "mod_advanced_haptics=%d\n", modAdvancedHaptics ? 1 : 0);
+    fprintf(f, "mod_flight_everywhere=%d\n", modFlightEverywhere ? 1 : 0);
     fclose(f);
     LOGI("Saved settings to %s", path.c_str());
 }
@@ -372,6 +374,7 @@ UIOverlay::UIOverlay() {
     mSwAnimInfiniteHp = 0.0f;
     mSwAnimInfinitePowerup = 0.0f;
     mSwAnimHaptics = 0.0f;
+    mSwAnimFlightEverywhere = 0.0f;
 }
 
 UIOverlay& UIOverlay::get() {
@@ -386,6 +389,7 @@ void UIOverlay::setSavePath(const std::string& path) {
         mSettings.modSkipCutscenes = false;
         mSettings.modInfiniteHealth = false;
         mSettings.modInfinitePowerup = false;
+        mSettings.modFlightEverywhere = false;
         mWarpMenuOpen = false;
     }
     mSwAnimShowControls = mSettings.showControls ? 1.0f : 0.0f;
@@ -396,6 +400,7 @@ void UIOverlay::setSavePath(const std::string& path) {
     mSwAnimInfiniteHp = mSettings.modInfiniteHealth ? 1.0f : 0.0f;
     mSwAnimInfinitePowerup = mSettings.modInfinitePowerup ? 1.0f : 0.0f;
     mSwAnimHaptics = mSettings.modAdvancedHaptics ? 1.0f : 0.0f;
+    mSwAnimFlightEverywhere = mSettings.modFlightEverywhere ? 1.0f : 0.0f;
 }
 
 bool UIOverlay::needsRedraw() {
@@ -423,7 +428,8 @@ bool UIOverlay::needsRedraw() {
         switchActive(mSwAnimSkipCutscenes, mSettings.modSkipCutscenes) ||
         switchActive(mSwAnimInfiniteHp, mSettings.modInfiniteHealth) ||
         switchActive(mSwAnimInfinitePowerup, mSettings.modInfinitePowerup) ||
-        switchActive(mSwAnimHaptics, mSettings.modAdvancedHaptics)) {
+        switchActive(mSwAnimHaptics, mSettings.modAdvancedHaptics) ||
+        switchActive(mSwAnimFlightEverywhere, mSettings.modFlightEverywhere)) {
         return true;
     }
     bool d = mDirty;
@@ -683,7 +689,7 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
         } else if (mSettingsTab == 1) {
             totalContentH = 384.0f * uiScale;
         } else {
-            totalContentH = mPlusEdition ? (650.0f * uiScale) : (460.0f * uiScale);
+            totalContentH = mPlusEdition ? (700.0f * uiScale) : (460.0f * uiScale);
         }
         float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
 
@@ -893,14 +899,19 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                                 mSettings.modInfinitePowerup = !mSettings.modInfinitePowerup;
                                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                             }
-                            // Mod 4: Advanced Haptic Feedback Switch
-                            else if (contentRelY >= 176.0f * uiScale && contentRelY <= 228.0f * uiScale) {
+                                                        // Mod 4: Advanced Haptic Feedback Switch
+                            else if (contentRelY >= 176.0f * uiScale && contentRelY <= 222.0f * uiScale) {
                                 mSettings.modAdvancedHaptics = !mSettings.modAdvancedHaptics;
                                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                             }
-                            // Mod 5: Live Power-Up Switcher Card Grid Tap (290..400)
-                            else if (contentRelY >= 290.0f * uiScale && contentRelY <= 400.0f * uiScale) {
-                                float gridTopRelY = 294.0f * uiScale;
+                            // Mod 5: Flight Everywhere (Red Star) Switch
+                            else if (contentRelY >= 224.0f * uiScale && contentRelY <= 274.0f * uiScale) {
+                                mSettings.modFlightEverywhere = !mSettings.modFlightEverywhere;
+                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            }
+                            // Mod 6: Live Power-Up Switcher Card Grid Tap (338..450)
+                            else if (contentRelY >= 338.0f * uiScale && contentRelY <= 450.0f * uiScale) {
+                                float gridTopRelY = 342.0f * uiScale;
                                 float cardX0 = drawerX + padX;
                                 float pStartX = cardX0 + 8.0f * uiScale;
                                 float pillW = (contentW - 16.0f * uiScale - 10.0f * uiScale) / 3.0f;
@@ -929,15 +940,15 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                                     }
                                 }
                             }
-                            // Mod 6: Galaxy Warp Menu Card
-                            else if (contentRelY >= 442.0f * uiScale && contentRelY <= 488.0f * uiScale) {
+                                                        // Mod 7: Galaxy Warp Menu Card
+                            else if (contentRelY >= 490.0f * uiScale && contentRelY <= 536.0f * uiScale) {
                                 mWarpMenuOpen = true;
                                 mWarpScrollY = 0.0f;
                                 mWarpScrollTarget = 0.0f;
                                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                             }
-                            // Mod 7: Early Spin Ability Card
-                            else if (contentRelY >= 492.0f * uiScale && contentRelY <= 540.0f * uiScale) {
+                            // Mod 8: Early Spin Ability Card
+                            else if (contentRelY >= 540.0f * uiScale && contentRelY <= 590.0f * uiScale) {
                                 port_request_unlock_spin();
                                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                             }
@@ -1383,6 +1394,7 @@ void UIOverlay::render(int screenW, int screenH) {
     updateSwAnim(mSwAnimInfiniteHp, mSettings.modInfiniteHealth);
     updateSwAnim(mSwAnimInfinitePowerup, mSettings.modInfinitePowerup);
     updateSwAnim(mSwAnimHaptics, mSettings.modAdvancedHaptics);
+    updateSwAnim(mSwAnimFlightEverywhere, mSettings.modFlightEverywhere);
 
     // Fluid Tab Indicator Animation
     float padX = 22.0f * uiScale;
@@ -1857,7 +1869,7 @@ void UIOverlay::render(int screenW, int screenH) {
         } else if (mSettingsTab == 1) {
             totalContentH = 384.0f * uiScale;
         } else {
-            totalContentH = mPlusEdition ? (650.0f * uiScale) : (460.0f * uiScale);
+            totalContentH = mPlusEdition ? (700.0f * uiScale) : (460.0f * uiScale);
         }
         float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
 
@@ -2203,8 +2215,8 @@ void UIOverlay::render(int screenW, int screenH) {
                 if (mPlusEdition) {
                     // Plus Edition Advanced Tab
                     // Card 1: Gameplay Cheats & Mods
-                    renderCardBlock(6.0f * uiScale, 236.0f * uiScale, [&](float y) {
-                        drawCard(cX0, y, cX1, y + 236.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+                    renderCardBlock(6.0f * uiScale, 284.0f * uiScale, [&](float y) {
+                        drawCard(cX0, y, cX1, y + 284.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
 
                         drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
                         drawText("GAMEPLAY CHEATS & MODS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
@@ -2238,10 +2250,18 @@ void UIOverlay::render(int screenW, int screenH) {
                         drawText("Tactile Haptic Feedback", cX0 + 14.0f * uiScale, r4Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
                         drawText("Vibrations on button presses & gameplay events", cX0 + 14.0f * uiScale, r4Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
                         drawM3Switch(cX1 - swW - 14.0f * uiScale, r4Y + 8.0f * uiScale, swW, swH, mSwAnimHaptics);
+
+                        drawRoundRect(cX0 + 14.0f * uiScale, y + 224.0f * uiScale, cX1 - 14.0f * uiScale, y + 225.0f * uiScale, 0.5f, cDivider);
+
+                        // Mod 5: Flight Everywhere (Red Star)
+                        float r5Y = y + 226.0f * uiScale;
+                        drawText("Flight Everywhere (Red Star)", cX0 + 14.0f * uiScale, r5Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
+                        drawText("Fly in all galaxies with the Red Star suit", cX0 + 14.0f * uiScale, r5Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                        drawM3Switch(cX1 - swW - 14.0f * uiScale, r5Y + 8.0f * uiScale, swW, swH, mSwAnimFlightEverywhere);
                     });
 
                     // Card 2: Live Power-Up Morph Switcher
-                    renderCardBlock(250.0f * uiScale, 158.0f * uiScale, [&](float y) {
+                    renderCardBlock(298.0f * uiScale, 158.0f * uiScale, [&](float y) {
                         drawCard(cX0, y, cX1, y + 158.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
 
                         drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
@@ -2283,7 +2303,7 @@ void UIOverlay::render(int screenW, int screenH) {
                     });
 
                     // Card 3: Stage Warp & Abilities
-                    renderCardBlock(416.0f * uiScale, 136.0f * uiScale, [&](float y) {
+                    renderCardBlock(464.0f * uiScale, 136.0f * uiScale, [&](float y) {
                         drawCard(cX0, y, cX1, y + 136.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
 
                         drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);

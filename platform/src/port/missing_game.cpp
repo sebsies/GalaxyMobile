@@ -52,6 +52,7 @@ __attribute__((weak)) int port_is_modern_boo_flight(void) { return 0; }
 __attribute__((weak)) int port_is_skip_cutscenes(void) { return 0; }
 __attribute__((weak)) int port_is_infinite_health(void) { return 0; }
 __attribute__((weak)) int port_is_infinite_powerup(void) { return 0; }
+__attribute__((weak)) int port_is_flight_everywhere(void) { return 0; }
 __attribute__((weak)) int port_is_hd_ui_enabled(void) { return 0; }
 __attribute__((weak)) int port_input_real_a(void) { return 0; }
 __attribute__((weak)) void port_request_warp(const char* stage, int scenario) { (void)stage; (void)scenario; }

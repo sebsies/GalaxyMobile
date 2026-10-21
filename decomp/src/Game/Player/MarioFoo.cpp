@@ -1,4 +1,5 @@
 #include "Game/Player/MarioFoo.hpp"
+#include "port/compat.h"
 #include "Game/LiveActor/HitSensor.hpp"
 #include "Game/MapObj/DashRing.hpp"
 #include "Game/Player/Mario.hpp"
@@ -71,6 +72,13 @@ namespace {
 }  // namespace
 
 void Mario::tryStartFoo() {
+#ifdef TARGET_PC
+    if (port_is_plus_edition()) {
+        changeStatus(mFoo);
+        mFoo->setStartSpeed(mActor->getConst().getTable()->mSwimFrontMaxSpeed);
+        return;
+    }
+#endif
     if (MR::getAreaObj("CelestrialSphere", getTrans()) || !mFoo->_48) {
         changeStatus(mFoo);
         mFoo->setStartSpeed(mActor->getConst().getTable()->mSwimFrontMaxSpeed);
@@ -367,6 +375,11 @@ bool MarioFoo::update() {
 
     updateTilt();
 
+#ifdef TARGET_PC
+    if (port_is_plus_edition() && port_is_flight_everywhere()) {
+        // Full unrestricted flight - no invisible boundary wall
+    } else
+#endif
     if (_48 != nullptr) {
         TVec3f center;
         MR::calcSpherePos(&center, _48);

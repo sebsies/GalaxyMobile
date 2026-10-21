@@ -1,4 +1,5 @@
 #include "Game/Enemy/KariKariDirector.hpp"
+#include "port/compat.h"
 #include "Game/LiveActor/HitSensor.hpp"
 #include "Game/LiveActor/LiveActor.hpp"
 #include "Game/Map/HitInfo.hpp"
@@ -675,6 +676,17 @@ void Mario::trySpinJump(u8 a1) {
         return;
     }
 
+#ifdef TARGET_PC
+    if (port_is_plus_edition()) {
+        if (getPlayerMode() == 7 || port_is_flight_everywhere()) {
+            if (getPlayerMode() != 7) {
+                mActor->setPlayerMode(7, false);
+            }
+            tryStartFoo();
+            return;
+        }
+    }
+#endif
     if (getPlayerMode() == 7 && mVerticalSpeed > 100.0f) {
         tryStartFoo();
         return;
