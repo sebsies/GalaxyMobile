@@ -1,4 +1,5 @@
 #include "Game/Util/MessageUtil.hpp"
+#include "port/port.h"
 #include "Game/Map/RaceManager.hpp"
 #include "Game/NPC/TalkMessageInfo.hpp"
 #include "Game/Screen/MessageTagSkipTagProcessor.hpp"
@@ -28,6 +29,11 @@ namespace MR {
     }
 
     const wchar_t* getLayoutMessageDirect(const char* pMessageId) {
+#ifdef TARGET_PC
+        if (port_is_plus_edition() && pMessageId && strcmp(pMessageId, "Layout_PressStartPressAB") == 0) {
+            return L"Press A";
+        }
+#endif
         TalkMessageInfo messageInfo = TalkMessageInfo();
 
         MessageSystem::getLayoutMessageDirect(&messageInfo, pMessageId);

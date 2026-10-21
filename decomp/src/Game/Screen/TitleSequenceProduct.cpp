@@ -1,4 +1,5 @@
 #include "Game/Screen/TitleSequenceProduct.hpp"
+#include "port/port.h"
 #include "Game/LiveActor/Nerve.hpp"
 #include "Game/Screen/EncouragePal60Window.hpp"
 #include "Game/System/GameDataFunction.hpp"
@@ -43,6 +44,12 @@ TitleSequenceProduct::TitleSequenceProduct()
     mLogoLayout = new TitleSequenceProductSub::LogoLayout();
     mPressStartLayout = new SimpleLayout("Press[A][B]", "PressStart", 1, -1);
     mPressStartLayout->initWithoutIter();
+#ifdef TARGET_PC
+    if (port_is_plus_edition()) {
+        MR::setTextBoxMessageRecursive(mPressStartLayout, "TxtStart", L"Press A");
+        MR::setTextBoxMessageRecursive(mPressStartLayout, "ShaStart", L"Press A");
+    }
+#endif
     mAButtonChecker = new TriggerChecker();
     mBButtonChecker = new TriggerChecker();
     mIsDisplayEncouragePal60Window = MR::isDisplayEncouragePal60Window();
@@ -115,6 +122,12 @@ void TitleSequenceProduct::exeLogoWait() {
 
 void TitleSequenceProduct::exeLogoDisplay() {
     if (MR::isFirstStep(this)) {
+#ifdef TARGET_PC
+        if (port_is_plus_edition()) {
+            MR::setTextBoxMessageRecursive(mPressStartLayout, "TxtStart", L"Press A");
+            MR::setTextBoxMessageRecursive(mPressStartLayout, "ShaStart", L"Press A");
+        }
+#endif
         mPressStartLayout->appear();
         MR::startAnim(mPressStartLayout, "Appear", 0);
     }
@@ -126,7 +139,18 @@ void TitleSequenceProduct::exeLogoDisplay() {
     mAButtonChecker->update(MR::testCorePadButtonA(WPAD_CHAN0));
     mBButtonChecker->update(MR::testCorePadButtonB(WPAD_CHAN0));
 
-    if (mAButtonChecker->getLevel() && mBButtonChecker->getLevel()) {
+    bool triggered = false;
+#ifdef TARGET_PC
+    if (port_is_plus_edition()) {
+        triggered = mAButtonChecker->getLevel();
+    } else {
+        triggered = (mAButtonChecker->getLevel() && mBButtonChecker->getLevel());
+    }
+#else
+    triggered = (mAButtonChecker->getLevel() && mBButtonChecker->getLevel());
+#endif
+
+    if (triggered) {
         MR::stopStageBGM(75);
         MR::startSystemSE("SE_SY_GAME_START");
         MR::startCSSound("CS_CLICK_CLOSE", nullptr, 0);
