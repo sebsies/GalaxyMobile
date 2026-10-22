@@ -309,6 +309,11 @@ MarioActor::MarioActor(const char* pName) : LiveActor(pName), _1B0(0xFFFFFFFF) {
 
 MarioActor::~MarioActor() {
     delete mMario;
+#ifdef TARGET_PC
+    if (port_is_plus_edition()) {
+        RemotePlayerActor::tryDestroy();
+    }
+#endif
 }
 
 void MarioActor::init(const JMapInfoIter& rInfo) {

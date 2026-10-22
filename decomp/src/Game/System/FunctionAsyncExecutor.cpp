@@ -162,18 +162,15 @@ bool FunctionAsyncExecutor::isEnd(const char* pName) const {
     }
 
     if (cur == lst) {
-        OSUnlockMutex(&MR::MutexHolder< 2 >::sMutex);
-        return true;
-    }
-
 #ifdef TARGET_PC
-    if (cur == lst) {
         port_log("async: isEnd('%s') not found among %d entries", pName, mHolders.size());
         for (FunctionAsyncExecInfo* const* p = mHolders.begin(); p != lst; p++) {
             port_log("async:   %p '%s'", (void*)*p, *p ? (*p)->mName : "(null)");
         }
-    }
 #endif
+        OSUnlockMutex(&MR::MutexHolder< 2 >::sMutex);
+        return false;
+    }
     FunctionAsyncExecInfo* info = *cur;
     OSUnlockMutex(&MR::MutexHolder< 2 >::sMutex);
     return info->mIsEnd;

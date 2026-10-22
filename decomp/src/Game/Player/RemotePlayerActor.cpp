@@ -33,18 +33,14 @@ void RemotePlayerActor::tryCreate() {
 #ifdef TARGET_PC
     if (!port_is_plus_edition()) return;
 
-    if (!sInstance) {
-        sInstance = new RemotePlayerActor("RemotePlayer");
-        sInstance->initWithoutIter();
-    }
+    // In a new stage, reset any previous pointer and allocate freshly
+    sInstance = new RemotePlayerActor("RemotePlayer");
+    sInstance->initWithoutIter();
 #endif
 }
 
 void RemotePlayerActor::tryDestroy() {
-    if (sInstance) {
-        sInstance->makeActorDead();
-        sInstance = nullptr;
-    }
+    sInstance = nullptr;
 }
 
 void RemotePlayerActor::init(const JMapInfoIter& rIter) {
