@@ -117,6 +117,12 @@ void FunctionAsyncExecutor::waitForEnd(const char* pName) {
         cur++;
     }
 
+    if (cur == lst) {
+        // Not in pending list: it either already completed or was executed synchronously on the main thread
+        OSUnlockMutex(&MR::MutexHolder< 2 >::sMutex);
+        return;
+    }
+
     FunctionAsyncExecInfo* info = *cur;
     OSUnlockMutex(&MR::MutexHolder< 2 >::sMutex);
     OSReceiveMessage(&info->mQueue, &info->mMessage, OS_MESSAGE_BLOCK);
@@ -126,6 +132,11 @@ void FunctionAsyncExecutor::waitForEnd(const char* pName) {
 
     while (cur != lst && *cur != info) {
         cur++;
+    }
+
+    if (cur == lst) {
+        OSUnlockMutex(&MR::MutexHolder< 2 >::sMutex);
+        return;
     }
 
     // TODO: Inline of `MR::Vector<T>::erase`.
@@ -148,6 +159,11 @@ bool FunctionAsyncExecutor::isEnd(const char* pName) const {
 
     while ((cur != lst) && !(*cur)->isSame(pName)) {
         cur++;
+    }
+
+    if (cur == lst) {
+        OSUnlockMutex(&MR::MutexHolder< 2 >::sMutex);
+        return true;
     }
 
 #ifdef TARGET_PC

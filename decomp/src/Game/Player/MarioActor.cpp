@@ -389,6 +389,11 @@ void MarioActor::init2(const TVec3f& rA, const TVec3f& rB, s32 initialAnimation)
     _C28 = new Mtx[MR::getJointNum(this)];
 
     MR::connectToScene(this, MR::MovementType_Player, MR::CalcAnimType_Player, MR::DrawBufferType_Player, MR::DrawType_Player);
+#ifdef TARGET_PC
+    if (port_is_plus_edition()) {
+        RemotePlayerActor::tryCreate();
+    }
+#endif
     MR::initLightCtrlForPlayer(this);
     mMarioAnim = new MarioAnimator(this);
     mMarioEffect = new MarioEffect(this);
@@ -1008,7 +1013,14 @@ void MarioActor::control() {
 
 #ifdef TARGET_PC
     if (port_is_plus_edition() && port_net_is_connected() && port_net_get_mode() == PORT_NET_MODE_COOP) {
-        RemotePlayerActor::tryCreate();
+        RemotePlayerActor* rActor = RemotePlayerActor::getInstance();
+        if (!rActor) {
+            RemotePlayerActor::tryCreate();
+            rActor = RemotePlayerActor::getInstance();
+        }
+        if (rActor && MR::isDead(rActor)) {
+            rActor->makeActorAppeared();
+        }
 
         static int sNetSendCooldown = 0;
         if (++sNetSendCooldown >= 2) {
@@ -1046,6 +1058,11 @@ void MarioActor::control() {
         int warpScenario = 1;
         if (port_net_take_warp_event(warpStage, sizeof(warpStage), &warpScenario)) {
             port_request_warp(warpStage, warpScenario);
+        }
+    } else if (port_is_plus_edition()) {
+        RemotePlayerActor* rActor = RemotePlayerActor::getInstance();
+        if (rActor && !MR::isDead(rActor)) {
+            rActor->makeActorDead();
         }
     }
 #endif

@@ -32,8 +32,6 @@ RemotePlayerActor* RemotePlayerActor::getInstance() {
 void RemotePlayerActor::tryCreate() {
 #ifdef TARGET_PC
     if (!port_is_plus_edition()) return;
-    if (!port_net_is_connected()) return;
-    if (port_net_get_mode() != PORT_NET_MODE_COOP) return;
 
     if (!sInstance) {
         sInstance = new RemotePlayerActor("RemotePlayer");
@@ -53,20 +51,16 @@ void RemotePlayerActor::init(const JMapInfoIter& rIter) {
     // If local player is Mario, remote partner is Luigi (and vice versa)
     mIsLuigi = !MR::isPlayerLuigi();
 
-    const char* modelName = mIsLuigi ? "Luigi" : "Mario";
-    if (!MR::isExistModel(modelName)) {
-        modelName = mIsLuigi ? "GhostLuigi" : "GhostMario";
-        if (!MR::isExistModel(modelName)) {
-            modelName = "Mario";
-        }
-    }
+    // Use whatever player archive is already loaded and stationed in memory
+    // (Mario.arc when playing as Mario, Luigi.arc when playing as Luigi).
+    // This avoids synchronous storage I/O and heap reallocation during gameplay.
+    const char* modelName = MR::isPlayerLuigi() ? "Luigi" : "Mario";
 
     initModelManagerWithAnm(modelName, "MarioAnime", true);
 
     MR::connectToScene(this, MR::MovementType_Player, MR::CalcAnimType_Player,
-                       MR::DrawBufferType_Player, MR::DrawType_Player);
+                       MR::DrawBufferType_PlayerDecoration, MR::DrawType_None);
 
-    initEffectKeeper(4, nullptr, false);
     initSound(4, false);
 
     MR::initShadowVolumeSphere(this, 50.0f);
@@ -76,16 +70,27 @@ void RemotePlayerActor::init(const JMapInfoIter& rIter) {
     MR::onCalcShadowDropGravity(this, nullptr);
     MR::invalidateClipping(this);
 
+    // Apply distinct visual silhouette for Player 2
+    if (mIsLuigi) {
+        // Luigi: taller and slimmer
+        mScale.set(0.95f, 1.05f, 0.95f);
+    } else {
+        // Mario: stockier
+        mScale.set(1.05f, 0.95f, 1.05f);
+    }
+
     mCurrentAnim = "Wait";
     MR::tryStartBck(this, "Wait", nullptr);
 
-    makeActorAppeared();
+    // Start dormant (invisible & paused) until a peer connects
+    makeActorDead();
 }
 
 void RemotePlayerActor::control() {
 #ifdef TARGET_PC
     PortRemotePlayerState rState;
-    if (!port_net_get_remote_player_state(&rState) || !rState.valid) {
+    if (!port_net_is_connected() || port_net_get_mode() != PORT_NET_MODE_COOP ||
+        !port_net_get_remote_player_state(&rState) || !rState.valid) {
         if (!MR::isDead(this)) {
             makeActorDead();
         }
@@ -100,7 +105,7 @@ void RemotePlayerActor::control() {
     TVec3f target(rState.posX, rState.posY, rState.posZ);
     TVec3f delta = target - mPosition;
     float dist = delta.length();
-    if (dist > 500.0f) {
+    if (dist > 500.0f || dist < 0.1f) {
         mPosition = target;
     } else {
         mPosition += delta * 0.40f;

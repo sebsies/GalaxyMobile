@@ -22,7 +22,7 @@ public:
     // Session Management
     bool startHost(int port, int mode, const std::string& roomName);
     bool connectTo(const std::string& ip, int port);
-    void disconnect();
+    void disconnect(bool stopHosting = true);
 
     // Queries
     bool isConnected() const { return mConnected.load(); }

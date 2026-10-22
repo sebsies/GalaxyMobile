@@ -176,7 +176,7 @@ bool NetplayManager::connectTo(const std::string& ip, int port) {
     return true;
 }
 
-void NetplayManager::disconnect() {
+void NetplayManager::disconnect(bool stopHosting) {
     if (mRole.load() != PORT_NET_ROLE_NONE && !mPeerIp.empty() && mPeerPort > 0) {
         sendPacket(PKT_DISCONNECT, nullptr, 0, mPeerIp, mPeerPort);
     }
@@ -187,7 +187,9 @@ void NetplayManager::disconnect() {
     zeroPad.connected = 0;
     port_input_set(1, &zeroPad);
 
-    mRole.store(PORT_NET_ROLE_NONE);
+    if (stopHosting || mRole.load() == PORT_NET_ROLE_CLIENT) {
+        mRole.store(PORT_NET_ROLE_NONE);
+    }
     mConnected.store(false);
     mPeerIp.clear();
     mPeerPort = 0;
@@ -329,7 +331,7 @@ void NetplayManager::workerLoop() {
             // Connection timeout after 5.0 s of silence
             if (std::chrono::duration_cast<std::chrono::milliseconds>(now - mLastPacketReceived).count() >= 5000) {
                 PORT_LOG("NetplayManager: connection to %s:%d timed out\n", mPeerIp.c_str(), mPeerPort);
-                disconnect();
+                disconnect(false);
             }
         }
 
@@ -469,7 +471,7 @@ void NetplayManager::handleIncomingPacket(const uint8_t* data, size_t size, cons
     // Disconnect
     else if (hdr->type == PKT_DISCONNECT) {
         PORT_LOG("NetplayManager: received graceful disconnect from peer %s:%d\n", srcIp.c_str(), srcPort);
-        disconnect();
+        disconnect(false);
     }
 }
 

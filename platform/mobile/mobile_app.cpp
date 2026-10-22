@@ -643,6 +643,11 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
             a.pad.accY = 0.0f;
         }
         port_input_set(0, &a.pad);
+        if (port_is_plus_edition() && port_net_is_connected() &&
+            port_net_get_mode() == PORT_NET_MODE_COSTAR &&
+            port_net_get_role() == PORT_NET_ROLE_CLIENT) {
+            port_net_send_costar_state(&a.pad);
+        }
         port_net_update();
         mobile_haptics::updateRumble(port_input_rumble(0));
 
