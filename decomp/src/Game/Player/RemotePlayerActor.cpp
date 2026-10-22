@@ -2,6 +2,7 @@
 #include "port/net.h"
 #include "port/port.h"
 
+#include "Game/Player/MarioActor.hpp"
 #include "Game/Scene/SceneFunction.hpp"
 #include "Game/Util/ObjUtil.hpp"
 #include "Game/Util/EventUtil.hpp"
@@ -11,12 +12,14 @@
 #include "Game/Util/ModelUtil.hpp"
 #include "Game/Util/PlayerUtil.hpp"
 #include "Game/Util/SoundUtil.hpp"
+#include "Game/Util/EffectUtil.hpp"
 
 RemotePlayerActor* RemotePlayerActor::sInstance = nullptr;
 
 RemotePlayerActor::RemotePlayerActor(const char* pName)
     : LiveActor(pName), mIsLuigi(false), mTargetPos(0.0f, 0.0f, 0.0f),
-      mTargetRot(0.0f, 0.0f, 0.0f), mCurrentAnim(nullptr), mSpinSoundCooldown(0) {
+      mTargetRot(0.0f, 0.0f, 0.0f), mCurrentAnim(nullptr), mSpinSoundCooldown(0),
+      mCurrentPowerupMode(-1), mWasSpinning(false) {
 }
 
 RemotePlayerActor::~RemotePlayerActor() {
@@ -57,7 +60,10 @@ void RemotePlayerActor::init(const JMapInfoIter& rIter) {
     MR::connectToScene(this, MR::MovementType_Player, MR::CalcAnimType_Player,
                        MR::DrawBufferType_PlayerDecoration, MR::DrawType_None);
 
+    // Audio, particle effects & scene lighting
     initSound(4, false);
+    initEffectKeeper(16, "Mario", false);
+    MR::initLightCtrl(this);
 
     MR::initShadowVolumeSphere(this, 50.0f);
     MR::validateShadow(this, nullptr);
@@ -74,12 +80,64 @@ void RemotePlayerActor::init(const JMapInfoIter& rIter) {
         // Mario: stockier
         mScale.set(1.05f, 0.95f, 1.05f);
     }
+    MR::getJ3DModel(this)->setBaseScale(mScale);
+
+    // Initial normal texture pattern
+    if (MR::startBtpIfExist(this, "ColorChange")) {
+        MR::setBtpFrameAndStop(this, 0.0f);
+    }
 
     mCurrentAnim = "Wait";
     MR::tryStartBck(this, "Wait", nullptr);
 
     // Start dormant (invisible & paused) until a peer connects
     makeActorDead();
+}
+
+void RemotePlayerActor::updatePowerup(int powerupMode) {
+    // Clean up any active continuous powerup looping effects
+    if (mEffectKeeper) {
+        MR::deleteEffect(this, "\x96\xb3\x93\x47\x92\x86"); // Invincible ("無敵中")
+        MR::deleteEffect(this, "\x83\x41\x83\x43\x83\x58\x92\x86"); // Ice ("アイス中")
+    }
+
+    switch (powerupMode) {
+    case PlayerMode_Foo: // Flying / Red Star Mario
+        if (MR::startBtpIfExist(this, "ColorChange")) {
+            MR::setBtpFrameAndStop(this, 1.0f);
+        }
+        break;
+
+    case PlayerMode_2: // Fire Mario
+        if (MR::startBtpIfExist(this, "ColorChange")) {
+            MR::setBtpFrameAndStop(this, 2.0f);
+        }
+        break;
+
+    case PlayerMode_Invincible: // Rainbow Star
+        if (MR::startBtpIfExist(this, "ColorChange")) {
+            MR::setBtpFrameAndStop(this, 0.0f);
+        }
+        if (mEffectKeeper) {
+            MR::emitEffect(this, "\x96\xb3\x93\x47\x92\x86");
+        }
+        break;
+
+    case PlayerMode_Ice: // Ice Mario
+        if (MR::startBtpIfExist(this, "ColorChange")) {
+            MR::setBtpFrameAndStop(this, 0.0f);
+        }
+        if (mEffectKeeper) {
+            MR::emitEffect(this, "\x83\x41\x83\x43\x83\x58\x92\x86");
+        }
+        break;
+
+    default: // Normal (0) and other modes
+        if (MR::startBtpIfExist(this, "ColorChange")) {
+            MR::setBtpFrameAndStop(this, 0.0f);
+        }
+        break;
+    }
 }
 
 void RemotePlayerActor::control() {
@@ -110,33 +168,71 @@ void RemotePlayerActor::control() {
     // Direct orientation match
     mRotation.set(rState.rotX, rState.rotY, rState.rotZ);
 
+    // Power-up skin synchronization
+    if (rState.powerupMode != mCurrentPowerupMode) {
+        mCurrentPowerupMode = rState.powerupMode;
+        updatePowerup(mCurrentPowerupMode);
+    }
+
     // Dynamic animation selection based on remote player action flags
     const char* nextAnim = "Wait";
-    if (rState.stateFlags & PORT_NET_FLAG_SPINNING) {
+    bool isSpinning = (rState.stateFlags & PORT_NET_FLAG_SPINNING) != 0;
+
+    if (isSpinning) {
         nextAnim = "Spin";
-        if (mSpinSoundCooldown <= 0) {
+        if (mSpinSoundCooldown <= 0 || !mWasSpinning) {
             MR::startSound(this, "SE_PV_MARIO_SPIN");
-            mSpinSoundCooldown = 30;
+            mSpinSoundCooldown = 25;
+            if (mEffectKeeper) {
+                // Iconic star burst ring around player
+                MR::emitEffect(this, "\x83\x58\x83\x73\x83\x93\x83\x8a\x83\x93\x83\x4f"); // SpinRing
+
+                // Star sparkle / elemental spin trail
+                if (mCurrentPowerupMode == PlayerMode_2) {
+                    MR::emitEffect(this, "\x83\x74\x83\x40\x83\x43\x83\x41\x83\x58\x83\x73\x83\x93"); // FireMarioSpinLight
+                } else if (mCurrentPowerupMode == PlayerMode_Ice) {
+                    MR::emitEffect(this, "\x83\x41\x83\x43\x83\x58\x83\x58\x83\x73\x83\x93"); // IceMarioSpinLight
+                } else {
+                    MR::emitEffect(this, "\x83\x58\x83\x73\x83\x93\x83\x89\x83\x43\x83\x67"); // SpinLight
+                }
+            }
         }
-    } else if (rState.stateFlags & PORT_NET_FLAG_AIR) {
-        nextAnim = "Jump";
-    } else if (rState.stateFlags & PORT_NET_FLAG_SWIMMING) {
-        nextAnim = "Swim";
-    } else if (rState.stateFlags & PORT_NET_FLAG_SLIDING) {
-        nextAnim = "Slide";
-    } else if (rState.stateFlags & PORT_NET_FLAG_SQUATTING) {
-        nextAnim = "Squat";
     } else {
-        TVec3f vel(rState.velX, rState.velY, rState.velZ);
-        if (vel.length() > 2.0f) {
-            nextAnim = "Run";
+        if (mWasSpinning && mEffectKeeper) {
+            MR::deleteEffect(this, "\x83\x58\x83\x73\x83\x93\x83\x89\x83\x43\x83\x67");
+            MR::deleteEffect(this, "\x83\x74\x83\x40\x83\x43\x83\x41\x83\x58\x83\x73\x83\x93");
+            MR::deleteEffect(this, "\x83\x41\x83\x43\x83\x58\x83\x58\x83\x73\x83\x93");
+        }
+    }
+    mWasSpinning = isSpinning;
+
+    if (!isSpinning) {
+        if (rState.stateFlags & PORT_NET_FLAG_FLYING) {
+            nextAnim = "\x83\x74\x81\x5b\x83\x74\x83\x40\x83\x43\x83\x5e\x81\x5b\x94\xf2\x8d\x73"; // Flight
+        } else if (rState.stateFlags & PORT_NET_FLAG_AIR) {
+            nextAnim = "Jump";
+        } else if (rState.stateFlags & PORT_NET_FLAG_SWIMMING) {
+            nextAnim = "Swim";
+        } else if (rState.stateFlags & PORT_NET_FLAG_SLIDING) {
+            nextAnim = "Slide";
+        } else if (rState.stateFlags & PORT_NET_FLAG_SQUATTING) {
+            nextAnim = "Squat";
+        } else {
+            TVec3f vel(rState.velX, rState.velY, rState.velZ);
+            if (vel.length() > 2.0f) {
+                nextAnim = "Run";
+            }
         }
     }
 
     if (nextAnim != mCurrentAnim) {
-        if (MR::tryStartBck(this, nextAnim, nullptr)) {
-            mCurrentAnim = nextAnim;
+        if (!MR::tryStartBck(this, nextAnim, nullptr)) {
+            // Fallback for animations if not found
+            if (MR::tryStartBck(this, "Jump", nullptr)) {
+                nextAnim = "Jump";
+            }
         }
+        mCurrentAnim = nextAnim;
     }
 
     if (mSpinSoundCooldown > 0) {

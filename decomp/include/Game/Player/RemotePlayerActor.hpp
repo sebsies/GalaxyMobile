@@ -17,11 +17,15 @@ public:
     static void tryDestroy();
 
 private:
+    void updatePowerup(int powerupMode);
+
     bool mIsLuigi;
     TVec3f mTargetPos;
     TVec3f mTargetRot;
     const char* mCurrentAnim;
     int mSpinSoundCooldown;
+    int mCurrentPowerupMode;
+    bool mWasSpinning;
 
     static RemotePlayerActor* sInstance;
 };
