@@ -688,8 +688,10 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
             totalContentH = 474.0f * uiScale;
         } else if (mSettingsTab == 1) {
             totalContentH = 384.0f * uiScale;
-        } else {
+        } else if (mSettingsTab == 2) {
             totalContentH = mPlusEdition ? (720.0f * uiScale) : (460.0f * uiScale);
+        } else {
+            totalContentH = 750.0f * uiScale;
         }
         float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
 
@@ -881,6 +883,53 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                             mSettings.hdUiTextures = !mSettings.hdUiTextures;
                             mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                         }
+                    } else if (mSettingsTab == 3) {
+                        // Tab 3: Netplay (Local Wi-Fi & Online)
+                        float cardX0 = drawerX + padX;
+                        float cX0 = cardX0 + 8.0f * uiScale;
+                        float cX1 = cardX0 + contentW - 8.0f * uiScale;
+
+                        // 1. Disconnect / Stop Host (Card 1: 68..112)
+                        if (contentRelY >= 68.0f * uiScale && contentRelY <= 112.0f * uiScale && px >= cX1 - 120.0f * uiScale) {
+                            port_net_disconnect();
+                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                        }
+                        // 2. Mode Selectors (Card 2: 148..204)
+                        else if (contentRelY >= 148.0f * uiScale && contentRelY <= 204.0f * uiScale) {
+                            if (px < (cX0 + cX1) * 0.5f) {
+                                port_net_set_mode(PORT_NET_MODE_COOP);
+                            } else {
+                                port_net_set_mode(PORT_NET_MODE_COSTAR);
+                            }
+                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                        }
+                        // 3. Host Button (Card 3: 268..320)
+                        else if (contentRelY >= 268.0f * uiScale && contentRelY <= 320.0f * uiScale) {
+                            if (port_net_get_role() == 1) {
+                                port_net_disconnect();
+                            } else {
+                                port_net_start_host(24601, port_net_get_mode(), "Galaxy Room");
+                            }
+                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                        }
+                        // 4. Discovered LAN Hosts List (Card 4: 356..510)
+                        else if (contentRelY >= 356.0f * uiScale && contentRelY <= 510.0f * uiScale) {
+                            PortLanHostInfo hosts[3];
+                            int n = port_net_get_lan_hosts(hosts, 3);
+                            for (int i = 0; i < n; i++) {
+                                float rY = 356.0f * uiScale + i * 48.0f * uiScale;
+                                if (contentRelY >= rY && contentRelY <= rY + 44.0f * uiScale && px >= cX1 - 100.0f * uiScale) {
+                                    port_net_connect(hosts[i].ip, hosts[i].port);
+                                    mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                                    break;
+                                }
+                            }
+                        }
+                        // 5. Direct Connect Button (Card 5: 574..630)
+                        else if (contentRelY >= 574.0f * uiScale && contentRelY <= 630.0f * uiScale) {
+                            port_net_connect("192.168.43.1", 24601);
+                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                        }
                     } else {
                         // Tab 2: System (Vanilla) or Advanced (Plus)
                         if (mPlusEdition) {
@@ -1067,12 +1116,13 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                     return true;
                 }
             } else {
-                // Tab Bar Tap (Controls vs Display vs System/Advanced) - Available in BOTH Vanilla and Plus
+                // Tab Bar Tap (Controls vs Display vs Cheats/System vs Netplay)
                 if (py >= 58.0f * uiScale && py <= 106.0f * uiScale) {
-                    float tabW = contentW / 3.0f;
+                    int numTabs = mPlusEdition ? 4 : 3;
+                    float tabW = contentW / (float)numTabs;
                     float relX = px - (drawerX + padX);
                     int newTab = (int)(relX / tabW);
-                    if (newTab >= 0 && newTab < 3 && newTab != mSettingsTab) {
+                    if (newTab >= 0 && newTab < numTabs && newTab != mSettingsTab) {
                         mSettingsTab = newTab;
                         mDrawerScrollY = 0.0f;
                         mDrawerScrollTarget = 0.0f;
@@ -1406,7 +1456,8 @@ void UIOverlay::render(int screenW, int screenH) {
     // Fluid Tab Indicator Animation
     float padX = 22.0f * uiScale;
     float contentW = drawerW - padX * 2.0f;
-    float tabW = contentW / 3.0f;
+    int numTabs = mPlusEdition ? 4 : 3;
+    float tabW = contentW / (float)numTabs;
     mTabTargetX = drawerX + padX + mSettingsTab * tabW + 3.0f * uiScale;
     mTabTargetW = tabW - 6.0f * uiScale;
     if (mTabIndicatorW < 1.0f) {
@@ -1875,8 +1926,10 @@ void UIOverlay::render(int screenW, int screenH) {
             totalContentH = 474.0f * uiScale;
         } else if (mSettingsTab == 1) {
             totalContentH = 384.0f * uiScale;
-        } else {
+        } else if (mSettingsTab == 2) {
             totalContentH = mPlusEdition ? (720.0f * uiScale) : (460.0f * uiScale);
+        } else {
+            totalContentH = 750.0f * uiScale;
         }
         float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
 
@@ -2215,7 +2268,7 @@ void UIOverlay::render(int screenW, int screenH) {
                     drawText("Crisp native 1080p text, icons, buttons & health meter", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
                     drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimHdUi);
                 });
-            } else {
+            } else if (mSettingsTab == 2) {
                 // =========================================================
                 // Tab 2: System (Vanilla) or Advanced (Plus)
                 // =========================================================
@@ -2415,6 +2468,159 @@ void UIOverlay::render(int screenW, int screenH) {
                         drawText("Optimized for all Android 11+ Snapdragon & Dimensity chipsets.", cX0 + 16.0f * uiScale, y + 68.0f * uiScale, 0.24f * uiScale, rgba(0.55f, 0.60f, 0.70f, 0.75f), 0);
                     });
                 }
+            } else if (mSettingsTab == 3) {
+                // -------------------------------------------------------------
+                // Tab 3: Netplay (Local Wi-Fi LAN & Online Multiplayer)
+                // -------------------------------------------------------------
+                bool isConn = (port_net_is_connected() != 0);
+                int netRole = port_net_get_role();
+                int netMode = port_net_get_mode();
+                int ping = port_net_get_ping_ms();
+                const char* peerIp = port_net_get_peer_ip();
+                const char* localIp = port_net_get_local_ip();
+
+                // Card 1: Network Connection Status & Live Metrics (H = 110)
+                renderCardBlock(6.0f * uiScale, 110.0f * uiScale, [&](float y) {
+                    drawCard(cX0, y, cX1, y + 110.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+
+                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, isConn ? rgba(0.290f, 0.871f, 0.502f, 1.0f) : cHeader);
+                    drawText("MULTIPLAYER STATUS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+
+                    if (isConn) {
+                        char statusBuf[64];
+                        snprintf(statusBuf, sizeof(statusBuf), "Connected (%s)", (netRole == 1) ? "Host" : "Client");
+                        drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, statusBuf,
+                                       rgba(0.12f, 0.32f, 0.20f, 0.90f), rgba(0.50f, 0.95f, 0.60f, 1.0f), rgba(0.290f, 0.871f, 0.502f, 1.0f));
+
+                        char pingBuf[32];
+                        snprintf(pingBuf, sizeof(pingBuf), "%d ms", ping);
+                        drawStatusChip(cX0 + 180.0f * uiScale, y + 36.0f * uiScale, pingBuf,
+                                       rgba(0.14f, 0.24f, 0.36f, 0.90f), rgba(0.60f, 0.85f, 1.0f, 1.0f), cHeader);
+
+                        char peerBuf[64];
+                        snprintf(peerBuf, sizeof(peerBuf), "Peer: %s", (peerIp && *peerIp) ? peerIp : "Unknown");
+                        drawText(peerBuf, cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+
+                        float dcBtnY = y + 70.0f * uiScale;
+                        drawRoundRect(cX1 - 110.0f * uiScale, dcBtnY, cX1 - 14.0f * uiScale, dcBtnY + 30.0f * uiScale, 14.0f * uiScale, rgba(0.55f, 0.15f, 0.15f, 0.95f));
+                        drawText("DISCONNECT", cX1 - 62.0f * uiScale, dcBtnY + 20.0f * uiScale, 0.28f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                    } else if (netRole == 1) { // Hosting
+                        drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Hosting • Port 24601",
+                                       rgba(0.38f, 0.28f, 0.08f, 0.95f), rgba(1.0f, 0.88f, 0.40f, 1.0f), rgba(0.988f, 0.827f, 0.302f, 1.0f));
+
+                        char localBuf[64];
+                        snprintf(localBuf, sizeof(localBuf), "Local IP: %s (Beacon active)", (localIp && *localIp) ? localIp : "127.0.0.1");
+                        drawText(localBuf, cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+
+                        float stopBtnY = y + 70.0f * uiScale;
+                        drawRoundRect(cX1 - 100.0f * uiScale, stopBtnY, cX1 - 14.0f * uiScale, stopBtnY + 30.0f * uiScale, 14.0f * uiScale, rgba(0.55f, 0.15f, 0.15f, 0.95f));
+                        drawText("STOP", cX1 - 57.0f * uiScale, stopBtnY + 20.0f * uiScale, 0.28f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                    } else {
+                        drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Offline / Ready",
+                                       rgba(0.18f, 0.20f, 0.25f, 0.90f), rgba(0.70f, 0.74f, 0.80f, 1.0f), rgba(0.50f, 0.54f, 0.60f, 1.0f));
+
+                        char localBuf[64];
+                        snprintf(localBuf, sizeof(localBuf), "Local IP: %s", (localIp && *localIp) ? localIp : "127.0.0.1");
+                        drawText(localBuf, cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+                        drawText("Host a room or join a friend on Wi-Fi or Online.", cX0 + 14.0f * uiScale, y + 92.0f * uiScale, 0.24f * uiScale, rgba(0.55f, 0.60f, 0.70f, 0.75f), 0);
+                    }
+                });
+
+                // Card 2: Multiplayer Mode Selection (H = 88)
+                renderCardBlock(124.0f * uiScale, 88.0f * uiScale, [&](float y) {
+                    drawCard(cX0, y, cX1, y + 88.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+
+                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
+                    drawText("GAMEPLAY MODE", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+
+                    float mBtnY = y + 36.0f * uiScale;
+                    float mBtnW = (contentW - 36.0f * uiScale) * 0.5f;
+
+                    bool isCoop = (netMode == 1);
+                    Color coopBg = isCoop ? rgba(0.043f, 0.341f, 0.816f, 0.95f) : rgba(0.165f, 0.180f, 0.215f, 0.90f);
+                    Color coopTxt = isCoop ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.70f, 0.74f, 0.80f, 0.80f);
+                    drawRoundRect(cX0 + 14.0f * uiScale, mBtnY, cX0 + 14.0f * uiScale + mBtnW, mBtnY + 38.0f * uiScale, 16.0f * uiScale, coopBg);
+                    drawText("Mario & Luigi Co-op", cX0 + 14.0f * uiScale + mBtnW * 0.5f, mBtnY + 24.0f * uiScale, 0.30f * uiScale, coopTxt, 1);
+
+                    bool isCostar = (netMode == 2);
+                    Color csBg = isCostar ? rgba(0.38f, 0.20f, 0.68f, 0.95f) : rgba(0.165f, 0.180f, 0.215f, 0.90f);
+                    Color csTxt = isCostar ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.70f, 0.74f, 0.80f, 0.80f);
+                    drawRoundRect(cX1 - 14.0f * uiScale - mBtnW, mBtnY, cX1 - 14.0f * uiScale, mBtnY + 38.0f * uiScale, 16.0f * uiScale, csBg);
+                    drawText("Co-Star Assist Mode", cX1 - 14.0f * uiScale - mBtnW * 0.5f, mBtnY + 24.0f * uiScale, 0.30f * uiScale, csTxt, 1);
+                });
+
+                // Card 3: Host a Room (H = 100)
+                renderCardBlock(220.0f * uiScale, 100.0f * uiScale, [&](float y) {
+                    drawCard(cX0, y, cX1, y + 100.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+
+                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, rgba(0.988f, 0.827f, 0.302f, 1.0f));
+                    drawText("HOST A GAME ROOM", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, rgba(0.988f, 0.827f, 0.302f, 1.0f), 0);
+
+                    drawText("Beacons room to Wi-Fi / Hotspot & listens on UDP port 24601.", cX0 + 14.0f * uiScale, y + 44.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+
+                    float hBtnY = y + 56.0f * uiScale;
+                    bool hosting = (netRole == 1);
+                    Color hBtnBg = hosting ? rgba(0.48f, 0.18f, 0.18f, 0.95f) : rgba(0.043f, 0.341f, 0.816f, 0.95f);
+                    drawRoundRect(cX0 + 14.0f * uiScale, hBtnY, cX1 - 14.0f * uiScale, hBtnY + 34.0f * uiScale, 16.0f * uiScale, hBtnBg);
+                    const char* hBtnTxt = hosting ? "STOP HOSTING ROOM" : "START HOSTING ROOM (PORT 24601)";
+                    drawText(hBtnTxt, (cX0 + cX1) * 0.5f, hBtnY + 22.0f * uiScale, 0.33f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                });
+
+                // Card 4: Discovered LAN Rooms (H = 190)
+                renderCardBlock(328.0f * uiScale, 190.0f * uiScale, [&](float y) {
+                    drawCard(cX0, y, cX1, y + 190.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+
+                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
+                    drawText("DISCOVERED LAN ROOMS (WI-FI / HOTSPOT)", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+
+                    PortLanHostInfo hosts[3];
+                    int numHosts = port_net_get_lan_hosts(hosts, 3);
+                    if (numHosts == 0) {
+                        drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Searching LAN for active rooms...",
+                                       rgba(0.18f, 0.20f, 0.25f, 0.90f), rgba(0.70f, 0.74f, 0.80f, 1.0f), rgba(0.50f, 0.54f, 0.60f, 1.0f));
+                        drawText("Make sure both devices are on the same Wi-Fi or Hotspot.", cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+                        drawText("Host must tap 'Start Hosting Room' above.", cX0 + 14.0f * uiScale, y + 92.0f * uiScale, 0.24f * uiScale, rgba(0.55f, 0.60f, 0.70f, 0.75f), 0);
+                    } else {
+                        for (int hIdx = 0; hIdx < numHosts; hIdx++) {
+                            float rowY = y + 36.0f * uiScale + hIdx * 48.0f * uiScale;
+                            drawRoundRect(cX0 + 14.0f * uiScale, rowY, cX1 - 14.0f * uiScale, rowY + 42.0f * uiScale, 12.0f * uiScale, rgba(0.141f, 0.153f, 0.180f, 0.95f));
+
+                            drawText(hosts[hIdx].name, cX0 + 24.0f * uiScale, rowY + 18.0f * uiScale, 0.31f * uiScale, cTextPrimary, 0);
+                            char infoStr[64];
+                            snprintf(infoStr, sizeof(infoStr), "%s:%d • %s", hosts[hIdx].ip, hosts[hIdx].port, (hosts[hIdx].mode == 1) ? "Co-op" : "Co-Star");
+                            drawText(infoStr, cX0 + 24.0f * uiScale, rowY + 34.0f * uiScale, 0.24f * uiScale, cTextSecondary, 0);
+
+                            float jBtnX1 = cX1 - 22.0f * uiScale;
+                            float jBtnX0 = jBtnX1 - 70.0f * uiScale;
+                            float jBtnY = rowY + 7.0f * uiScale;
+                            drawRoundRect(jBtnX0, jBtnY, jBtnX1, jBtnY + 28.0f * uiScale, 12.0f * uiScale, rgba(0.14f, 0.48f, 0.26f, 0.95f));
+                            drawText("JOIN", (jBtnX0 + jBtnX1) * 0.5f, jBtnY + 19.0f * uiScale, 0.30f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                        }
+                    }
+                });
+
+                // Card 5: Direct Online Connect (H = 110)
+                renderCardBlock(526.0f * uiScale, 110.0f * uiScale, [&](float y) {
+                    drawCard(cX0, y, cX1, y + 110.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+
+                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
+                    drawText("DIRECT IP CONNECT (ONLINE / HOTSPOT)", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+
+                    drawText("Connect to remote host via IP:Port or Hotspot gateway.", cX0 + 14.0f * uiScale, y + 44.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+
+                    float cBtnY = y + 58.0f * uiScale;
+                    drawRoundRect(cX0 + 14.0f * uiScale, cBtnY, cX1 - 14.0f * uiScale, cBtnY + 36.0f * uiScale, 16.0f * uiScale, rgba(0.18f, 0.32f, 0.55f, 0.95f));
+                    drawText("CONNECT TO LOCAL GATEWAY (192.168.43.1)", (cX0 + cX1) * 0.5f, cBtnY + 23.0f * uiScale, 0.30f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                });
+
+                // Card 6: Info & Guidance (H = 80)
+                renderCardBlock(644.0f * uiScale, 80.0f * uiScale, [&](float y) {
+                    drawCard(cX0, y, cX1, y + 80.0f * uiScale, 18.0f * uiScale, rgba(0.165f, 0.180f, 0.215f, 0.95f), cCardBorder);
+
+                    drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "Galaxy Netplay Core v1.0", rgba(0.38f, 0.28f, 0.08f, 0.95f), rgba(1.0f, 0.88f, 0.40f, 1.0f), rgba(0.988f, 0.827f, 0.302f, 1.0f));
+                    drawText("Ultra-low latency UDP protocol • Auto NAT & Broadcast", cX0 + 16.0f * uiScale, y + 54.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                    drawText("Both players enjoy full 60 FPS gameplay synchronization.", cX0 + 16.0f * uiScale, y + 68.0f * uiScale, 0.24f * uiScale, rgba(0.55f, 0.60f, 0.70f, 0.75f), 0);
+                });
             }
 
             // Scrollbar Thumb (rendered inside content area)
@@ -2458,18 +2664,21 @@ void UIOverlay::render(int screenW, int screenH) {
             // Animated Sliding Pill Indicator
             drawRoundRect(mTabIndicatorX, tabBoxY0 + 3.0f * uiScale, mTabIndicatorX + mTabIndicatorW, tabBoxY1 - 3.0f * uiScale, 17.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 0.95f));
 
-            const char* kTabTitles[3];
+            int numTabs = mPlusEdition ? 4 : 3;
+            float tabW = contentW / (float)numTabs;
+            const char* kTabTitles[4];
             kTabTitles[0] = "Controls";
             kTabTitles[1] = "Display";
-            kTabTitles[2] = mPlusEdition ? "Advanced" : "System";
+            kTabTitles[2] = mPlusEdition ? "Cheats" : "System";
+            kTabTitles[3] = "Netplay";
 
-            for (int t = 0; t < 3; t++) {
+            for (int t = 0; t < numTabs; t++) {
                 float tX0 = drawerX + padX + t * tabW;
                 float tX1 = tX0 + tabW;
                 float tMidX = (tX0 + tX1) * 0.5f;
                 bool isSel = (mSettingsTab == t);
                 Color tCol = isSel ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.720f, 0.745f, 0.784f, 0.75f);
-                drawText(kTabTitles[t], tMidX, tabBoxY0 + 26.0f * uiScale, 0.35f * uiScale, tCol, 1);
+                drawText(kTabTitles[t], tMidX, tabBoxY0 + 26.0f * uiScale, 0.33f * uiScale, tCol, 1);
             }
 
             // Divider below tab bar

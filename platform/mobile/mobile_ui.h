@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <string>
 #include "port/input.h"
+#include "port/net.h"
 
 namespace mobile_ui {
 
@@ -108,6 +109,10 @@ private:
     float mSwAnimInfinitePowerup = 0.0f;
     float mSwAnimHaptics = 0.0f;
     float mSwAnimFlightEverywhere = 0.0f;
+
+    // Netplay State (Local Wi-Fi & Online)
+    bool mNetIsHosting = false;
+    int mNetSelectedMode = 1; // 1 = Co-op, 2 = Co-Star
 
     // Warp Menu Sub-View (Plus Edition)
     bool mWarpMenuOpen = false;

@@ -1,5 +1,7 @@
 #include "Game/Player/MarioActor.hpp"
 #include "port/port.h"
+#include "port/net.h"
+#include "Game/Player/RemotePlayerActor.hpp"
 #include "Game/Animation/XanimeCore.hpp"
 #include "Game/Camera/CameraTargetArg.hpp"
 #include "Game/Enemy/KarikariDirector.hpp"
@@ -1003,6 +1005,50 @@ void MarioActor::control() {
 
     control2();
     _294 = mPosition;
+
+#ifdef TARGET_PC
+    if (port_is_plus_edition() && port_net_is_connected() && port_net_get_mode() == PORT_NET_MODE_COOP) {
+        RemotePlayerActor::tryCreate();
+
+        static int sNetSendCooldown = 0;
+        if (++sNetSendCooldown >= 2) {
+            sNetSendCooldown = 0;
+            PortRemotePlayerState myState;
+            memset(&myState, 0, sizeof(myState));
+            myState.valid = 1;
+            myState.posX = mPosition.x;
+            myState.posY = mPosition.y;
+            myState.posZ = mPosition.z;
+            myState.velX = mVelocity.x;
+            myState.velY = mVelocity.y;
+            myState.velZ = mVelocity.z;
+            myState.rotX = mRotation.x;
+            myState.rotY = mRotation.y;
+            myState.rotZ = mRotation.z;
+            myState.isLuigi = gIsLuigi ? 1 : 0;
+            myState.powerupMode = mPlayerMode;
+
+            uint32_t flags = 0;
+            if (isJumping() || MR::isPlayerJumpRising() || MR::isPlayerHipDropFalling()) flags |= PORT_NET_FLAG_AIR;
+            else flags |= PORT_NET_FLAG_GROUNDED;
+            if (MR::isPlayerSwimming()) flags |= PORT_NET_FLAG_SWIMMING;
+            if (isPunching() || MR::isPlayerSwingAction()) flags |= PORT_NET_FLAG_SPINNING;
+            if (MR::isPlayerFlying()) flags |= PORT_NET_FLAG_FLYING;
+            if (MR::isPlayerSkating()) flags |= PORT_NET_FLAG_SLIDING;
+            if (MR::isPlayerSquat()) flags |= PORT_NET_FLAG_SQUATTING;
+            if (MR::isPlayerDead()) flags |= PORT_NET_FLAG_DEAD;
+            myState.stateFlags = flags;
+
+            port_net_send_player_state(&myState);
+        }
+
+        char warpStage[64];
+        int warpScenario = 1;
+        if (port_net_take_warp_event(warpStage, sizeof(warpStage), &warpScenario)) {
+            port_request_warp(warpStage, warpScenario);
+        }
+    }
+#endif
 }
 
 void MarioActor::control2() {

@@ -28,6 +28,7 @@
 #include "mobile_haptics.h"
 #include "port/input.h"
 #include "port/port.h"
+#include "port/net.h"
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "PetariVR", __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "PetariVR", __VA_ARGS__)
@@ -569,6 +570,7 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
 
     mobile_ui::get().setPlusEdition(isPlus);
     mobile_haptics::init(app->activity->vm, app->activity->clazz);
+    port_net_init();
     port_skip_set_hold_seconds(isPlus ? 1.0f : 0.0f);
     LOGI("GalaxyMobile edition detected: %s (internalDataPath: %s, externalPath: %s)", isPlus ? "GalaxyMobile+" : "GalaxyMobile (Standard)", internalPath.c_str(), externalPath.c_str());
 
@@ -641,6 +643,7 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
             a.pad.accY = 0.0f;
         }
         port_input_set(0, &a.pad);
+        port_net_update();
         mobile_haptics::updateRumble(port_input_rumble(0));
 
 
@@ -727,6 +730,7 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
     }
 
     LOGI("GalaxyMobile exiting cleanly");
+    port_net_shutdown();
     mobile_haptics::shutdown();
     destroySurface(a);
     exit(0);
