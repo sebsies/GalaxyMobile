@@ -3,6 +3,7 @@
 #include "port/port.h"
 
 #include "Game/Player/MarioActor.hpp"
+#include "Game/Player/MarioParts.hpp"
 #include "Game/Scene/SceneFunction.hpp"
 #include "Game/Util/ObjUtil.hpp"
 #include "Game/Util/EventUtil.hpp"
@@ -12,14 +13,13 @@
 #include "Game/Util/ModelUtil.hpp"
 #include "Game/Util/PlayerUtil.hpp"
 #include "Game/Util/SoundUtil.hpp"
-#include "Game/Util/EffectUtil.hpp"
 
 RemotePlayerActor* RemotePlayerActor::sInstance = nullptr;
 
 RemotePlayerActor::RemotePlayerActor(const char* pName)
     : LiveActor(pName), mIsLuigi(false), mTargetPos(0.0f, 0.0f, 0.0f),
       mTargetRot(0.0f, 0.0f, 0.0f), mCurrentAnim(nullptr), mSpinSoundCooldown(0),
-      mCurrentPowerupMode(-1), mWasSpinning(false) {
+      mCurrentPowerupMode(-1), mWasSpinning(false), mSpinTico(nullptr) {
 }
 
 RemotePlayerActor::~RemotePlayerActor() {
@@ -35,8 +35,8 @@ RemotePlayerActor* RemotePlayerActor::getInstance() {
 void RemotePlayerActor::tryCreate() {
 #ifdef TARGET_PC
     if (!port_is_plus_edition()) return;
+    if (sInstance != nullptr) return;
 
-    // In a new stage, reset any previous pointer and allocate freshly
     sInstance = new RemotePlayerActor("RemotePlayer");
     sInstance->initWithoutIter();
 #endif
@@ -46,13 +46,18 @@ void RemotePlayerActor::tryDestroy() {
     sInstance = nullptr;
 }
 
+void RemotePlayerActor::makeActorDead() {
+    LiveActor::makeActorDead();
+    if (mSpinTico && !MR::isDead(mSpinTico)) {
+        mSpinTico->kill();
+    }
+}
+
 void RemotePlayerActor::init(const JMapInfoIter& rIter) {
     // If local player is Mario, remote partner is Luigi (and vice versa)
     mIsLuigi = !MR::isPlayerLuigi();
 
     // Use whatever player archive is already loaded and stationed in memory
-    // (Mario.arc when playing as Mario, Luigi.arc when playing as Luigi).
-    // This avoids synchronous storage I/O and heap reallocation during gameplay.
     const char* modelName = MR::isPlayerLuigi() ? "Luigi" : "Mario";
 
     initModelManagerWithAnm(modelName, "MarioAnime", true);
@@ -60,9 +65,8 @@ void RemotePlayerActor::init(const JMapInfoIter& rIter) {
     MR::connectToScene(this, MR::MovementType_Player, MR::CalcAnimType_Player,
                        MR::DrawBufferType_PlayerDecoration, MR::DrawType_None);
 
-    // Audio, particle effects & scene lighting
+    // Audio & scene lighting for stage shading
     initSound(4, false);
-    initEffectKeeper(16, "Mario", false);
     MR::initLightCtrl(this);
 
     MR::initShadowVolumeSphere(this, 50.0f);
@@ -87,6 +91,13 @@ void RemotePlayerActor::init(const JMapInfoIter& rIter) {
         MR::setBtpFrameAndStop(this, 0.0f);
     }
 
+    // Spin star companion (SpinTico)
+    mSpinTico = new MarioParts(this, "\x83\x58\x83\x73\x83\x93\x83\x60\x83\x52", "SpinTico", false, getBaseMtx(), nullptr);
+    if (mSpinTico) {
+        mSpinTico->initWithoutIter();
+        mSpinTico->kill();
+    }
+
     mCurrentAnim = "Wait";
     MR::tryStartBck(this, "Wait", nullptr);
 
@@ -95,48 +106,15 @@ void RemotePlayerActor::init(const JMapInfoIter& rIter) {
 }
 
 void RemotePlayerActor::updatePowerup(int powerupMode) {
-    // Clean up any active continuous powerup looping effects
-    if (mEffectKeeper) {
-        MR::deleteEffect(this, "\x96\xb3\x93\x47\x92\x86"); // Invincible ("無敵中")
-        MR::deleteEffect(this, "\x83\x41\x83\x43\x83\x58\x92\x86"); // Ice ("アイス中")
+    float frame = 0.0f;
+    if (powerupMode == PlayerMode_Foo) {
+        frame = 1.0f; // Flying / Red Star Mario
+    } else if (powerupMode == PlayerMode_2) {
+        frame = 2.0f; // Fire Mario
     }
 
-    switch (powerupMode) {
-    case PlayerMode_Foo: // Flying / Red Star Mario
-        if (MR::startBtpIfExist(this, "ColorChange")) {
-            MR::setBtpFrameAndStop(this, 1.0f);
-        }
-        break;
-
-    case PlayerMode_2: // Fire Mario
-        if (MR::startBtpIfExist(this, "ColorChange")) {
-            MR::setBtpFrameAndStop(this, 2.0f);
-        }
-        break;
-
-    case PlayerMode_Invincible: // Rainbow Star
-        if (MR::startBtpIfExist(this, "ColorChange")) {
-            MR::setBtpFrameAndStop(this, 0.0f);
-        }
-        if (mEffectKeeper) {
-            MR::emitEffect(this, "\x96\xb3\x93\x47\x92\x86");
-        }
-        break;
-
-    case PlayerMode_Ice: // Ice Mario
-        if (MR::startBtpIfExist(this, "ColorChange")) {
-            MR::setBtpFrameAndStop(this, 0.0f);
-        }
-        if (mEffectKeeper) {
-            MR::emitEffect(this, "\x83\x41\x83\x43\x83\x58\x92\x86");
-        }
-        break;
-
-    default: // Normal (0) and other modes
-        if (MR::startBtpIfExist(this, "ColorChange")) {
-            MR::setBtpFrameAndStop(this, 0.0f);
-        }
-        break;
+    if (MR::startBtpIfExist(this, "ColorChange")) {
+        MR::setBtpFrameAndStop(this, frame);
     }
 }
 
@@ -183,25 +161,15 @@ void RemotePlayerActor::control() {
         if (mSpinSoundCooldown <= 0 || !mWasSpinning) {
             MR::startSound(this, "SE_PV_MARIO_SPIN");
             mSpinSoundCooldown = 25;
-            if (mEffectKeeper) {
-                // Iconic star burst ring around player
-                MR::emitEffect(this, "\x83\x58\x83\x73\x83\x93\x83\x8a\x83\x93\x83\x4f"); // SpinRing
-
-                // Star sparkle / elemental spin trail
-                if (mCurrentPowerupMode == PlayerMode_2) {
-                    MR::emitEffect(this, "\x83\x74\x83\x40\x83\x43\x83\x41\x83\x58\x83\x73\x83\x93"); // FireMarioSpinLight
-                } else if (mCurrentPowerupMode == PlayerMode_Ice) {
-                    MR::emitEffect(this, "\x83\x41\x83\x43\x83\x58\x83\x58\x83\x73\x83\x93"); // IceMarioSpinLight
-                } else {
-                    MR::emitEffect(this, "\x83\x58\x83\x73\x83\x93\x83\x89\x83\x43\x83\x67"); // SpinLight
-                }
-            }
+        }
+        if (mSpinTico && MR::isDead(mSpinTico)) {
+            mSpinTico->appear();
+            mSpinTico->mRotation.set(0.0f, 0.0f, 0.0f);
+            MR::startBck(mSpinTico, "SpinTimer");
         }
     } else {
-        if (mWasSpinning && mEffectKeeper) {
-            MR::deleteEffect(this, "\x83\x58\x83\x73\x83\x93\x83\x89\x83\x43\x83\x67");
-            MR::deleteEffect(this, "\x83\x74\x83\x40\x83\x43\x83\x41\x83\x58\x83\x73\x83\x93");
-            MR::deleteEffect(this, "\x83\x41\x83\x43\x83\x58\x83\x58\x83\x73\x83\x93");
+        if (mSpinTico && !MR::isDead(mSpinTico)) {
+            mSpinTico->kill();
         }
     }
     mWasSpinning = isSpinning;
