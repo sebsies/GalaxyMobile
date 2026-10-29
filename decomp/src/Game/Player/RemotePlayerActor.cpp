@@ -103,12 +103,15 @@ void RemotePlayerActor::updatePowerup(int powerupMode) {
 
 void RemotePlayerActor::control() {
 #ifdef TARGET_PC
-    PortRemotePlayerState rState;
-    if (!port_net_is_connected() || port_net_get_mode() != PORT_NET_MODE_COOP ||
-        !port_net_get_remote_player_state(&rState) || !rState.valid) {
+    if (!port_net_is_connected() || port_net_get_mode() != PORT_NET_MODE_COOP) {
         if (!MR::isDead(this)) {
             makeActorDead();
         }
+        return;
+    }
+
+    PortRemotePlayerState rState;
+    if (!port_net_get_remote_player_state(&rState) || !rState.valid) {
         return;
     }
 
