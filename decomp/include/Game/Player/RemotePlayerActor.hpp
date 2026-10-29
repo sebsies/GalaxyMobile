@@ -3,8 +3,6 @@
 #include "Game/LiveActor/LiveActor.hpp"
 #include <JSystem/JGeometry/TVec.hpp>
 
-class MarioParts;
-
 class RemotePlayerActor : public LiveActor {
 public:
     RemotePlayerActor(const char* pName = "RemotePlayer");
@@ -13,7 +11,6 @@ public:
     virtual void init(const JMapInfoIter& rIter) override;
     virtual void control() override;
     virtual void calcAndSetBaseMtx() override;
-    virtual void makeActorDead() override;
 
     static RemotePlayerActor* getInstance();
     static void tryCreate();
@@ -29,7 +26,6 @@ private:
     int mSpinSoundCooldown;
     int mCurrentPowerupMode;
     bool mWasSpinning;
-    MarioParts* mSpinTico;
 
     static RemotePlayerActor* sInstance;
 };

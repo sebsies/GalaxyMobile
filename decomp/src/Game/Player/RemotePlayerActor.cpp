@@ -3,7 +3,7 @@
 #include "port/port.h"
 
 #include "Game/Player/MarioActor.hpp"
-#include "Game/Player/MarioParts.hpp"
+#include "Game/Player/MarioAccess.hpp"
 #include "Game/Scene/SceneFunction.hpp"
 #include "Game/Util/ObjUtil.hpp"
 #include "Game/Util/EventUtil.hpp"
@@ -13,13 +13,14 @@
 #include "Game/Util/ModelUtil.hpp"
 #include "Game/Util/PlayerUtil.hpp"
 #include "Game/Util/SoundUtil.hpp"
+#include "Game/Util/EffectUtil.hpp"
 
 RemotePlayerActor* RemotePlayerActor::sInstance = nullptr;
 
 RemotePlayerActor::RemotePlayerActor(const char* pName)
     : LiveActor(pName), mIsLuigi(false), mTargetPos(0.0f, 0.0f, 0.0f),
       mTargetRot(0.0f, 0.0f, 0.0f), mCurrentAnim(nullptr), mSpinSoundCooldown(0),
-      mCurrentPowerupMode(-1), mWasSpinning(false), mSpinTico(nullptr) {
+      mCurrentPowerupMode(-1), mWasSpinning(false) {
 }
 
 RemotePlayerActor::~RemotePlayerActor() {
@@ -44,13 +45,6 @@ void RemotePlayerActor::tryCreate() {
 
 void RemotePlayerActor::tryDestroy() {
     sInstance = nullptr;
-}
-
-void RemotePlayerActor::makeActorDead() {
-    LiveActor::makeActorDead();
-    if (mSpinTico && !MR::isDead(mSpinTico)) {
-        mSpinTico->kill();
-    }
 }
 
 void RemotePlayerActor::init(const JMapInfoIter& rIter) {
@@ -89,13 +83,6 @@ void RemotePlayerActor::init(const JMapInfoIter& rIter) {
     // Initial normal texture pattern
     if (MR::startBtpIfExist(this, "ColorChange")) {
         MR::setBtpFrameAndStop(this, 0.0f);
-    }
-
-    // Spin star companion (SpinTico)
-    mSpinTico = new MarioParts(this, "\x83\x58\x83\x73\x83\x93\x83\x60\x83\x52", "SpinTico", false, getBaseMtx(), nullptr);
-    if (mSpinTico) {
-        mSpinTico->initWithoutIter();
-        mSpinTico->kill();
     }
 
     mCurrentAnim = "Wait";
@@ -146,6 +133,9 @@ void RemotePlayerActor::control() {
     // Direct orientation match
     mRotation.set(rState.rotX, rState.rotY, rState.rotZ);
 
+    // Update lighting for current position
+    MR::updateLightCtrl(this);
+
     // Power-up skin synchronization
     if (rState.powerupMode != mCurrentPowerupMode) {
         mCurrentPowerupMode = rState.powerupMode;
@@ -161,15 +151,21 @@ void RemotePlayerActor::control() {
         if (mSpinSoundCooldown <= 0 || !mWasSpinning) {
             MR::startSound(this, "SE_PV_MARIO_SPIN");
             mSpinSoundCooldown = 25;
-        }
-        if (mSpinTico && MR::isDead(mSpinTico)) {
-            mSpinTico->appear();
-            mSpinTico->mRotation.set(0.0f, 0.0f, 0.0f);
-            MR::startBck(mSpinTico, "SpinTimer");
-        }
-    } else {
-        if (mSpinTico && !MR::isDead(mSpinTico)) {
-            mSpinTico->kill();
+
+            LiveActor* player = MarioAccess::getPlayerActor();
+            if (player && MR::isExistEffectKeeper(player)) {
+                const char* spinEffects[] = {
+                    "\x83\x58\x83\x73\x83\x93\x83\x8a\x83\x93\x83\x4f", // SpinRing
+                    "\x83\x58\x83\x73\x83\x93\x83\x89\x83\x43\x83\x67\x8f\xc1\x8b\x8e", // SpinLightBurst
+                    "SpinRing",
+                    "SpinLightBurst"
+                };
+                for (int i = 0; i < 4; i++) {
+                    if (MR::isRegisteredEffect(player, spinEffects[i])) {
+                        MR::emitEffectHit(player, mPosition, spinEffects[i]);
+                    }
+                }
+            }
         }
     }
     mWasSpinning = isSpinning;
