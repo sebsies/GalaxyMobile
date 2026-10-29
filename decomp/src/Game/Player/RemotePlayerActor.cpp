@@ -59,9 +59,7 @@ void RemotePlayerActor::init(const JMapInfoIter& rIter) {
     MR::connectToScene(this, MR::MovementType_Player, MR::CalcAnimType_Player,
                        MR::DrawBufferType_PlayerDecoration, MR::DrawType_None);
 
-    // Audio & scene lighting for stage shading
     initSound(4, false);
-    MR::initLightCtrl(this);
 
     MR::initShadowVolumeSphere(this, 50.0f);
     MR::validateShadow(this, nullptr);
@@ -78,17 +76,15 @@ void RemotePlayerActor::init(const JMapInfoIter& rIter) {
         // Mario: stockier
         mScale.set(1.05f, 0.95f, 1.05f);
     }
-    MR::getJ3DModel(this)->setBaseScale(mScale);
 
-    // Initial normal texture pattern
-    if (MR::startBtpIfExist(this, "ColorChange")) {
-        MR::setBtpFrameAndStop(this, 0.0f);
-    }
+    // Enable dynamic differed display lists and fog so stage shading and lighting apply
+    MR::initDLMakerFog(this, true);
+    MR::newDifferedDLBuffer(this);
 
     mCurrentAnim = "Wait";
     MR::tryStartBck(this, "Wait", nullptr);
 
-    // Start dormant (invisible & paused) until a peer connects
+    // Start dormant until active peer packets are processed in control()
     makeActorDead();
 }
 
@@ -100,7 +96,7 @@ void RemotePlayerActor::updatePowerup(int powerupMode) {
         frame = 2.0f; // Fire Mario
     }
 
-    if (MR::startBtpIfExist(this, "ColorChange")) {
+    if (mModelManager && MR::startBtpIfExist(this, "ColorChange")) {
         MR::setBtpFrameAndStop(this, frame);
     }
 }
@@ -132,9 +128,6 @@ void RemotePlayerActor::control() {
 
     // Direct orientation match
     mRotation.set(rState.rotX, rState.rotY, rState.rotZ);
-
-    // Update lighting for current position
-    MR::updateLightCtrl(this);
 
     // Power-up skin synchronization
     if (rState.powerupMode != mCurrentPowerupMode) {
