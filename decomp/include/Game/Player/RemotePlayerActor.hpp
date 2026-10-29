@@ -19,12 +19,14 @@ public:
 
 private:
     void updatePowerup(int powerupMode);
+    void drawSpinEffect() const;
 
     bool mIsLuigi;
     TVec3f mTargetPos;
     TVec3f mTargetRot;
     const char* mCurrentAnim;
     int mSpinSoundCooldown;
+    int mSpinTimer;
     int mCurrentPowerupMode;
     bool mWasSpinning;
 

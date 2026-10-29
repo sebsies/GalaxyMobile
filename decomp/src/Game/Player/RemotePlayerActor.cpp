@@ -2,6 +2,7 @@
 #include "port/net.h"
 #include "port/port.h"
 
+#include <math.h>
 #include <revolution/gx.h>
 #include "Game/Player/J3DModelX.hpp"
 #include "Game/Player/MarioActor.hpp"
@@ -16,13 +17,15 @@
 #include "Game/Util/PlayerUtil.hpp"
 #include "Game/Util/SoundUtil.hpp"
 #include "Game/Util/EffectUtil.hpp"
+#include "Game/Util/MathUtil.hpp"
+#include "Game/Util/DirectDraw.hpp"
 
 RemotePlayerActor* RemotePlayerActor::sInstance = nullptr;
 
 RemotePlayerActor::RemotePlayerActor(const char* pName)
     : LiveActor(pName), mIsLuigi(false), mTargetPos(0.0f, 0.0f, 0.0f),
       mTargetRot(0.0f, 0.0f, 0.0f), mCurrentAnim(nullptr), mSpinSoundCooldown(0),
-      mCurrentPowerupMode(-1), mWasSpinning(false) {
+      mSpinTimer(0), mCurrentPowerupMode(-1), mWasSpinning(false) {
 }
 
 RemotePlayerActor::~RemotePlayerActor() {
@@ -131,6 +134,8 @@ void RemotePlayerActor::control() {
     // Direct orientation match
     mRotation.set(rState.rotX, rState.rotY, rState.rotZ);
 
+    MR::calcGravity(this);
+
     // Power-up skin synchronization
     if (rState.powerupMode != mCurrentPowerupMode) {
         mCurrentPowerupMode = rState.powerupMode;
@@ -146,21 +151,7 @@ void RemotePlayerActor::control() {
         if (mSpinSoundCooldown <= 0 || !mWasSpinning) {
             MR::startSound(this, "SE_PV_MARIO_SPIN");
             mSpinSoundCooldown = 25;
-
-            LiveActor* player = MarioAccess::getPlayerActor();
-            if (player && MR::isExistEffectKeeper(player)) {
-                const char* spinEffects[] = {
-                    "\x83\x58\x83\x73\x83\x93\x83\x8a\x83\x93\x83\x4f", // SpinRing
-                    "\x83\x58\x83\x73\x83\x93\x83\x89\x83\x43\x83\x67\x8f\xc1\x8b\x8e", // SpinLightBurst
-                    "SpinRing",
-                    "SpinLightBurst"
-                };
-                for (int i = 0; i < 4; i++) {
-                    if (MR::isRegisteredEffect(player, spinEffects[i])) {
-                        MR::emitEffectHit(player, mPosition, spinEffects[i]);
-                    }
-                }
-            }
+            mSpinTimer = 22;
         }
     }
     mWasSpinning = isSpinning;
@@ -197,11 +188,103 @@ void RemotePlayerActor::control() {
     if (mSpinSoundCooldown > 0) {
         mSpinSoundCooldown--;
     }
+    if (mSpinTimer > 0) {
+        mSpinTimer--;
+    }
 #endif
 }
 
 void RemotePlayerActor::calcAndSetBaseMtx() {
     LiveActor::calcAndSetBaseMtx();
+}
+
+void RemotePlayerActor::drawSpinEffect() const {
+    if (mSpinTimer <= 0) {
+        return;
+    }
+
+    f32 progress = (22 - mSpinTimer) / 22.0f;
+    f32 radius = 35.0f + progress * 55.0f;
+    f32 alphaFade = (mSpinTimer > 6) ? 1.0f : (mSpinTimer / 6.0f);
+
+    TDDraw::setup(0, 1, 0);
+    GXSetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_ONE, GX_LO_NOOP);
+    GXSetZMode(GX_TRUE, GX_LEQUAL, GX_FALSE);
+
+    TVec3f up = -mGravity;
+    if (up.squared() < 0.01f) {
+        up.set(0.0f, 1.0f, 0.0f);
+    } else {
+        MR::normalize(&up);
+    }
+    TVec3f center = mPosition + up * 60.0f;
+
+    TVec3f right(1.0f, 0.0f, 0.0f);
+    if (fabsf(up.dot(right)) > 0.85f) {
+        right.set(0.0f, 0.0f, 1.0f);
+    }
+    TVec3f front;
+    front.cross(up, right);
+    MR::normalize(&front);
+    right.cross(front, up);
+    MR::normalize(&right);
+
+    // 1. Brilliant white core star ring
+    Mtx rotation;
+    PSMTXRotAxisRad(rotation, reinterpret_cast< const Vec* >(&up), 0.09817477f);
+    GXSetLineWidth(32, GX_TO_ZERO);
+
+    TVec3f direction = front;
+    TVec3f previous;
+    u32 whiteAlpha = (u32)(70.0f * alphaFade) & 0xFF;
+    u32 whiteColor = 0xFFFFFF00 | whiteAlpha;
+
+    for (u32 i = 0; i <= 64; i++) {
+        TVec3f point = direction * radius;
+        point += up * (MR::getRandom() * 8.0f - 4.0f);
+
+        if (i > 0) {
+            TDDraw::drawLine(center + previous, center + point, whiteColor);
+        }
+        previous = point;
+        PSMTXMultVecSR(rotation, reinterpret_cast< const Vec* >(&direction), reinterpret_cast< Vec* >(&direction));
+    }
+
+    // 2. Character-colored luminous star sparkle ring
+    GXSetLineWidth(18, GX_TO_ZERO);
+    direction = front;
+    u32 rgb = mIsLuigi ? 0x40FF6000 : 0xFFE03000;
+    if (mCurrentPowerupMode == PlayerMode_2) rgb = 0xFF502000;
+    else if (mCurrentPowerupMode == PlayerMode_Ice) rgb = 0x50E0FF00;
+
+    for (u32 i = 0; i <= 64; i++) {
+        TVec3f point = direction * radius;
+        point += up * (MR::getRandom() * 12.0f - 6.0f);
+        f32 wave = MR::sin(((i & 31) / 32.0f) * 3.14159265f);
+        u32 alpha = (u32)(190.0f * wave * wave * alphaFade) & 0xFF;
+
+        if (i > 0) {
+            TDDraw::drawLine(center + previous, center + point, rgb | alpha);
+        }
+        previous = point;
+        PSMTXMultVecSR(rotation, reinterpret_cast< const Vec* >(&direction), reinterpret_cast< Vec* >(&direction));
+    }
+
+    // 3. Radiant star sparkles bursting outward
+    GXSetLineWidth(20, GX_TO_ZERO);
+    float burstOffset = progress * 2.8f;
+    u32 rayAlpha = (u32)(210.0f * alphaFade) & 0xFF;
+    u32 rayColor = (mIsLuigi ? 0x80FFA000 : 0xFFFF7000) | rayAlpha;
+
+    for (int s = 0; s < 8; s++) {
+        float angle = s * (3.14159265f / 4.0f) + burstOffset;
+        TVec3f rayDir = right * cosf(angle) + front * sinf(angle);
+        TVec3f rayInner = center + rayDir * (radius * 0.35f);
+        TVec3f rayOuter = center + rayDir * (radius * 1.30f) + up * (sinf(angle * 3.0f) * 12.0f);
+        TDDraw::drawLine(rayInner, rayOuter, rayColor);
+    }
+
+    TDDraw::close();
 }
 
 void RemotePlayerActor::draw() const {
@@ -218,6 +301,8 @@ void RemotePlayerActor::draw() const {
     GXInvalidateVtxCache();
     model->mFlags.clear();
     model->directDraw(nullptr);
+
+    drawSpinEffect();
 
     GXSetAlphaUpdate(GX_FALSE);
     GXSetColorUpdate(GX_TRUE);
