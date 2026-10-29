@@ -396,6 +396,7 @@ void MarioActor::init2(const TVec3f& rA, const TVec3f& rB, s32 initialAnimation)
     MR::connectToScene(this, MR::MovementType_Player, MR::CalcAnimType_Player, MR::DrawBufferType_Player, MR::DrawType_Player);
 #ifdef TARGET_PC
     if (port_is_plus_edition()) {
+        RemotePlayerActor::tryDestroy();
         RemotePlayerActor::tryCreate();
     }
 #endif

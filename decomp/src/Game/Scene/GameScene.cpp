@@ -2,6 +2,8 @@
 #include "Game/Player/MarioAccess.hpp"
 #include "Game/LiveActor/HitSensor.hpp"
 #include "Game/Player/MarioActor.hpp"
+#include "Game/Player/RemotePlayerActor.hpp"
+#include "port/port.h"
 #include "Game/AudioLib/AudSceneMgr.hpp"
 #include "Game/AudioLib/AudWrap.hpp"
 #include "Game/LiveActor/AllLiveActorGroup.hpp"
@@ -92,6 +94,11 @@ GameScene::~GameScene() {
     MR::destroySceneMessage();
     NPCFunction::deleteNPCData();
     MR::onStarPointerSceneOut();
+#ifdef TARGET_PC
+    if (port_is_plus_edition()) {
+        RemotePlayerActor::tryDestroy();
+    }
+#endif
 }
 
 void GameScene::init() {

@@ -2,6 +2,8 @@
 #include "port/net.h"
 #include "port/port.h"
 
+#include <revolution/gx.h>
+#include "Game/Player/J3DModelX.hpp"
 #include "Game/Player/MarioActor.hpp"
 #include "Game/Player/MarioAccess.hpp"
 #include "Game/Scene/SceneFunction.hpp"
@@ -54,10 +56,10 @@ void RemotePlayerActor::init(const JMapInfoIter& rIter) {
     // Use whatever player archive is already loaded and stationed in memory
     const char* modelName = MR::isPlayerLuigi() ? "Luigi" : "Mario";
 
-    initModelManagerWithAnm(modelName, "MarioAnime", true);
+    initModelManagerWithAnm(modelName, "MarioAnime", false);
 
     MR::connectToScene(this, MR::MovementType_Player, MR::CalcAnimType_Player,
-                       MR::DrawBufferType_PlayerDecoration, MR::DrawType_None);
+                       MR::DrawBufferType_None, MR::DrawType_Player);
 
     initSound(4, false);
 
@@ -76,15 +78,12 @@ void RemotePlayerActor::init(const JMapInfoIter& rIter) {
         // Mario: stockier
         mScale.set(1.05f, 0.95f, 1.05f);
     }
-
-    // Enable dynamic differed display lists and fog so stage shading and lighting apply
-    MR::initDLMakerFog(this, true);
-    MR::newDifferedDLBuffer(this);
+    MR::getJ3DModel(this)->setBaseScale(mScale);
 
     mCurrentAnim = "Wait";
     MR::tryStartBck(this, "Wait", nullptr);
 
-    // Start dormant until active peer packets are processed in control()
+    // Start dormant until active peer packets are processed
     makeActorDead();
 }
 
@@ -203,4 +202,24 @@ void RemotePlayerActor::control() {
 
 void RemotePlayerActor::calcAndSetBaseMtx() {
     LiveActor::calcAndSetBaseMtx();
+}
+
+void RemotePlayerActor::draw() const {
+    if (MR::isDead(this)) {
+        return;
+    }
+
+    J3DModelX* model = reinterpret_cast< J3DModelX* >(MR::getJ3DModel(this));
+    if (!model) {
+        return;
+    }
+
+    model->viewCalc2();
+    GXInvalidateVtxCache();
+    model->mFlags.clear();
+    model->directDraw(nullptr);
+
+    GXSetAlphaUpdate(GX_FALSE);
+    GXSetColorUpdate(GX_TRUE);
+    GXSetDstAlpha(GX_FALSE, 0);
 }

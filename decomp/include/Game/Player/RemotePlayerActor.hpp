@@ -11,6 +11,7 @@ public:
     virtual void init(const JMapInfoIter& rIter) override;
     virtual void control() override;
     virtual void calcAndSetBaseMtx() override;
+    virtual void draw() const override;
 
     static RemotePlayerActor* getInstance();
     static void tryCreate();
