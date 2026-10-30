@@ -780,13 +780,22 @@ static std::string sPendingWarpStage;
 static int sPendingWarpScenario = 1;
 static bool sHasPendingWarp = false;
 
-void port_request_warp(const char* stage, int scenario) {
+void port_request_warp_ex(const char* stage, int scenario, int broadcast) {
     if (!mobile_ui::UIOverlay::get().isPlusEdition()) return;
-    std::lock_guard<std::mutex> lk(sWarpMutex);
-    sPendingWarpStage = stage ? stage : "";
-    sPendingWarpScenario = scenario;
-    sHasPendingWarp = true;
-    LOGI("Queued warp request to stage=%s scenario=%d", sPendingWarpStage.c_str(), scenario);
+    {
+        std::lock_guard<std::mutex> lk(sWarpMutex);
+        sPendingWarpStage = stage ? stage : "";
+        sPendingWarpScenario = scenario;
+        sHasPendingWarp = true;
+    }
+    LOGI("Queued warp request to stage=%s scenario=%d (broadcast=%d)", sPendingWarpStage.c_str(), scenario, broadcast);
+    if (broadcast && port_net_is_connected()) {
+        port_net_send_warp_event(stage ? stage : "", scenario);
+    }
+}
+
+void port_request_warp(const char* stage, int scenario) {
+    port_request_warp_ex(stage, scenario, 1);
 }
 
 int port_take_warp_request(char* outStage, size_t maxLen, int* outScenario) {

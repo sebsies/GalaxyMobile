@@ -912,16 +912,23 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                             }
                             mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                         }
-                        // 4. Discovered LAN Hosts List (Card 4: 356..510)
-                        else if (contentRelY >= 356.0f * uiScale && contentRelY <= 510.0f * uiScale) {
-                            PortLanHostInfo hosts[3];
-                            int n = port_net_get_lan_hosts(hosts, 3);
-                            for (int i = 0; i < n; i++) {
-                                float rY = 356.0f * uiScale + i * 48.0f * uiScale;
-                                if (contentRelY >= rY && contentRelY <= rY + 44.0f * uiScale && px >= cX1 - 100.0f * uiScale) {
-                                    port_net_connect(hosts[i].ip, hosts[i].port);
-                                    mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                                    break;
+                        // 4. Discovered LAN Hosts List & Reload Button (Card 4: 328..518)
+                        else if (contentRelY >= 328.0f * uiScale && contentRelY <= 518.0f * uiScale) {
+                            float rTop = 328.0f * uiScale;
+                            if (contentRelY >= rTop + 4.0f * uiScale && contentRelY <= rTop + 34.0f * uiScale && px >= cX1 - 96.0f * uiScale) {
+                                port_net_refresh_discovery();
+                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                                mDirty = true;
+                            } else {
+                                PortLanHostInfo hosts[3];
+                                int n = port_net_get_lan_hosts(hosts, 3);
+                                for (int i = 0; i < n; i++) {
+                                    float rY = 328.0f * uiScale + 36.0f * uiScale + i * 48.0f * uiScale;
+                                    if (contentRelY >= rY && contentRelY <= rY + 44.0f * uiScale && px >= cX1 - 100.0f * uiScale) {
+                                        port_net_connect(hosts[i].ip, hosts[i].port);
+                                        mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -2571,7 +2578,17 @@ void UIOverlay::render(int screenW, int screenH) {
                     drawCard(cX0, y, cX1, y + 190.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
 
                     drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                    drawText("DISCOVERED LAN ROOMS (WI-FI / HOTSPOT)", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+                    drawText("DISCOVERED LAN ROOMS (WI-FI / HOTSPOT)", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.30f * uiScale, cHeader, 0);
+
+                    // Reload / Refresh Discovery Button on top-right of card
+                    float rBtnW = 76.0f * uiScale;
+                    float rBtnH = 24.0f * uiScale;
+                    float rBtnX1 = cX1 - 14.0f * uiScale;
+                    float rBtnX0 = rBtnX1 - rBtnW;
+                    float rBtnY0 = y + 8.0f * uiScale;
+                    float rBtnY1 = rBtnY0 + rBtnH;
+                    drawRoundRect(rBtnX0, rBtnY0, rBtnX1, rBtnY1, 12.0f * uiScale, rgba(0.18f, 0.28f, 0.44f, 0.95f));
+                    drawText("RELOAD", (rBtnX0 + rBtnX1) * 0.5f, rBtnY0 + 16.0f * uiScale, 0.26f * uiScale, rgba(0.85f, 0.92f, 1.0f, 1.0f), 1);
 
                     PortLanHostInfo hosts[3];
                     int numHosts = port_net_get_lan_hosts(hosts, 3);

@@ -35,6 +35,7 @@ public:
 
     // LAN Discovery
     int getLanHosts(PortLanHostInfo* outHosts, int maxHosts);
+    void refreshDiscovery();
 
     // State Replication
     void sendPlayerState(const PortRemotePlayerState& state);

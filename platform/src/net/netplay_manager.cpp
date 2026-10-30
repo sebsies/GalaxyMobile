@@ -209,6 +209,50 @@ std::string NetplayManager::getLocalIp() const {
     return NetSocket::getLocalIpAddress();
 }
 
+void NetplayManager::refreshDiscovery() {
+    std::lock_guard<std::mutex> lk(mMutex);
+    mLanHosts.clear();
+
+    if (!mDiscoverySocket.isOpened() && mSocket.getPort() != kDefaultPort) {
+        mDiscoverySocket.open(kDefaultPort, true);
+    }
+
+    uint8_t pBuf[sizeof(PacketHeader)];
+    PacketHeader* pHdr = (PacketHeader*)pBuf;
+    pHdr->magic = kNetMagic;
+    pHdr->version = kNetVersion;
+    pHdr->type = PKT_DISCOVERY_PROBE;
+    pHdr->seq = 0;
+
+    if (mSocket.isOpened()) {
+        mSocket.broadcast(pBuf, sizeof(pBuf), kDefaultPort);
+        mSocket.sendTo(pBuf, sizeof(pBuf), "192.168.43.1", kDefaultPort);
+    } else if (mDiscoverySocket.isOpened()) {
+        mDiscoverySocket.broadcast(pBuf, sizeof(pBuf), kDefaultPort);
+        mDiscoverySocket.sendTo(pBuf, sizeof(pBuf), "192.168.43.1", kDefaultPort);
+    }
+
+    if (mRole.load() == PORT_NET_ROLE_HOST && mSocket.isOpened()) {
+        BeaconPayload b;
+        std::memset(&b, 0, sizeof(b));
+        std::strncpy(b.roomName, mRoomName.c_str(), sizeof(b.roomName) - 1);
+        b.mode = (uint8_t)mMode.load();
+        std::strncpy(b.stage, "Galaxy", sizeof(b.stage) - 1);
+        b.scenario = 1;
+        b.playerCount = mConnected.load() ? 2 : 1;
+        b.port = (uint16_t)mHostPort;
+
+        uint8_t bBuf[sizeof(PacketHeader) + sizeof(BeaconPayload)];
+        PacketHeader* bHdr = (PacketHeader*)bBuf;
+        bHdr->magic = kNetMagic;
+        bHdr->version = kNetVersion;
+        bHdr->type = PKT_BEACON_BROADCAST;
+        bHdr->seq = 0;
+        std::memcpy(bBuf + sizeof(PacketHeader), &b, sizeof(b));
+        mSocket.broadcast(bBuf, sizeof(bBuf), kDefaultPort);
+    }
+}
+
 int NetplayManager::getLanHosts(PortLanHostInfo* outHosts, int maxHosts) {
     std::lock_guard<std::mutex> lk(mMutex);
     int count = std::min((int)mLanHosts.size(), maxHosts);
@@ -366,6 +410,20 @@ void NetplayManager::handleIncomingPacket(const uint8_t* data, size_t size, cons
 
     const uint8_t* payload = data + sizeof(PacketHeader);
     size_t payloadSize = size - sizeof(PacketHeader);
+
+    // Discovery probe from a searching peer
+    if (hdr->type == PKT_DISCOVERY_PROBE && mRole.load() == PORT_NET_ROLE_HOST && mSocket.isOpened()) {
+        BeaconPayload b;
+        std::memset(&b, 0, sizeof(b));
+        std::strncpy(b.roomName, mRoomName.c_str(), sizeof(b.roomName) - 1);
+        b.mode = (uint8_t)mMode.load();
+        std::strncpy(b.stage, "Galaxy", sizeof(b.stage) - 1);
+        b.scenario = 1;
+        b.playerCount = mConnected.load() ? 2 : 1;
+        b.port = (uint16_t)mHostPort;
+        sendPacket(PKT_BEACON_BROADCAST, &b, sizeof(b), srcIp, srcPort);
+        return;
+    }
 
     // Beacon packet (LAN Auto-Discovery)
     if (hdr->type == PKT_BEACON_BROADCAST && payloadSize >= sizeof(BeaconPayload)) {
@@ -552,6 +610,10 @@ int port_net_get_remote_player_state(PortRemotePlayerState* outState) {
 
 void port_net_send_costar_state(const struct PortPadState* pad) {
     if (pad) NetplayManager::get().sendCostarState(*pad);
+}
+
+void port_net_refresh_discovery(void) {
+    NetplayManager::get().refreshDiscovery();
 }
 
 void port_net_send_warp_event(const char* stage, int scenario) {

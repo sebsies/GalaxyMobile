@@ -184,6 +184,7 @@ int port_is_infinite_powerup(void);
 int port_is_flight_everywhere(void);
 int port_is_hd_ui_enabled(void);
 void port_request_warp(const char* stage, int scenario);
+void port_request_warp_ex(const char* stage, int scenario, int broadcast);
 int port_take_warp_request(char* outStage, size_t maxLen, int* outScenario);
 void port_request_powerup(int type);
 int port_take_powerup_request(void);

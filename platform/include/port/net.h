@@ -93,6 +93,7 @@ void port_net_send_costar_state(const struct PortPadState* pad);
 
 // Gameplay events
 void port_net_send_warp_event(const char* stage, int scenario);
+void port_net_refresh_discovery(void);
 void port_net_send_spin_event(void);
 int port_net_take_warp_event(char* outStage, size_t maxLen, int* outScenario);
 int port_net_take_spin_event(void);

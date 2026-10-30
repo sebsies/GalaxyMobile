@@ -217,15 +217,16 @@ void GameScene::update() {
     mPauseCtrl->updateNerve();
     updateNerve();
 #ifdef TARGET_PC
-    if (port_is_plus_edition() && !MR::isStageFileSelect() && !MR::isDemoActive()) {
+    if (port_is_plus_edition() && !MR::isStageFileSelect()) {
         char warpStage[64];
         int warpScenario = 1;
         if (port_take_warp_request(warpStage, sizeof(warpStage), &warpScenario)) {
-            OSReport("port: warping to %s scenario %d\n", warpStage, (int)warpScenario);
-            MR::onGameEventFlagEnableToSpinAndStarPointer();
-            port_set_spin_unlocked(1);
-            MR::closeSystemWipeFadeWithCaptureScreen(30);
-            MR::requestChangeStageInGameMoving(warpStage, warpScenario);
+            if (warpStage[0] != '\0') {
+                OSReport("port: warping to %s scenario %d\n", warpStage, (int)warpScenario);
+                MR::onGameEventFlagEnableToSpinAndStarPointer();
+                port_set_spin_unlocked(1);
+                MR::requestChangeStageInGameMoving(warpStage, warpScenario);
+            }
         }
     }
 
