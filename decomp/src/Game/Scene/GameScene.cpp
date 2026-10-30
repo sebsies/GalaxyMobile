@@ -218,14 +218,20 @@ void GameScene::update() {
     updateNerve();
 #ifdef TARGET_PC
     if (port_is_plus_edition() && !MR::isStageFileSelect()) {
-        char warpStage[64];
-        int warpScenario = 1;
-        if (port_take_warp_request(warpStage, sizeof(warpStage), &warpScenario)) {
-            if (warpStage[0] != '\0') {
-                OSReport("port: warping to %s scenario %d\n", warpStage, (int)warpScenario);
-                MR::onGameEventFlagEnableToSpinAndStarPointer();
-                port_set_spin_unlocked(1);
-                MR::requestChangeStageInGameMoving(warpStage, warpScenario);
+        if (isNerve(GET_NERVE(GameScene, GameSceneAction)) && MR::isExistMario() && !MR::isDemoActive() && !MR::isPlayerDead()) {
+            static char sWarpStage[64];
+            int warpScenario = 1;
+            if (port_take_warp_request(sWarpStage, sizeof(sWarpStage), &warpScenario)) {
+                if (sWarpStage[0] != '\0') {
+                    if (warpScenario < 1) {
+                        warpScenario = 1;
+                    }
+                    OSReport("port: warping to %s scenario %d\n", sWarpStage, (int)warpScenario);
+                    port_set_spin_unlocked(1);
+                    MR::stopSubBGM(0);
+                    MR::stopStageBGM(0);
+                    MR::requestChangeStageInGameMoving(sWarpStage, warpScenario);
+                }
             }
         }
     }

@@ -1164,7 +1164,7 @@ void MarioActor::updateBehavior() {
                 applyModPowerup(req);
             }
             if (port_take_unlock_spin_request()) {
-                MR::onGameEventFlagEnableToSpinAndStarPointer();
+                MR::setPlayerSwingPermission(true);
                 _EEB = true;
                 port_set_spin_unlocked(1);
             }

@@ -753,7 +753,8 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                                 float qWarpY0 = cardY0 + 34.0f * uiScale;
                                 float qWarpY1 = cardY0 + 60.0f * uiScale;
                                 if (px >= qWarpX0 && px <= qWarpX1 && py >= qWarpY0 && py <= qWarpY1) {
-                                    port_request_warp(kGalaxies[i].stageName, mWarpSelectedScenario);
+                                    int clampedSc = std::max(1, std::min(mWarpSelectedScenario, kGalaxies[i].maxScenarios));
+                                    port_request_warp(kGalaxies[i].stageName, clampedSc);
                                     closeSettings();
                                     return true;
                                 }
@@ -1107,7 +1108,8 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                 // Fixed bottom bar in Warp Menu: [ WARP TO GALAXY ]
                 if (py >= contentBottom) {
                     if (mWarpSelectedGalaxy >= 0 && mWarpSelectedGalaxy < kNumGalaxies) {
-                        port_request_warp(kGalaxies[mWarpSelectedGalaxy].stageName, mWarpSelectedScenario);
+                        int clampedSc = std::max(1, std::min(mWarpSelectedScenario, kGalaxies[mWarpSelectedGalaxy].maxScenarios));
+                        port_request_warp(kGalaxies[mWarpSelectedGalaxy].stageName, clampedSc);
                     }
                     closeSettings();
                     return true;
