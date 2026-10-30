@@ -377,15 +377,18 @@ namespace MR {
     }
 
     s32 getPlacedZoneId(const JMapInfoIter& rIter) {
-        return getStageDataHolder()->findPlacedStageDataHolder(rIter)->mZoneID;
+        const StageDataHolder* holder = getStageDataHolder()->findPlacedStageDataHolder(rIter);
+        return holder != nullptr ? holder->mZoneID : 0;
     }
 
     const TPos3f* getZonePlacementMtx(const JMapInfoIter& rIter) {
-        return &getStageDataHolder()->findPlacedStageDataHolder(rIter)->mPlacementMtx;
+        const StageDataHolder* holder = getStageDataHolder()->findPlacedStageDataHolder(rIter);
+        return holder != nullptr ? &holder->mPlacementMtx : &getStageDataHolder()->mPlacementMtx;
     }
 
     const TPos3f* getZonePlacementMtx(s32 zoneId) {
-        return &getStageDataHolder()->getStageDataHolderFromZoneId(zoneId)->mPlacementMtx;
+        const StageDataHolder* holder = getStageDataHolder()->getStageDataHolderFromZoneId(zoneId);
+        return holder != nullptr ? &holder->mPlacementMtx : &getStageDataHolder()->mPlacementMtx;
     }
 
     const char* getJapaneseObjectName(const char* pName) {

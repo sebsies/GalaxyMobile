@@ -206,23 +206,31 @@ s32 StageDataHolder::getCommonPathInfoElementNum() const {
 s32 StageDataHolder::getStartPosNum() const {
     s32 cur = 0;
 
-    for (const JMapInfo* i = &mStartObjs[0]; i != mStartObjs.end(); i++) {
-        cur += i->getNumEntries();
+    if (mStartObjs.size() > 0) {
+        for (const JMapInfo* i = mStartObjs.begin(); i != mStartObjs.end(); i++) {
+            cur += i->getNumEntries();
+        }
     }
 
     for (s32 i = 0; i < mStageDataHolderCount; i++) {
-        cur += mStageDataArray[i]->getStartPosNum();
+        if (mStageDataArray[i] != nullptr) {
+            cur += mStageDataArray[i]->getStartPosNum();
+        }
     }
 
     return cur;
 }
 
 s32 StageDataHolder::getCurrentStartZoneId() const {
-    return findPlacedStageDataHolder(makeCurrentMarioJMapInfoIter())->mZoneID;
+    const StageDataHolder* holder = findPlacedStageDataHolder(makeCurrentMarioJMapInfoIter());
+    return holder != nullptr ? holder->mZoneID : 0;
 }
 
 s32 StageDataHolder::getCurrentStartCameraId() const {
     JMapInfoIter marioIter = makeCurrentMarioJMapInfoIter();
+    if (!marioIter.isValid()) {
+        return -1;
+    }
     s32 cameraID;
     bool ret = marioIter.getValue< s32 >("Camera_id", &cameraID);
 
@@ -330,6 +338,10 @@ JMapInfoIter StageDataHolder::getChildObjInfoFromDataIndex(const JMapInfoIter& r
 }
 
 const StageDataHolder* StageDataHolder::findPlacedStageDataHolder(const JMapInfoIter& rIter) const {
+    if (!rIter.isValid() || rIter.mInfo == nullptr || rIter.mInfo->mData == nullptr) {
+        return nullptr;
+    }
+
     s32 data = (s32)rIter.mInfo->mData + rIter.mInfo->mData->mDataOffset + rIter.mInfo->mData->mEntrySize * rIter.mIndex;
 
     if (_E4 <= data && data < _E8) {
@@ -337,10 +349,12 @@ const StageDataHolder* StageDataHolder::findPlacedStageDataHolder(const JMapInfo
     }
 
     for (s32 i = 0; i < mStageDataHolderCount; i++) {
-        const StageDataHolder* pHolder = mStageDataArray[i]->findPlacedStageDataHolder(rIter);
+        if (mStageDataArray[i] != nullptr) {
+            const StageDataHolder* pHolder = mStageDataArray[i]->findPlacedStageDataHolder(rIter);
 
-        if (pHolder != nullptr) {
-            return pHolder;
+            if (pHolder != nullptr) {
+                return pHolder;
+            }
         }
     }
 
@@ -404,30 +418,45 @@ s32 StageDataHolder::getStageArchiveResourceSize(void* pData) {
 
 void StageDataHolder::initPlacementMario() {
     JMapInfoIter iter = makeCurrentMarioJMapInfoIter();
+    if (!iter.isValid()) {
+        if (getStartPosNum() > 0) {
+            iter = getStartJMapInfoIterFromStartDataIndex(0);
+        }
+    }
     MR::setCurrentPlacementZoneId(MR::getPlacedZoneId(iter));
-    const char* objName = "";
-    MR::getObjectName(&objName, iter);
+    const char* objName = "Mario";
+    if (iter.isValid()) {
+        MR::getObjectName(&objName, iter);
+    }
     CreationFuncPtr funcPtr = NameObjFactory::getCreator(objName);
-
-    NameObj* obj = funcPtr("\x83\x7d\x83\x8a\x83\x49\x83\x41\x83\x4e\x83\x5e\x81\x5b");
-    obj->init(iter);
+    if (funcPtr != nullptr) {
+        NameObj* obj = funcPtr("\x83\x7d\x83\x8a\x83\x49\x83\x41\x83\x4e\x83\x5e\x81\x5b");
+        if (obj != nullptr) {
+            obj->init(iter);
+        }
+    }
     MR::clearCurrentPlacementZoneId();
 }
 
 JMapInfoIter StageDataHolder::makeMarioJMapInfoIter(const JMapIdInfo& rInfo) const {
     const StageDataHolder* hldr = getStageDataHolderFromZoneId(rInfo.mZoneID);
+    if (hldr == nullptr) {
+        return JMapInfoIter();
+    }
     s32 id = rInfo._0;
-    const JMapInfo* i = hldr->mStartObjs.begin();
+    if (hldr->mStartObjs.size() > 0) {
+        const JMapInfo* i = hldr->mStartObjs.begin();
 
-    while (i != hldr->mStartObjs.end()) {
-        JMapInfoIter iter = i->findElement< s32 >("MarioNo", id, 0);
-        bool res = !(iter == i->end());
+        while (i != hldr->mStartObjs.end()) {
+            JMapInfoIter iter = i->findElement< s32 >("MarioNo", id, 0);
+            bool res = !(iter == i->end());
 
-        if (res) {
-            return iter;
+            if (res) {
+                return iter;
+            }
+
+            i++;
         }
-
-        i++;
     }
 
     return JMapInfoIter();
@@ -439,6 +468,10 @@ JMapInfoIter StageDataHolder::makeCurrentMarioJMapInfoIter() const {
 
     if (iter.isValid()) {
         return iter;
+    }
+
+    if (getStartPosNum() > 0) {
+        return getStartJMapInfoIterFromStartDataIndex(0);
     }
 
     return JMapInfoIter();
@@ -605,29 +638,31 @@ const JMapInfo* StageDataHolder::findJmpInfoFromArray(const MR::AssignableArray<
 JMapInfoIter StageDataHolder::getStartJMapInfoIterFromStartDataIndex(int idx_) const {
     int idx = idx_;
 
-    for (JMapInfo* pInfo = mStartObjs.mArr; pInfo != mStartObjs.end(); pInfo++) {
-        const JMapData* curData = pInfo->mData;
-        bool isValid = curData;
-        int curIdx = isValid ? curData->mNumEntries : 0;
+    if (mStartObjs.size() > 0) {
+        for (JMapInfo* pInfo = mStartObjs.mArr; pInfo != mStartObjs.end(); pInfo++) {
+            const JMapData* curData = pInfo->mData;
+            bool isValid = curData != nullptr;
+            int curIdx = isValid ? curData->mNumEntries : 0;
 
-        if (idx < curIdx) {
-            return JMapInfoIter(pInfo, idx);
+            if (idx < curIdx) {
+                return JMapInfoIter(pInfo, idx);
+            }
+
+            idx -= curIdx;
         }
-
-        curIdx = isValid ? curData->mNumEntries : 0;
-
-        idx -= curIdx;
     }
 
     for (s32 i = 0; i < mStageDataHolderCount; i++) {
         StageDataHolder* pHolder = mStageDataArray[i];
-        int startPosNum = pHolder->getStartPosNum();
+        if (pHolder != nullptr) {
+            int startPosNum = pHolder->getStartPosNum();
 
-        if (idx < startPosNum) {
-            return pHolder->getStartJMapInfoIterFromStartDataIndex(idx);
+            if (idx < startPosNum) {
+                return pHolder->getStartJMapInfoIterFromStartDataIndex(idx);
+            }
+
+            idx -= startPosNum;
         }
-
-        idx -= startPosNum;
     }
 
     return JMapInfoIter();

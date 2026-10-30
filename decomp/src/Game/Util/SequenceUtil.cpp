@@ -45,7 +45,9 @@ namespace MR {
     }
 
     void requestChangeStageInGameMoving(const char* pStageName, s32 scenarioNo, const JMapIdInfo& rInfo) {
-        GameSequenceFunction::requestGalaxyMove(GalaxyMoveArgument(0, pStageName, scenarioNo, &rInfo));
+        GalaxyMoveArgument argument(0, pStageName, scenarioNo, &rInfo);
+        argument._C = scenarioNo;
+        GameSequenceFunction::requestGalaxyMove(argument);
     }
 
     void requestChangeStageInGameMoving(const char* pStageName, s32 scenarioNo) {

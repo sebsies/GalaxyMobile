@@ -318,22 +318,20 @@ MarioActor::~MarioActor() {
 
 void MarioActor::init(const JMapInfoIter& rInfo) {
     s32 initialAnimation = -1;
-    if (!MR::isValidInfo(rInfo)) {
-        return;
-    }
+    TVec3f position(0.0f, 0.0f, 0.0f), rotation(0.0f, 0.0f, 0.0f), scale(1.0f, 1.0f, 1.0f);
 
-    TVec3f position, rotation, scale;
+    if (MR::isValidInfo(rInfo)) {
+        MR::getJMapInfoTrans(rInfo, &position);
+        MR::getJMapInfoRotate(rInfo, &rotation);
+        MR::getJMapInfoScale(rInfo, &scale);
 
-    MR::getJMapInfoTrans(rInfo, &position);
-    MR::getJMapInfoRotate(rInfo, &rotation);
-    MR::getJMapInfoScale(rInfo, &scale);
+        rotation.x = BASE_ROTATION + (f32)fmod(rotation.x - BASE_ROTATION + 360.0f, 360.0);
+        rotation.y = BASE_ROTATION + (f32)fmod(rotation.y - BASE_ROTATION + 360.0f, 360.0);
+        rotation.z = BASE_ROTATION + (f32)fmod(rotation.z - BASE_ROTATION + 360.0f, 360.0);
 
-    rotation.x = BASE_ROTATION + (f32)fmod(rotation.x - BASE_ROTATION + 360.0f, 360.0);
-    rotation.y = BASE_ROTATION + (f32)fmod(rotation.y - BASE_ROTATION + 360.0f, 360.0);
-    rotation.z = BASE_ROTATION + (f32)fmod(rotation.z - BASE_ROTATION + 360.0f, 360.0);
-
-    if (MR::isExistJMapArg(rInfo)) {
-        MR::getJMapInfoArg0NoInit(rInfo, &initialAnimation);
+        if (MR::isExistJMapArg(rInfo)) {
+            MR::getJMapInfoArg0NoInit(rInfo, &initialAnimation);
+        }
     }
 
     init2(position, rotation, initialAnimation);
