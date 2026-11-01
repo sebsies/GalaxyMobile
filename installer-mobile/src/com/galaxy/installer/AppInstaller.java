@@ -59,6 +59,19 @@ public class AppInstaller {
         });
     }
 
+    public static void openUrl(Activity activity, String url) {
+        if (activity == null || url == null) return;
+        activity.runOnUiThread(() -> {
+            try {
+                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                activity.startActivity(intent);
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to open URL: " + url, e);
+            }
+        });
+    }
+
     public static boolean isPlusInstalled(Context context) {
         if (context == null) return false;
         try {

@@ -1040,6 +1040,74 @@ void port_open_installer(void) {
     }
 }
 
+void port_open_url(const char* url) {
+    if (!url || !gMobile.android || !gMobile.android->activity) return;
+    ANativeActivity* activity = gMobile.android->activity;
+    if (!activity->vm || !activity->clazz) return;
+    JNIEnv* env = nullptr;
+    bool attached = false;
+    if (activity->vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
+        if (activity->vm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+            attached = true;
+        }
+    }
+    if (!env) return;
+
+    jclass actClass = env->GetObjectClass(activity->clazz);
+    jmethodID getClassLoaderMethod = env->GetMethodID(actClass, "getClassLoader", "()Ljava/lang/ClassLoader;");
+    jobject classLoader = env->CallObjectMethod(activity->clazz, getClassLoaderMethod);
+
+    jclass clClass = env->FindClass("java/lang/ClassLoader");
+    jmethodID loadClassMethod = env->GetMethodID(clClass, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+    jstring clsName = env->NewStringUTF("com.galaxy.installer.AppInstaller");
+    jclass appInstallerClass = (jclass)env->CallObjectMethod(classLoader, loadClassMethod, clsName);
+
+    if (env->ExceptionCheck() || !appInstallerClass) {
+        env->ExceptionClear();
+        jclass intentClass = env->FindClass("android/content/Intent");
+        jclass uriClass = env->FindClass("android/net/Uri");
+        if (intentClass && uriClass) {
+            jstring actionStr = env->NewStringUTF("android.intent.action.VIEW");
+            jstring urlStr = env->NewStringUTF(url);
+            jmethodID parseMethod = env->GetStaticMethodID(uriClass, "parse", "(Ljava/lang/String;)Landroid/net/Uri;");
+            jobject uriObj = env->CallStaticObjectMethod(uriClass, parseMethod, urlStr);
+            jmethodID intentCtor = env->GetMethodID(intentClass, "<init>", "(Ljava/lang/String;Landroid/net/Uri;)V");
+            jobject intentObj = env->NewObject(intentClass, intentCtor, actionStr, uriObj);
+            jmethodID addFlagsMethod = env->GetMethodID(intentClass, "addFlags", "(I)Landroid/content/Intent;");
+            env->CallObjectMethod(intentObj, addFlagsMethod, 0x10000000);
+            jmethodID startActivityMethod = env->GetMethodID(actClass, "startActivity", "(Landroid/content/Intent;)V");
+            env->CallVoidMethod(activity->clazz, startActivityMethod, intentObj);
+            if (env->ExceptionCheck()) env->ExceptionClear();
+            env->DeleteLocalRef(intentObj);
+            env->DeleteLocalRef(uriObj);
+            env->DeleteLocalRef(urlStr);
+            env->DeleteLocalRef(actionStr);
+            env->DeleteLocalRef(uriClass);
+            env->DeleteLocalRef(intentClass);
+        }
+    } else {
+        jmethodID openUrlMethod = env->GetStaticMethodID(appInstallerClass, "openUrl", "(Landroid/app/Activity;Ljava/lang/String;)V");
+        if (openUrlMethod) {
+            jstring jUrl = env->NewStringUTF(url);
+            env->CallStaticVoidMethod(appInstallerClass, openUrlMethod, activity->clazz, jUrl);
+            env->DeleteLocalRef(jUrl);
+        }
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+        env->DeleteLocalRef(appInstallerClass);
+    }
+
+    env->DeleteLocalRef(clsName);
+    env->DeleteLocalRef(clClass);
+    env->DeleteLocalRef(classLoader);
+    env->DeleteLocalRef(actClass);
+
+    if (attached) {
+        activity->vm->DetachCurrentThread();
+    }
+}
+
 int port_is_plus_installed(void) {
     if (!gMobile.android || !gMobile.android->activity) return 0;
     ANativeActivity* activity = gMobile.android->activity;

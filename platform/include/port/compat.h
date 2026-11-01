@@ -196,6 +196,7 @@ void port_set_spin_unlocked(int unlocked);
 int port_is_spin_unlocked(void);
 int port_has_game_data(void);
 void port_open_installer(void);
+void port_open_url(const char* url);
 int port_is_plus_installed(void);
 void port_install_plus(void);
 void port_set_game_language(int index);

@@ -69,6 +69,7 @@ __attribute__((weak)) void port_set_spin_unlocked(int unlocked) { (void)unlocked
 __attribute__((weak)) int port_is_spin_unlocked(void) { return 0; }
 __attribute__((weak)) int port_has_game_data(void) { return 0; }
 __attribute__((weak)) void port_open_installer(void) {}
+__attribute__((weak)) void port_open_url(const char* url) { (void)url; }
 __attribute__((weak)) int port_is_plus_installed(void) { return 0; }
 __attribute__((weak)) void port_install_plus(void) {}
 }
