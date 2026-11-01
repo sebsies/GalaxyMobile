@@ -1146,7 +1146,6 @@ void MarioActor::updateBehavior() {
 #ifdef TARGET_PC
     if (port_is_plus_edition()) {
         port_set_current_powerup(mPlayerMode);
-        port_set_spin_unlocked(_EEB ? 1 : 0);
         if (port_is_infinite_powerup() && mPlayerMode == PlayerMode_Bee && mMario) {
             mMario->_402 = mConst->getTable()->mAirWalkTime;
         }
@@ -1156,9 +1155,9 @@ void MarioActor::updateBehavior() {
                 applyModPowerup(req);
             }
             if (port_take_unlock_spin_request()) {
-                MR::setPlayerSwingPermission(true);
-                _EEB = true;
-                port_set_spin_unlocked(1);
+                bool enableSpin = (port_is_spin_unlocked() != 0);
+                MR::setPlayerSwingPermission(enableSpin);
+                _EEB = enableSpin;
             }
         }
     }

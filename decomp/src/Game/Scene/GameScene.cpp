@@ -278,7 +278,6 @@ void GameScene::update() {
                         }
                     }
                     OSReport("port: warping to %s scenario %d (placedNo=%d)\n", sWarpStage, (int)warpScenario, (int)placedNo);
-                    port_set_spin_unlocked(1);
                     MR::stopSubBGM(0);
                     MR::stopStageBGM(0);
                     GalaxyMoveArgument argument(0, sWarpStage, placedNo, &MR::getInitializeStartIdInfo());
@@ -289,7 +288,6 @@ void GameScene::update() {
                     snprintf(mapArcPath, sizeof(mapArcPath), "/StageData/%s/%sMap.arc", sWarpStage, sWarpStage);
                     if (MR::isFileExist(mapArcPath, false)) {
                         OSReport("port: warping to non-galaxy stage %s scenario %d\n", sWarpStage, (int)warpScenario);
-                        port_set_spin_unlocked(1);
                         MR::stopSubBGM(0);
                         MR::stopStageBGM(0);
                         MR::requestChangeStageInGameMoving(sWarpStage, warpScenario);

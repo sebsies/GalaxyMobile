@@ -948,8 +948,10 @@ static std::atomic<int> sSpinUnlocked{0};
 
 void port_request_unlock_spin(void) {
     if (!mobile_ui::UIOverlay::get().isPlusEdition()) return;
+    int nextState = (sSpinUnlocked.load(std::memory_order_relaxed) != 0) ? 0 : 1;
+    sSpinUnlocked.store(nextState, std::memory_order_relaxed);
     sPendingUnlockSpin.store(true, std::memory_order_relaxed);
-    LOGI("Queued early spin unlock request");
+    LOGI("Queued early spin unlock request (state=%d)", nextState);
 }
 
 int port_take_unlock_spin_request(void) {
