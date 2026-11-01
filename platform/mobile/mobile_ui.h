@@ -11,6 +11,9 @@ namespace mobile_ui {
 struct Settings {
     bool showControls = true;
     bool fullscreen = false;
+    bool showCameraCutout = true;
+    int languageIndex = 0;
+    int playerCharacter = 0;
     float opacity = 0.65f;
     float scale = 1.0f;
     bool dynamicStick = true;
@@ -103,6 +106,8 @@ private:
     float mSwAnimShowControls = 1.0f;
     float mSwAnimShowDpad = 1.0f;
     float mSwAnimFullscreen = 0.0f;
+    float mSwAnimCameraCutout = 1.0f;
+    bool mDraggingLanguageSlider = false;
     float mSwAnimHdUi = 1.0f;
     float mSwAnimSkipCutscenes = 0.0f;
     float mSwAnimInfiniteHp = 0.0f;

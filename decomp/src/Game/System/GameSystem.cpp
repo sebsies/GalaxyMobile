@@ -20,6 +20,7 @@
 #include "Game/System/GameSystemStationedArchiveLoader.hpp"
 #include "Game/System/HeapMemoryWatcher.hpp"
 #include "Game/System/HomeButtonStateNotifier.hpp"
+#include "Game/System/Language.hpp"
 #include "Game/System/MainLoopFramework.hpp"
 #include "Game/Util/MathUtil.hpp"
 #include "Game/Util/MemoryUtil.hpp"
@@ -160,6 +161,9 @@ void GameSystem::exeWaitForReboot() {
 }
 
 void GameSystem::exeNormal() {
+#ifdef TARGET_PC
+    MR::tryApplyRuntimeLanguageChange();
+#endif
     updateSceneController();
     mStationedArchiveLoader->update();
 }

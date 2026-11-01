@@ -108,8 +108,9 @@ static const PortDisc kDiscs[] = {
       {"french", "EuFrench", SC_LANG_FRENCH},
       {"german", "EuGerman", SC_LANG_GERMAN},
       {"spanish", "EuSpanish", SC_LANG_SPANISH},
-      {"italian", "EuItalian", SC_LANG_ITALIAN}},
-     5},
+      {"italian", "EuItalian", SC_LANG_ITALIAN},
+      {"dutch", "EuDutch", SC_LANG_DUTCH}},
+     6},
     {"RMGE01",
      "North America",
      {{"english", "UsEnglish", SC_LANG_ENGLISH}, {"french", "UsFrench", SC_LANG_FRENCH}, {"spanish", "UsSpanish", SC_LANG_SPANISH}},
@@ -181,6 +182,40 @@ extern "C" void port_language_set(const char* name) {
         sLanguageWanted[n] = (char)tolower((unsigned char)name[n]);
     }
     sLanguageWanted[n] = 0;
+}
+
+static int sGameLanguageIndex = 0;
+static int sPendingLangChange = -1;
+
+static const char* kIndexToLangName[7] = {
+    "english",
+    "spanish",
+    "french",
+    "german",
+    "italian",
+    "dutch",
+    "japanese"
+};
+
+extern "C" void port_set_game_language(int index) {
+    if (index < 0 || index >= 7) index = 0;
+    sGameLanguageIndex = index;
+    port_language_set(kIndexToLangName[index]);
+    sPendingLangChange = index;
+}
+
+extern "C" int port_get_game_language(void) {
+    return sGameLanguageIndex;
+}
+
+extern "C" int port_take_language_change_request(int* outLangIndex) {
+    int req = sPendingLangChange;
+    if (req >= 0) {
+        sPendingLangChange = -1;
+        if (outLangIndex) *outLangIndex = req;
+        return 1;
+    }
+    return 0;
 }
 
 extern "C" int port_language_wanted(void) {

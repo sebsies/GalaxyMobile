@@ -63,6 +63,12 @@ struct MobileApp {
 
     // Input state
     PortPadState pad{};
+    PortPadState touchPad{};
+    uint32_t gamepadKeyButtons = 0;
+    uint32_t gamepadAxisButtons = 0;
+    float gamepadStickX = 0.0f;
+    float gamepadStickY = 0.0f;
+    bool gamepadRTrigWasDown = false;
     bool touchActive = false;
     float touchX = 0.0f, touchY = 0.0f;
 
@@ -260,10 +266,18 @@ static void presentGameImage(MobileApp& a) {
 
 void updateViewport(MobileApp& a) {
     if (mobile_ui::get().settings().fullscreen) {
-        a.vpX = 0;
-        a.vpY = 0;
-        a.vpW = a.screenWidth;
-        a.vpH = a.screenHeight;
+        if (mobile_ui::get().settings().showCameraCutout) {
+            a.vpX = 0;
+            a.vpY = 0;
+            a.vpW = a.screenWidth;
+            a.vpH = a.screenHeight;
+        } else {
+            int cutoutMargin = std::max(44, (int)lroundf((float)a.screenWidth * 0.042f));
+            a.vpX = cutoutMargin;
+            a.vpY = 0;
+            a.vpW = std::max(1, a.screenWidth - cutoutMargin * 2);
+            a.vpH = a.screenHeight;
+        }
     } else {
         float targetAspect = 16.0f / 9.0f;
         float screenAspect = (float)a.screenWidth / (float)a.screenHeight;
@@ -319,7 +333,7 @@ bool createSurface(MobileApp& a) {
     int targetH = getDesiredTargetHeight(a);
     int targetW;
     if (mobile_ui::get().settings().fullscreen) {
-        float nativeAspect = (float)a.screenWidth / (float)a.screenHeight;
+        float nativeAspect = (a.vpH > 0) ? ((float)a.vpW / (float)a.vpH) : ((float)a.screenWidth / (float)a.screenHeight);
         targetW = (int)lroundf(targetH * nativeAspect);
     } else {
         targetW = (targetH * 16) / 9;
@@ -348,6 +362,23 @@ void destroySurface(MobileApp& a) {
     a.windowReady = false;
 }
 
+void syncMergedPad(MobileApp& a) {
+    a.pad.connected = 1;
+    a.pad.buttons = a.touchPad.buttons | a.gamepadKeyButtons | a.gamepadAxisButtons;
+    if (fabsf(a.gamepadStickX) > fabsf(a.touchPad.stickX) ||
+        fabsf(a.gamepadStickY) > fabsf(a.touchPad.stickY)) {
+        a.pad.stickX = a.gamepadStickX;
+        a.pad.stickY = a.gamepadStickY;
+    } else {
+        a.pad.stickX = a.touchPad.stickX;
+        a.pad.stickY = a.touchPad.stickY;
+    }
+    a.pad.pointerX = a.touchPad.pointerX;
+    a.pad.pointerY = a.touchPad.pointerY;
+    a.pad.pointerValid = a.touchPad.pointerValid;
+    a.pad.pointerDist = a.touchPad.pointerDist;
+}
+
 int32_t onInput(android_app* app, AInputEvent* event) {
     MobileApp* a = (MobileApp*)app->userData;
     if (!a) return 0;
@@ -357,22 +388,60 @@ int32_t onInput(android_app* app, AInputEvent* event) {
         int32_t source = AInputEvent_getSource(event);
         bool isJoystickSource = (source & AINPUT_SOURCE_CLASS_JOYSTICK) != 0 || (source & AINPUT_SOURCE_GAMEPAD) != 0;
 
-        // Physical gamepad analog stick mapping only
+        // Physical gamepad analog sticks, D-Pad hat axes, and analog triggers
         if (isJoystickSource) {
             float stickX = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_X, 0);
             float stickY = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_Y, 0);
             if (fabsf(stickX) > 0.15f || fabsf(stickY) > 0.15f) {
-                a->pad.stickX = stickX;
-                a->pad.stickY = -stickY;
+                a->gamepadStickX = stickX;
+                a->gamepadStickY = -stickY;
             } else {
-                a->pad.stickX = 0.0f;
-                a->pad.stickY = 0.0f;
+                a->gamepadStickX = 0.0f;
+                a->gamepadStickY = 0.0f;
             }
+
+            uint32_t axisBtns = 0;
+
+            // D-Pad Hat Axes (standard on Xbox, DualShock/DualSense, Switch Pro, Backbone, Razer Kishi)
+            float hatX = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_HAT_X, 0);
+            float hatY = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_HAT_Y, 0);
+            if (hatX < -0.45f) axisBtns |= 0x0001; // D-Pad Left (Camera Orbit Left)
+            if (hatX >  0.45f) axisBtns |= 0x0002; // D-Pad Right (Camera Orbit Right)
+            if (hatY < -0.45f) axisBtns |= 0x0008; // D-Pad Up (First-Person Camera)
+            if (hatY >  0.45f) axisBtns |= 0x0004; // D-Pad Down (Center Camera)
+
+            // Right Stick Camera Control (AXIS_Z / AXIS_RZ on standard Android gamepads, fallback to AXIS_RX / AXIS_RY)
+            float rx = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_Z, 0);
+            float ry = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_RZ, 0);
+            if (fabsf(rx) < 0.10f && fabsf(ry) < 0.10f) {
+                float altRx = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_RX, 0);
+                float altRy = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_RY, 0);
+                if (altRx > -0.85f && altRy > -0.85f) {
+                    rx = altRx;
+                    ry = altRy;
+                }
+            }
+            if (rx < -0.38f) axisBtns |= 0x0001; // Camera Orbit Left
+            if (rx >  0.38f) axisBtns |= 0x0002; // Camera Orbit Right
+            if (ry < -0.38f) axisBtns |= 0x0008; // Camera First-Person / Up
+            if (ry >  0.38f) axisBtns |= 0x0004; // Camera Center / Down
+
+            // Analog Triggers (L2/LT = Crouch/Ground Pound, R2/RT = Spin)
             float lTrig = std::max(AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_LTRIGGER, 0),
                                    AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_BRAKE, 0));
-            if (lTrig > 0.3f) {
-                a->pad.buttons |= 0x2000;
+            if (lTrig > 0.30f) {
+                axisBtns |= 0x2000;
             }
+            float rTrig = std::max(AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_RTRIGGER, 0),
+                                   AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_GAS, 0));
+            bool rTrigDown = (rTrig > 0.30f);
+            if (rTrigDown && !a->gamepadRTrigWasDown) {
+                a->spinFrames = 6;
+            }
+            a->gamepadRTrigWasDown = rTrigDown;
+
+            a->gamepadAxisButtons = axisBtns;
+            syncMergedPad(*a);
             port_input_set(0, &a->pad);
             return 1;
         }
@@ -383,9 +452,10 @@ int32_t onInput(android_app* app, AInputEvent* event) {
             ptrW = (int)lroundf((float)a->screenHeight * (16.0f / 9.0f));
             ptrX = (a->screenWidth - ptrW) / 2;
         }
-        if (mobile_ui::get().handleInput(event, a->pad, a->spinFrames,
+        if (mobile_ui::get().handleInput(event, a->touchPad, a->spinFrames,
                                          a->screenWidth, a->screenHeight,
                                          ptrX, ptrY, ptrW, ptrH)) {
+            syncMergedPad(*a);
             port_input_set(0, &a->pad);
             return 1;
         }
@@ -403,62 +473,63 @@ int32_t onInput(android_app* app, AInputEvent* event) {
         switch (keyCode) {
         case AKEYCODE_BUTTON_A:
         case AKEYCODE_DPAD_CENTER:
-            a->pad.connected = 1;
-            if (down) a->pad.buttons |= 0x0800;  // A
-            else a->pad.buttons &= ~0x0800;
+            if (down) a->gamepadKeyButtons |= 0x0800;  // A (Jump / Confirm)
+            else a->gamepadKeyButtons &= ~0x0800;
             break;
         case AKEYCODE_BUTTON_B:
-            a->pad.connected = 1;
-            if (down) a->pad.buttons |= 0x0400;  // B
-            else a->pad.buttons &= ~0x0400;
+            if (down) a->gamepadKeyButtons |= 0x0400;  // B (Shoot Star Bit / Cancel)
+            else a->gamepadKeyButtons &= ~0x0400;
             break;
         case AKEYCODE_BUTTON_X:
-            a->pad.connected = 1;
             if (down) a->spinFrames = 6;  // Spin (Wiimote shake)
             break;
         case AKEYCODE_BUTTON_Y:
-            a->pad.connected = 1;
-            if (down) a->pad.buttons |= 0x1000;  // C
-            else a->pad.buttons &= ~0x1000;
+            if (down) {
+                a->spinFrames = 6;  // Spin + C
+                a->gamepadKeyButtons |= 0x1000;
+            } else {
+                a->gamepadKeyButtons &= ~0x1000;
+            }
             break;
         case AKEYCODE_BUTTON_L1:
         case AKEYCODE_BUTTON_L2:
+            if (down) a->gamepadKeyButtons |= 0x2000;  // Z (crouch / ground pound)
+            else a->gamepadKeyButtons &= ~0x2000;
+            break;
         case AKEYCODE_BUTTON_THUMBL:
-            a->pad.connected = 1;
-            if (down) a->pad.buttons |= 0x2000;  // Z (crouch / ground pound)
-            else a->pad.buttons &= ~0x2000;
+            if (down) a->gamepadKeyButtons |= 0x0004;  // L3: Center Camera behind player
+            else a->gamepadKeyButtons &= ~0x0004;
             break;
         case AKEYCODE_BUTTON_R1:
         case AKEYCODE_BUTTON_R2:
         case AKEYCODE_BUTTON_THUMBR:
-            a->pad.connected = 1;
             if (down) a->spinFrames = 6;  // Spin (Wiimote shake)
             break;
         case AKEYCODE_BUTTON_START:
         case AKEYCODE_MENU:
-            a->pad.connected = 1;
-            if (down) a->pad.buttons |= 0x0010;  // Plus / Pause
-            else a->pad.buttons &= ~0x0010;
+            if (down) a->gamepadKeyButtons |= 0x0010;  // Plus / Pause
+            else a->gamepadKeyButtons &= ~0x0010;
+            break;
+        case AKEYCODE_BUTTON_SELECT:
+        case AKEYCODE_BUTTON_MODE:
+            if (down) a->gamepadKeyButtons |= 0x1000;  // Minus / C
+            else a->gamepadKeyButtons &= ~0x1000;
             break;
         case AKEYCODE_DPAD_UP:
-            a->pad.connected = 1;
-            if (down) a->pad.buttons |= 0x0008;
-            else a->pad.buttons &= ~0x0008;
+            if (down) a->gamepadKeyButtons |= 0x0008;
+            else a->gamepadKeyButtons &= ~0x0008;
             break;
         case AKEYCODE_DPAD_DOWN:
-            a->pad.connected = 1;
-            if (down) a->pad.buttons |= 0x0004;
-            else a->pad.buttons &= ~0x0004;
+            if (down) a->gamepadKeyButtons |= 0x0004;
+            else a->gamepadKeyButtons &= ~0x0004;
             break;
         case AKEYCODE_DPAD_LEFT:
-            a->pad.connected = 1;
-            if (down) a->pad.buttons |= 0x0001;
-            else a->pad.buttons &= ~0x0001;
+            if (down) a->gamepadKeyButtons |= 0x0001;
+            else a->gamepadKeyButtons &= ~0x0001;
             break;
         case AKEYCODE_DPAD_RIGHT:
-            a->pad.connected = 1;
-            if (down) a->pad.buttons |= 0x0002;
-            else a->pad.buttons &= ~0x0002;
+            if (down) a->gamepadKeyButtons |= 0x0002;
+            else a->gamepadKeyButtons &= ~0x0002;
             break;
         case AKEYCODE_BACK:
             if (mobile_ui::get().isSettingsOpen()) {
@@ -472,6 +543,7 @@ int32_t onInput(android_app* app, AInputEvent* event) {
             return 0;
         }
 
+        syncMergedPad(*a);
         port_input_set(0, &a->pad);
         return 1;
     }
@@ -578,6 +650,11 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
     a.saveRoot = internalPath + "/nand";
     mkdir(a.saveRoot.c_str(), 0770);
     mobile_ui::get().setSavePath(a.saveRoot + (isPlus ? "/touch_settings_plus.ini" : "/touch_settings.ini"));
+    port_set_game_language(mobile_ui::get().settings().languageIndex);
+    port_set_camera_cutout(mobile_ui::get().settings().showCameraCutout ? 1 : 0);
+    if (isPlus) {
+        port_set_player_character(mobile_ui::get().settings().playerCharacter);
+    }
 
     port_log_file((ext + "/petari_mobile_log.txt").c_str());
     gpu::setShaderCachePath((std::string(app->activity->internalDataPath) + "/shaders.bin").c_str());
@@ -633,6 +710,7 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
         }
 
         // Handle spin shake decay and feed input state
+        syncMergedPad(a);
         if (a.spinFrames > 0) {
             float s = (a.spinFrames & 1) ? 2.5f : -2.5f;
             a.pad.accX = s;
@@ -663,7 +741,8 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
             int desiredTargetH = getDesiredTargetHeight(a);
             int desiredTargetW;
             if (mobile_ui::get().settings().fullscreen) {
-                float nativeAspect = (float)a.screenWidth / (float)a.screenHeight;
+                updateViewport(a);
+                float nativeAspect = (a.vpH > 0) ? ((float)a.vpW / (float)a.vpH) : ((float)a.screenWidth / (float)a.screenHeight);
                 desiredTargetW = (int)lroundf(desiredTargetH * nativeAspect);
             } else {
                 desiredTargetW = (desiredTargetH * 16) / 9;
@@ -743,6 +822,9 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
 
 extern "C" {
 float port_get_display_aspect(void) {
+    if (gMobile.vpH > 0 && gMobile.vpW > 0) {
+        return (float)gMobile.vpW / (float)gMobile.vpH;
+    }
     if (gMobile.screenHeight > 0) {
         return (float)gMobile.screenWidth / (float)gMobile.screenHeight;
     }
@@ -1038,6 +1120,34 @@ void port_install_plus(void) {
     if (attached) {
         activity->vm->DetachCurrentThread();
     }
+}
+
+static std::atomic<int> sShowCameraCutout{1};
+void port_set_camera_cutout(int show) {
+    sShowCameraCutout.store(show ? 1 : 0, std::memory_order_relaxed);
+}
+int port_get_camera_cutout(void) {
+    return sShowCameraCutout.load(std::memory_order_relaxed);
+}
+
+static std::atomic<int> sPlayerCharacter{0};
+static std::atomic<bool> sPendingCharacterChange{false};
+void port_set_player_character(int isLuigi) {
+    sPlayerCharacter.store(isLuigi ? 1 : 0, std::memory_order_relaxed);
+}
+int port_get_player_character(void) {
+    if (!mobile_ui::UIOverlay::get().isPlusEdition()) return 0;
+    return sPlayerCharacter.load(std::memory_order_relaxed);
+}
+void port_request_character_change(int isLuigi) {
+    if (!mobile_ui::UIOverlay::get().isPlusEdition()) return;
+    sPlayerCharacter.store(isLuigi ? 1 : 0, std::memory_order_relaxed);
+    sPendingCharacterChange.store(true, std::memory_order_relaxed);
+    LOGI("Queued character change request: isLuigi=%d", isLuigi ? 1 : 0);
+}
+int port_take_character_change_request(void) {
+    if (!mobile_ui::UIOverlay::get().isPlusEdition()) return 0;
+    return sPendingCharacterChange.exchange(false, std::memory_order_relaxed) ? 1 : 0;
 }
 }
 

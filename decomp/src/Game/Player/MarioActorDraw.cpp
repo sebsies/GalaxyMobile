@@ -26,6 +26,8 @@
 #include "Game/Util/MtxUtil.hpp"
 #include "Game/Util/ObjUtil.hpp"
 #include "Game/Util/SchedulerUtil.hpp"
+#include "Game/System/ResourceHolder.hpp"
+#include "port/port.h"
 #include <JSystem/J3DGraphAnimator/J3DJoint.hpp>
 #include <JSystem/J3DGraphAnimator/J3DModelData.hpp>
 #include <JSystem/J3DGraphBase/J3DMaterial.hpp>
@@ -70,8 +72,26 @@ void MarioActor::initDrawAndModel() {
     _22C = new DrawAdaptor(MR::Functor(this, &MarioActor::drawIndirect), MR::DrawType_0x24);
 
     if (gIsLuigi) {
+#ifdef TARGET_PC
+        if (port_is_plus_edition()) {
+            ResourceHolder* pAnimeHolder = MR::createAndAddResourceHolder("MarioAnime.arc");
+            ResourceHolder* pLuigiHolder = MR::createAndAddResourceHolder("Luigi.arc");
+            if (pAnimeHolder && pLuigiHolder && pLuigiHolder->mModelResTable) {
+                pAnimeHolder->newMaterialAnmBuffer(static_cast< J3DModelData* >(pLuigiHolder->mModelResTable->getRes("luigi")));
+            }
+        }
+#endif
         initModelManagerWithAnm("Luigi", "MarioAnime", true);
     } else {
+#ifdef TARGET_PC
+        if (port_is_plus_edition()) {
+            ResourceHolder* pAnimeHolder = MR::createAndAddResourceHolder("MarioAnime.arc");
+            ResourceHolder* pMarioHolder = MR::createAndAddResourceHolder("Mario.arc");
+            if (pAnimeHolder && pMarioHolder && pMarioHolder->mModelResTable) {
+                pAnimeHolder->newMaterialAnmBuffer(static_cast< J3DModelData* >(pMarioHolder->mModelResTable->getRes("mario")));
+            }
+        }
+#endif
         initModelManagerWithAnm("Mario", "MarioAnime", true);
     }
 

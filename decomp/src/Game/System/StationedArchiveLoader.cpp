@@ -45,7 +45,9 @@ void StationedArchiveLoader::loadResourcesFromTable(const StationedArchiveLoader
         case MR::StationedFileInfo::LOAD_TYPE_MOUNT_RESOURCE_LUIGI:
         case MR::StationedFileInfo::LOAD_TYPE_MOUNT_RESOURCE:
         case MR::StationedFileInfo::LOAD_TYPE_MOUNT_RESOURCE_LAYOUT:
-            MR::mountArchive(pInfo->mArchive, pHeap);
+            if (!MR::isMountedArchive(pInfo->mArchive)) {
+                MR::mountArchive(pInfo->mArchive, pHeap);
+            }
             break;
         }
     }

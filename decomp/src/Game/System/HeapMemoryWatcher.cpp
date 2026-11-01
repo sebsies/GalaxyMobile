@@ -68,6 +68,9 @@ JKRHeap* HeapMemoryWatcher::getHeapGDDR3(const JKRHeap* pHeap) {
 }
 
 void HeapMemoryWatcher::createFileCacheHeapOnGameHeap(u32 size) {
+#ifdef TARGET_PC
+    size = size * 3;
+#endif
     mFileCacheHeap = ::createSolidHeap(size, mGameHeapGDDR);
 }
 
@@ -148,12 +151,12 @@ void HeapMemoryWatcher::createHeaps() {
     MR::CurrentHeapRestorer heapRestorer = MR::CurrentHeapRestorer(JKRHeap::sRootHeap);
     ::createExpHeap(PORT_HEAP(0x40000), JKRHeap::sRootHeap, false)->becomeSystemHeap();
     mAudSystemHeap = ::createSolidHeap(PORT_HEAP(0x1E0000), JKRHeap::sRootHeap);
-    mStationedHeapNapa = ::createExpHeap(PORT_HEAP(0x900000), JKRHeap::sRootHeap, false);
+    mStationedHeapNapa = ::createExpHeap(PORT_HEAP(0x1000000), JKRHeap::sRootHeap, false);
     JKRHeap* pRootHeapGDDR = HeapMemoryWatcher::sRootHeapGDDR3;
     u32 wpadHeapSize = OSRoundUp32B(WPADGetWorkMemorySize()) + 0xD0;
     mWPadHeap = ::createExpHeap(wpadHeapSize, pRootHeapGDDR, false);
     mHomeButtonLayoutHeap = ::createExpHeap(PORT_HEAP(0x80000), HeapMemoryWatcher::sRootHeapGDDR3, false);
-    mStationedHeapGDDR = ::createExpHeap(PORT_HEAP(0x1400000), HeapMemoryWatcher::sRootHeapGDDR3, false);
+    mStationedHeapGDDR = ::createExpHeap(PORT_HEAP(0x1A00000), HeapMemoryWatcher::sRootHeapGDDR3, false);
     createGameHeap();
 }
 

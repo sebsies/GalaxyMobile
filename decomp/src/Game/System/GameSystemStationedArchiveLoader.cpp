@@ -33,6 +33,12 @@ ConditionUsePlayerHeap::ConditionUsePlayerHeap() : mNapaHeap(), mGDDRHeap(), mIs
 }
 
 bool ConditionUsePlayerHeap::isExecute(const MR::StationedFileInfo* pInfo) const {
+#ifdef TARGET_PC
+    if (port_is_plus_edition()) {
+        return pInfo->mLoadType == MR::StationedFileInfo::LOAD_TYPE_MOUNT_RESOURCE_MARIO ||
+               pInfo->mLoadType == MR::StationedFileInfo::LOAD_TYPE_MOUNT_RESOURCE_LUIGI;
+    }
+#endif
     MR::StationedFileInfo::LoadType type = MR::StationedFileInfo::LOAD_TYPE_MOUNT_RESOURCE_LUIGI;
 
     if (mIsDataMario) {
@@ -57,8 +63,8 @@ JKRHeap* ConditionUsePlayerHeap::getProperHeap(const MR::StationedFileInfo* pInf
 
 PlayerHeapHolder::PlayerHeapHolder() : mCondition(), mNapaHeap(), mGDDRHeap(), mIsDataMario(true) {
     ConditionUsePlayerHeap* condition = new ConditionUsePlayerHeap();
-    mNapaHeap = PlayerHeapHolder::createHeap(0x500000, MR::getStationedHeapNapa());
-    JKRExpHeap* gddr = PlayerHeapHolder::createHeap(0x500000, MR::getStationedHeapGDDR3());
+    mNapaHeap = PlayerHeapHolder::createHeap(0xC00000, MR::getStationedHeapNapa());
+    JKRExpHeap* gddr = PlayerHeapHolder::createHeap(0xC00000, MR::getStationedHeapGDDR3());
     mGDDRHeap = gddr;
     condition->mNapaHeap = mNapaHeap;
     condition->mGDDRHeap = gddr;
@@ -138,6 +144,14 @@ void GameSystemStationedArchiveLoader::prepareReset() {
 }
 
 void GameSystemStationedArchiveLoader::requestChangeArchivePlayer(bool isDataMario) {
+#ifdef TARGET_PC
+    if (port_is_plus_edition()) {
+        if (mHeapHolder != nullptr) {
+            mHeapHolder->setIsDataMario(isDataMario);
+        }
+        return;
+    }
+#endif
     if (mHeapHolder == nullptr) {
         return;
     }
@@ -274,8 +288,18 @@ void GameSystemStationedArchiveLoader::startToLoadStationedArchiveOthers() {
 }
 
 void GameSystemStationedArchiveLoader::createAndAddPlayerArchives(bool isDataMario) {
+#ifdef TARGET_PC
+    if (port_is_plus_edition()) {
+        ConditionIsEqualType condMario(true);
+        StationedArchiveLoader::createAndAddResourcesFromTable(condMario);
+        ConditionIsEqualType condLuigi(false);
+        StationedArchiveLoader::createAndAddResourcesFromTable(condLuigi);
+    } else
+#endif
+    if (true) {
     ConditionIsEqualType cond(isDataMario);
     StationedArchiveLoader::createAndAddResourcesFromTable(cond);
+    }
 
     ResourceHolder* pMarioAnimeHolder = MR::createAndAddResourceHolder("MarioAnime.arc");
 

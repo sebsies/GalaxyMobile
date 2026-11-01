@@ -4,6 +4,13 @@
 #include "Game/Player/MarioActor.hpp"
 #include "Game/Player/RemotePlayerActor.hpp"
 #include "port/port.h"
+#include "port/net.h"
+#include "Game/System/GalaxyMoveArgument.hpp"
+#include "Game/System/GalaxyStatusAccessor.hpp"
+#include "Game/System/ScenarioDataParser.hpp"
+#include "Game/System/GameSystem.hpp"
+#include "Game/System/GameSystemSceneController.hpp"
+#include "Game/Util/SingletonHolder.hpp"
 #include "Game/AudioLib/AudSceneMgr.hpp"
 #include "Game/AudioLib/AudWrap.hpp"
 #include "Game/LiveActor/AllLiveActorGroup.hpp"
@@ -145,6 +152,7 @@ void GameScene::init() {
         SceneFunction::initAfterScenarioSelected();
         NPCFunction::createNPCData();
         SceneFunction::startActorFileLoadScenario();
+        MR::receiveAllRequestedFile();
         MR::createSceneObj(SceneObj_EventDirector);
         MR::initSceneMessage();
         MR::createSceneObj(SceneObj_CameraDirector);
@@ -218,19 +226,76 @@ void GameScene::update() {
     updateNerve();
 #ifdef TARGET_PC
     if (port_is_plus_edition() && !MR::isStageFileSelect()) {
-        if (isNerve(GET_NERVE(GameScene, GameSceneAction)) && MR::isExistMario() && !MR::isDemoActive() && !MR::isPlayerDead()) {
+        bool sceneReadyForWarp =
+            !SingletonHolder< GameSystem >::get()->mSceneController->isChangingScene() &&
+            MR::isExistMario() && !MR::isPlayerDead() &&
+            (isNerve(GET_NERVE(GameScene, GameSceneAction)) ||
+             isNerve(GET_NERVE(GameScene, GameSceneScenarioOpeningCamera)) ||
+             isNerve(GET_NERVE(GameScene, GameSceneScenarioStarter)) ||
+             isNerve(GET_NERVE(GameScene, GameScenePauseMenu)));
+
+        if (sceneReadyForWarp) {
             static char sWarpStage[64];
             int warpScenario = 1;
-            if (port_take_warp_request(sWarpStage, sizeof(sWarpStage), &warpScenario)) {
-                if (sWarpStage[0] != '\0') {
+            bool hasWarp = port_take_warp_request(sWarpStage, sizeof(sWarpStage), &warpScenario) != 0;
+            if (!hasWarp && port_net_is_connected() && port_net_get_mode() == PORT_NET_MODE_COOP) {
+                hasWarp = port_net_take_warp_event(sWarpStage, sizeof(sWarpStage), &warpScenario) != 0;
+            }
+            if (!hasWarp && port_take_character_change_request()) {
+                const char* curStage = MR::getCurrentStageName();
+                if (curStage != nullptr && curStage[0] != '\0') {
+                    snprintf(sWarpStage, sizeof(sWarpStage), "%s", curStage);
+                    warpScenario = MR::getCurrentSelectedScenarioNo();
+                    if (warpScenario < 1) {
+                        warpScenario = MR::getCurrentScenarioNo();
+                    }
                     if (warpScenario < 1) {
                         warpScenario = 1;
                     }
-                    OSReport("port: warping to %s scenario %d\n", sWarpStage, (int)warpScenario);
+                    hasWarp = true;
+                }
+            }
+
+            if (hasWarp && sWarpStage[0] != '\0') {
+                if (warpScenario < 1) {
+                    warpScenario = 1;
+                }
+                const ScenarioData* pScenarioData = ScenarioDataFunction::getScenarioDataParser()->getScenarioData(sWarpStage);
+                if (pScenarioData != nullptr) {
+                    GalaxyStatusAccessor accessor(pScenarioData);
+                    s32 maxSc = accessor.getScenarioNum();
+                    if (maxSc < 1) maxSc = 1;
+                    if (warpScenario > maxSc) {
+                        warpScenario = maxSc;
+                    }
+                    s32 placedNo = warpScenario;
+                    if (accessor.isHiddenStar(warpScenario)) {
+                        s32 hiddenPlaced = MR::getPlacedHiddenStarScenarioNo(sWarpStage, warpScenario);
+                        if (hiddenPlaced >= 1 && hiddenPlaced <= maxSc) {
+                            placedNo = hiddenPlaced;
+                        } else if (accessor.getNormalScenarioNum() >= 1) {
+                            placedNo = 1;
+                        }
+                    }
+                    OSReport("port: warping to %s scenario %d (placedNo=%d)\n", sWarpStage, (int)warpScenario, (int)placedNo);
                     port_set_spin_unlocked(1);
                     MR::stopSubBGM(0);
                     MR::stopStageBGM(0);
-                    MR::requestChangeStageInGameMoving(sWarpStage, warpScenario);
+                    GalaxyMoveArgument argument(0, sWarpStage, placedNo, &MR::getInitializeStartIdInfo());
+                    argument._C = warpScenario;
+                    GameSequenceFunction::requestGalaxyMove(argument);
+                } else {
+                    char mapArcPath[128];
+                    snprintf(mapArcPath, sizeof(mapArcPath), "/StageData/%s/%sMap.arc", sWarpStage, sWarpStage);
+                    if (MR::isFileExist(mapArcPath, false)) {
+                        OSReport("port: warping to non-galaxy stage %s scenario %d\n", sWarpStage, (int)warpScenario);
+                        port_set_spin_unlocked(1);
+                        MR::stopSubBGM(0);
+                        MR::stopStageBGM(0);
+                        MR::requestChangeStageInGameMoving(sWarpStage, warpScenario);
+                    } else {
+                        OSReport("port: ignored invalid warp target %s\n", sWarpStage);
+                    }
                 }
             }
         }

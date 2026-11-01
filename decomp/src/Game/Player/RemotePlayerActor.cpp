@@ -2,12 +2,17 @@
 #include "port/net.h"
 #include "port/port.h"
 
+#include <cstdio>
 #include <math.h>
 #include <revolution/gx.h>
+#include "Game/LiveActor/DisplayListMaker.hpp"
+#include "Game/LiveActor/ModelManager.hpp"
 #include "Game/Player/J3DModelX.hpp"
 #include "Game/Player/MarioActor.hpp"
 #include "Game/Player/MarioAccess.hpp"
 #include "Game/Scene/SceneFunction.hpp"
+#include "Game/System/ResourceHolder.hpp"
+#include "Game/Util/FileUtil.hpp"
 #include "Game/Util/ObjUtil.hpp"
 #include "Game/Util/EventUtil.hpp"
 #include "Game/Util/LiveActorUtil.hpp"
@@ -22,10 +27,35 @@
 
 RemotePlayerActor* RemotePlayerActor::sInstance = nullptr;
 
+namespace {
+    ModelManager* createRemoteModelManager(const char* pModelName) {
+        if (!MR::isLoadedObjectOrLayoutArchive(pModelName)) {
+            return nullptr;
+        }
+        char modelArchive[64];
+        snprintf(modelArchive, sizeof(modelArchive), "%s.arc", pModelName);
+        ResourceHolder* modelHolder = MR::createAndAddResourceHolder(modelArchive);
+        ResourceHolder* animationHolder = MR::createAndAddResourceHolder("MarioAnime.arc");
+        if (modelHolder == nullptr || animationHolder == nullptr) {
+            return nullptr;
+        }
+
+        ModelManager* mgr = new ModelManager();
+        J3DMdlFlag flags = static_cast< J3DMdlFlag >(J3DMdlFlag_UseSharedDL | J3DMdlFlag_DifferedDLBuffer);
+        mgr->initModelAndAnimation(modelHolder, pModelName, animationHolder, flags);
+        mgr->initVisibilityAnm();
+        // Bind DisplayListMaker to modelHolder instead of MarioAnime.arc so Mario and Luigi
+        // never clobber MarioAnime.arc's single MaterialAnmBuffer.
+        mgr->mDisplayListMaker = new DisplayListMaker(mgr->getJ3DModel(), modelHolder);
+        mgr->mDisplayListMaker->newDifferedDisplayList();
+        return mgr;
+    }
+}
+
 RemotePlayerActor::RemotePlayerActor(const char* pName)
-    : LiveActor(pName), mIsLuigi(false), mTargetPos(0.0f, 0.0f, 0.0f),
-      mTargetRot(0.0f, 0.0f, 0.0f), mCurrentAnim(nullptr), mSpinSoundCooldown(0),
-      mSpinTimer(0), mCurrentPowerupMode(-1), mWasSpinning(false) {
+    : LiveActor(pName), mIsLuigi(false), mMarioModelManager(nullptr), mLuigiModelManager(nullptr),
+      mTargetPos(0.0f, 0.0f, 0.0f), mTargetRot(0.0f, 0.0f, 0.0f), mCurrentAnim(nullptr),
+      mSpinSoundCooldown(0), mSpinTimer(0), mCurrentPowerupMode(-1), mWasSpinning(false) {
 }
 
 RemotePlayerActor::~RemotePlayerActor() {
@@ -52,14 +82,44 @@ void RemotePlayerActor::tryDestroy() {
     sInstance = nullptr;
 }
 
+void RemotePlayerActor::applyCharacterModel(bool isLuigi) {
+    mIsLuigi = isLuigi;
+    if (mIsLuigi && mLuigiModelManager != nullptr) {
+        mModelManager = mLuigiModelManager;
+    } else if (!mIsLuigi && mMarioModelManager != nullptr) {
+        mModelManager = mMarioModelManager;
+    } else if (mLuigiModelManager != nullptr) {
+        mModelManager = mLuigiModelManager;
+    } else {
+        mModelManager = mMarioModelManager;
+    }
+
+    mScale.set(1.0f, 1.0f, 1.0f);
+    if (mModelManager != nullptr && MR::getJ3DModel(this) != nullptr) {
+        MR::getJ3DModel(this)->setBaseScale(mScale);
+    }
+
+    if (mCurrentAnim != nullptr && mModelManager != nullptr) {
+        MR::tryStartBck(this, mCurrentAnim, nullptr);
+    }
+}
+
 void RemotePlayerActor::init(const JMapInfoIter& rIter) {
-    // If local player is Mario, remote partner is Luigi (and vice versa)
+    // Default remote character is opposite of local player (Mario vs Luigi)
     mIsLuigi = !MR::isPlayerLuigi();
 
-    // Use whatever player archive is already loaded and stationed in memory
-    const char* modelName = MR::isPlayerLuigi() ? "Luigi" : "Mario";
+    mMarioModelManager = createRemoteModelManager("Mario");
+    mLuigiModelManager = createRemoteModelManager("Luigi");
 
-    initModelManagerWithAnm(modelName, "MarioAnime", false);
+    if (mMarioModelManager == nullptr && mLuigiModelManager == nullptr) {
+        const char* fallbackModel = MR::isPlayerLuigi() ? "Luigi" : "Mario";
+        initModelManagerWithAnm(fallbackModel, "MarioAnime", false);
+        mMarioModelManager = mModelManager;
+        mLuigiModelManager = mModelManager;
+    } else {
+        mCurrentAnim = "Wait";
+        applyCharacterModel(mIsLuigi);
+    }
 
     MR::connectToScene(this, MR::MovementType_Player, MR::CalcAnimType_Player,
                        MR::DrawBufferType_None, MR::DrawType_Player);
@@ -73,15 +133,10 @@ void RemotePlayerActor::init(const JMapInfoIter& rIter) {
     MR::onCalcShadowDropGravity(this, nullptr);
     MR::invalidateClipping(this);
 
-    // Apply distinct visual silhouette for Player 2
-    if (mIsLuigi) {
-        // Luigi: taller and slimmer
-        mScale.set(0.95f, 1.05f, 0.95f);
-    } else {
-        // Mario: stockier
-        mScale.set(1.05f, 0.95f, 1.05f);
+    mScale.set(1.0f, 1.0f, 1.0f);
+    if (MR::getJ3DModel(this) != nullptr) {
+        MR::getJ3DModel(this)->setBaseScale(mScale);
     }
-    MR::getJ3DModel(this)->setBaseScale(mScale);
 
     mCurrentAnim = "Wait";
     MR::tryStartBck(this, "Wait", nullptr);
@@ -98,7 +153,7 @@ void RemotePlayerActor::updatePowerup(int powerupMode) {
         frame = 2.0f; // Fire Mario
     }
 
-    if (mModelManager && MR::startBtpIfExist(this, "ColorChange")) {
+    if (mModelManager && mModelManager->mBtpPlayer != nullptr && MR::startBtpIfExist(this, "ColorChange")) {
         MR::setBtpFrameAndStop(this, frame);
     }
 }
@@ -119,6 +174,16 @@ void RemotePlayerActor::control() {
 
     if (MR::isDead(this)) {
         makeActorAppeared();
+    }
+
+    // Determine remote character: if both players happen to have the same character selected,
+    // automatically make the remote partner the opposite character so one is always Mario and one is Luigi!
+    bool localIsLuigi = MR::isPlayerLuigi();
+    bool remoteWantsLuigi = (rState.isLuigi != 0);
+    bool targetRemoteLuigi = (remoteWantsLuigi == localIsLuigi) ? !localIsLuigi : remoteWantsLuigi;
+
+    if (targetRemoteLuigi != mIsLuigi) {
+        applyCharacterModel(targetRemoteLuigi);
     }
 
     // Smooth position interpolation (LERP with snap distance threshold)

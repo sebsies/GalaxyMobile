@@ -1,6 +1,12 @@
 #include "Game/System/Language.hpp"
 #include "Game/System/GameSystem.hpp"
 #include "Game/System/GameSystemObjHolder.hpp"
+#include "Game/System/MessageHolder.hpp"
+#include "Game/Util/FileUtil.hpp"
+#include "Game/Util/MemoryUtil.hpp"
+#include <JSystem/JKernel/JKRExpHeap.hpp>
+#include <revolution/dvd.h>
+#include <cstdio>
 #include "Game/Util/SingletonHolder.hpp"
 #include "Game/Util/StringUtil.hpp"
 #include "Game/Util/SystemUtil.hpp"
@@ -220,5 +226,86 @@ namespace MR {
 
     const char* getLanguagePrefixByIndex(u32 index) {
         return ::cLanguages[index].mName;
+    }
+
+    void tryApplyRuntimeLanguageChange() {
+#ifdef TARGET_PC
+        int langIndex = -1;
+        if (!port_take_language_change_request(&langIndex)) {
+            return;
+        }
+
+        GameSystem* pSys = SingletonHolder< GameSystem >::get();
+        if (pSys == nullptr || pSys->mObjHolder == nullptr) {
+            return;
+        }
+
+        u32 cand1 = LANGUAGE_USENGLISH;
+        u32 cand2 = LANGUAGE_EUENGLISH;
+        switch (langIndex) {
+        case 0: cand1 = LANGUAGE_USENGLISH; cand2 = LANGUAGE_EUENGLISH; break;
+        case 1: cand1 = LANGUAGE_USSPANISH; cand2 = LANGUAGE_EUSPANISH; break;
+        case 2: cand1 = LANGUAGE_USFRENCH;  cand2 = LANGUAGE_EUFRENCH;  break;
+        case 3: cand1 = LANGUAGE_EUGERMAN;  cand2 = LANGUAGE_USENGLISH; break;
+        case 4: cand1 = LANGUAGE_EUITALIAN; cand2 = LANGUAGE_USENGLISH; break;
+        case 5: cand1 = LANGUAGE_EUDUTCH;   cand2 = LANGUAGE_EUENGLISH; break;
+        case 6: cand1 = LANGUAGE_JPJAPANESE; cand2 = LANGUAGE_USENGLISH; break;
+        default: break;
+        }
+
+        char discRegion = reinterpret_cast< const char* >(OSPhysicalToCached(0))[3];
+        if (discRegion == 'P' && (cand2 & REGION_MASK) == REGION_SHIFT_EU) {
+            u32 tmp = cand1;
+            cand1 = cand2;
+            cand2 = tmp;
+        }
+
+        u32 chosenId = 0;
+        u32 candidates[2] = {cand1, cand2};
+        for (int c = 0; c < 2; c++) {
+            u32 cid = candidates[c];
+            const char* prefix = nullptr;
+            for (u32 i = 0; i < getLanguageNum(); i++) {
+                if (::cLanguages[i].mId == cid) {
+                    prefix = ::cLanguages[i].mName;
+                    break;
+                }
+            }
+            if (prefix != nullptr) {
+                char testPath[128];
+                snprintf(testPath, sizeof(testPath), "/%s/MessageData/Message.arc", prefix);
+                if (DVDConvertPathToEntrynum(testPath) >= 0) {
+                    chosenId = cid;
+                    break;
+                }
+            }
+        }
+
+        if (chosenId == 0 || chosenId == pSys->mObjHolder->mLanguage) {
+            return;
+        }
+
+        pSys->mObjHolder->mLanguage = chosenId;
+
+        JKRHeap* stationedHeap = MR::getStationedHeapNapa();
+        if (stationedHeap == nullptr) {
+            return;
+        }
+
+        MR::CurrentHeapRestorer heapRestorer(stationedHeap);
+        if (!MR::isMountedArchive("/MessageData/Message.arc")) {
+            MR::mountArchive("/MessageData/Message.arc", stationedHeap);
+        }
+
+        if (MR::isMountedArchive("/MessageData/Message.arc") && pSys->mObjHolder->mMessageHolder != nullptr) {
+            MessageData* newMsg = new MessageData("/MessageData/Message.arc");
+            bool hadSceneMsg = (pSys->mObjHolder->mMessageHolder->mSceneMessageData != nullptr);
+            pSys->mObjHolder->mMessageHolder->mGameMessageData = newMsg;
+            if (hadSceneMsg) {
+                pSys->mObjHolder->mMessageHolder->mSceneMessageData = newMsg;
+            }
+            port_log("language: hot-reloaded Message.arc for %s (id=0x%02x)", getCurrentLanguagePrefix(), chosenId);
+        }
+#endif
     }
 };  // namespace MR

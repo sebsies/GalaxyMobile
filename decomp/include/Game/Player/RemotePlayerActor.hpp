@@ -3,6 +3,8 @@
 #include "Game/LiveActor/LiveActor.hpp"
 #include <JSystem/JGeometry/TVec.hpp>
 
+class ModelManager;
+
 class RemotePlayerActor : public LiveActor {
 public:
     RemotePlayerActor(const char* pName = "RemotePlayer");
@@ -20,8 +22,11 @@ public:
 private:
     void updatePowerup(int powerupMode);
     void drawSpinEffect() const;
+    void applyCharacterModel(bool isLuigi);
 
     bool mIsLuigi;
+    ModelManager* mMarioModelManager;
+    ModelManager* mLuigiModelManager;
     TVec3f mTargetPos;
     TVec3f mTargetRot;
     const char* mCurrentAnim;

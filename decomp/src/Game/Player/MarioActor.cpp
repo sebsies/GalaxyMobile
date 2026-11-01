@@ -1057,12 +1057,6 @@ void MarioActor::control() {
 
             port_net_send_player_state(&myState);
         }
-
-        char warpStage[64];
-        int warpScenario = 1;
-        if (port_net_take_warp_event(warpStage, sizeof(warpStage), &warpScenario)) {
-            port_request_warp_ex(warpStage, warpScenario, 0);
-        }
     } else if (port_is_plus_edition()) {
         RemotePlayerActor* rActor = RemotePlayerActor::getInstance();
         if (rActor && !MR::isDead(rActor)) {

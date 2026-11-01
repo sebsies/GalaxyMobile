@@ -82,7 +82,7 @@ static const GalaxyDef kGalaxies[] = {
     // Special / Trials / Secret (category 7)
     {"Comet Observatory", "AstroGalaxy", 1, 7},
     {"Gateway Galaxy", "HeavensDoorGalaxy", 2, 7},
-    {"Grand Finale Galaxy", "PeachCastleFinalGalaxy", 1, 7},
+    {"Grand Finale Galaxy", "PeachCastleGardenGalaxy", 1, 7},
     {"Rolling Gizmo Galaxy", "TamakoroExLv2Galaxy", 1, 7},
     {"Loopdeeswoop Galaxy", "SurfingLv2Galaxy", 1, 7},
     {"Bubble Blast Galaxy", "CubeBubbleExLv2Galaxy", 1, 7},
@@ -325,6 +325,9 @@ void Settings::load(const std::string& path) {
             else if (!strcmp(key, "hd_ui_textures")) hdUiTextures = (val > 0.5f);
             else if (!strcmp(key, "mod_advanced_haptics")) modAdvancedHaptics = (val > 0.5f);
             else if (!strcmp(key, "mod_flight_everywhere")) modFlightEverywhere = (val > 0.5f);
+            else if (!strcmp(key, "show_camera_cutout")) showCameraCutout = (val > 0.5f);
+            else if (!strcmp(key, "language_index")) languageIndex = std::max(0, std::min(6, (int)(val + 0.5f)));
+            else if (!strcmp(key, "player_character")) playerCharacter = (val > 0.5f) ? 1 : 0;
         }
     }
     fclose(f);
@@ -355,6 +358,9 @@ void Settings::save(const std::string& path) const {
     fprintf(f, "hd_ui_textures=%d\n", hdUiTextures ? 1 : 0);
     fprintf(f, "mod_advanced_haptics=%d\n", modAdvancedHaptics ? 1 : 0);
     fprintf(f, "mod_flight_everywhere=%d\n", modFlightEverywhere ? 1 : 0);
+    fprintf(f, "show_camera_cutout=%d\n", showCameraCutout ? 1 : 0);
+    fprintf(f, "language_index=%d\n", languageIndex);
+    fprintf(f, "player_character=%d\n", playerCharacter);
     fclose(f);
     LOGI("Saved settings to %s", path.c_str());
 }
@@ -369,6 +375,7 @@ UIOverlay::UIOverlay() {
     mSwAnimShowControls = 1.0f;
     mSwAnimShowDpad = 1.0f;
     mSwAnimFullscreen = 0.0f;
+    mSwAnimCameraCutout = 1.0f;
     mSwAnimHdUi = 1.0f;
     mSwAnimSkipCutscenes = 0.0f;
     mSwAnimInfiniteHp = 0.0f;
@@ -395,6 +402,12 @@ void UIOverlay::setSavePath(const std::string& path) {
     mSwAnimShowControls = mSettings.showControls ? 1.0f : 0.0f;
     mSwAnimShowDpad = mSettings.showDpad ? 1.0f : 0.0f;
     mSwAnimFullscreen = mSettings.fullscreen ? 1.0f : 0.0f;
+    mSwAnimCameraCutout = mSettings.showCameraCutout ? 1.0f : 0.0f;
+    port_set_camera_cutout(mSettings.showCameraCutout ? 1 : 0);
+    port_set_game_language(mSettings.languageIndex);
+    if (mPlusEdition) {
+        port_set_player_character(mSettings.playerCharacter);
+    }
     mSwAnimHdUi = mSettings.hdUiTextures ? 1.0f : 0.0f;
     mSwAnimSkipCutscenes = mSettings.modSkipCutscenes ? 1.0f : 0.0f;
     mSwAnimInfiniteHp = mSettings.modInfiniteHealth ? 1.0f : 0.0f;
@@ -424,6 +437,7 @@ bool UIOverlay::needsRedraw() {
     if (switchActive(mSwAnimShowControls, mSettings.showControls) ||
         switchActive(mSwAnimShowDpad, mSettings.showDpad) ||
         switchActive(mSwAnimFullscreen, mSettings.fullscreen) ||
+        switchActive(mSwAnimCameraCutout, mSettings.showCameraCutout) ||
         switchActive(mSwAnimHdUi, mSettings.hdUiTextures) ||
         switchActive(mSwAnimSkipCutscenes, mSettings.modSkipCutscenes) ||
         switchActive(mSwAnimInfiniteHp, mSettings.modInfiniteHealth) ||
@@ -608,15 +622,16 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
             }
 
             // Start dragging stick cluster, button cluster, or D-Pad cluster
-            float baseDpadX = mSettings.dpadOnRight ? (w - 380.0f * scale) : (140.0f * scale);
+            float cutoutInset = mSettings.showCameraCutout ? 0.0f : (42.0f * uiScale);
+            float baseDpadX = mSettings.dpadOnRight ? (w - 380.0f * scale - cutoutInset) : (140.0f * scale + cutoutInset);
             float baseDpadY = mSettings.dpadOnRight ? (h - 220.0f * scale) : (h - 390.0f * scale);
             float curDpadX = baseDpadX + mSettings.dpadOffsetX;
             float curDpadY = baseDpadY + mSettings.dpadOffsetY;
 
-            float curStickX = 175.0f * scale + mSettings.stickOffsetX;
+            float curStickX = 175.0f * scale + cutoutInset + mSettings.stickOffsetX;
             float curStickY = h - 175.0f * scale + mSettings.stickOffsetY;
 
-            float curBtnX = w - 160.0f * scale + mSettings.buttonOffsetX - 60.0f * scale;
+            float curBtnX = w - 160.0f * scale - cutoutInset + mSettings.buttonOffsetX - 60.0f * scale;
             float curBtnY = h - 160.0f * scale + mSettings.buttonOffsetY - 60.0f * scale;
 
             float dDpad2 = (px - curDpadX) * (px - curDpadX) + (py - curDpadY) * (py - curDpadY);
@@ -687,11 +702,11 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
         } else if (mSettingsTab == 0) {
             totalContentH = 474.0f * uiScale;
         } else if (mSettingsTab == 1) {
-            totalContentH = 384.0f * uiScale;
+            totalContentH = 432.0f * uiScale;
         } else if (mSettingsTab == 2) {
-            totalContentH = mPlusEdition ? (720.0f * uiScale) : (460.0f * uiScale);
+            totalContentH = mPlusEdition ? (928.0f * uiScale) : (562.0f * uiScale);
         } else {
-            totalContentH = 750.0f * uiScale;
+            totalContentH = 780.0f * uiScale;
         }
         float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
 
@@ -715,7 +730,21 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                 for (size_t i = 0; i < pointerCount; i++) {
                     int32_t pid = AMotionEvent_getPointerId(event, i);
                     if (pid == mDrawerScrollPointerId) {
+                        float px = AMotionEvent_getX(event, i);
                         float py = AMotionEvent_getY(event, i);
+                        if (mDraggingLanguageSlider) {
+                            float trackX0 = drawerX + padX + 24.0f * uiScale;
+                            float trackX1 = drawerX + drawerW - padX - 24.0f * uiScale;
+                            float t = (px - trackX0) / std::max(1.0f, trackX1 - trackX0);
+                            int newLang = std::max(0, std::min(6, (int)(t * 6.0f + 0.5f)));
+                            if (newLang != mSettings.languageIndex) {
+                                mSettings.languageIndex = newLang;
+                                port_set_game_language(newLang);
+                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            }
+                            mDirty = true;
+                            return true;
+                        }
                         float deltaY = py - mDrawerTouchStartY;
                         if (fabsf(deltaY) > 6.0f * uiScale || mDrawerIsScrolling) {
                             mDrawerIsScrolling = true;
@@ -865,8 +894,14 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                             mSettings.fullscreen = !mSettings.fullscreen;
                             mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                         }
-                        // Row 2: Resolution Preset Selector (Card 2: 130..180)
-                        else if (contentRelY >= 130.0f * uiScale && contentRelY <= 180.0f * uiScale) {
+                        // Row 2: Camera Cutout Switch (Card 1: 82..134)
+                        else if (contentRelY >= 82.0f * uiScale && contentRelY <= 134.0f * uiScale) {
+                            mSettings.showCameraCutout = !mSettings.showCameraCutout;
+                            port_set_camera_cutout(mSettings.showCameraCutout ? 1 : 0);
+                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                        }
+                        // Row 3: Resolution Preset Selector (Card 2: 178..228)
+                        else if (contentRelY >= 178.0f * uiScale && contentRelY <= 228.0f * uiScale) {
                             float cardX0 = drawerX + padX;
                             float cX0 = cardX0 + 8.0f * uiScale;
                             float chipW = (contentW - 16.0f * uiScale - 9.0f * uiScale) / 4.0f;
@@ -879,8 +914,8 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                                 }
                             }
                         }
-                        // Row 3: HD UI & HUD Textures Switch (Card 3: 310..364)
-                        else if (contentRelY >= 310.0f * uiScale && contentRelY <= 364.0f * uiScale) {
+                        // Row 4: HD UI & HUD Textures Switch (Card 3: 358..412)
+                        else if (contentRelY >= 358.0f * uiScale && contentRelY <= 412.0f * uiScale) {
                             mSettings.hdUiTextures = !mSettings.hdUiTextures;
                             mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                         }
@@ -895,8 +930,8 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                             port_net_disconnect();
                             mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                         }
-                        // 2. Mode Selectors (Card 2: 148..204)
-                        else if (contentRelY >= 148.0f * uiScale && contentRelY <= 204.0f * uiScale) {
+                        // 2. Mode Selectors (Card 2: 148..198)
+                        else if (contentRelY >= 148.0f * uiScale && contentRelY <= 198.0f * uiScale) {
                             if (px < (cX0 + cX1) * 0.5f) {
                                 port_net_set_mode(PORT_NET_MODE_COOP);
                             } else {
@@ -904,18 +939,34 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                             }
                             mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                         }
-                        // 3. Host Button (Card 3: 268..320)
-                        else if (contentRelY >= 268.0f * uiScale && contentRelY <= 320.0f * uiScale) {
+                        // 2b. Player Character Selector in Netplay (Card 2: 200..252)
+                        else if (contentRelY >= 200.0f * uiScale && contentRelY <= 252.0f * uiScale) {
+                            int newChar = (px < (cX0 + cX1) * 0.5f) ? 0 : 1;
+                            if (newChar != mSettings.playerCharacter) {
+                                mSettings.playerCharacter = newChar;
+                                port_request_character_change(newChar);
+                            }
+                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                        }
+                        // 3. Host Button (Card 3: 312..364)
+                        else if (contentRelY >= 312.0f * uiScale && contentRelY <= 364.0f * uiScale) {
                             if (port_net_get_role() == 1) {
                                 port_net_disconnect();
                             } else {
+                                // Host defaults to Mario (0)
+                                if (mSettings.playerCharacter != 0) {
+                                    mSettings.playerCharacter = 0;
+                                    port_request_character_change(0);
+                                } else {
+                                    port_set_player_character(0);
+                                }
                                 port_net_start_host(24601, port_net_get_mode(), "Galaxy Room");
                             }
                             mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                         }
-                        // 4. Discovered LAN Hosts List & Reload Button (Card 4: 328..518)
-                        else if (contentRelY >= 328.0f * uiScale && contentRelY <= 518.0f * uiScale) {
-                            float rTop = 328.0f * uiScale;
+                        // 4. Discovered LAN Hosts List & Reload Button (Card 4: 372..562)
+                        else if (contentRelY >= 372.0f * uiScale && contentRelY <= 562.0f * uiScale) {
+                            float rTop = 372.0f * uiScale;
                             if (contentRelY >= rTop + 4.0f * uiScale && contentRelY <= rTop + 34.0f * uiScale && px >= cX1 - 96.0f * uiScale) {
                                 port_net_refresh_discovery();
                                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
@@ -924,8 +975,15 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                                 PortLanHostInfo hosts[3];
                                 int n = port_net_get_lan_hosts(hosts, 3);
                                 for (int i = 0; i < n; i++) {
-                                    float rY = 328.0f * uiScale + 36.0f * uiScale + i * 48.0f * uiScale;
+                                    float rY = 372.0f * uiScale + 36.0f * uiScale + i * 48.0f * uiScale;
                                     if (contentRelY >= rY && contentRelY <= rY + 44.0f * uiScale && px >= cX1 - 100.0f * uiScale) {
+                                        // Joiner defaults to Luigi (1)
+                                        if (mSettings.playerCharacter != 1) {
+                                            mSettings.playerCharacter = 1;
+                                            port_request_character_change(1);
+                                        } else {
+                                            port_set_player_character(1);
+                                        }
                                         port_net_connect(hosts[i].ip, hosts[i].port);
                                         mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                                         break;
@@ -933,8 +991,14 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                                 }
                             }
                         }
-                        // 5. Direct Connect Button (Card 5: 574..630)
-                        else if (contentRelY >= 574.0f * uiScale && contentRelY <= 630.0f * uiScale) {
+                        // 5. Direct Connect Button (Card 5: 618..674)
+                        else if (contentRelY >= 618.0f * uiScale && contentRelY <= 674.0f * uiScale) {
+                            if (mSettings.playerCharacter != 1) {
+                                mSettings.playerCharacter = 1;
+                                port_request_character_change(1);
+                            } else {
+                                port_set_player_character(1);
+                            }
                             port_net_connect("192.168.43.1", 24601);
                             mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                         }
@@ -956,7 +1020,7 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                                 mSettings.modInfinitePowerup = !mSettings.modInfinitePowerup;
                                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                             }
-                                                        // Mod 4: Advanced Haptic Feedback Switch
+                            // Mod 4: Advanced Haptic Feedback Switch
                             else if (contentRelY >= 176.0f * uiScale && contentRelY <= 222.0f * uiScale) {
                                 mSettings.modAdvancedHaptics = !mSettings.modAdvancedHaptics;
                                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
@@ -1004,7 +1068,7 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                                     }
                                 }
                             }
-                                                        // Mod 7: Galaxy Warp Menu Card
+                            // Mod 7: Galaxy Warp Menu Card
                             else if (contentRelY >= 496.0f * uiScale && contentRelY <= 544.0f * uiScale) {
                                 mWarpMenuOpen = true;
                                 mWarpScrollY = 0.0f;
@@ -1015,6 +1079,28 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                             else if (contentRelY >= 548.0f * uiScale && contentRelY <= 600.0f * uiScale) {
                                 port_request_unlock_spin();
                                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            }
+                            // Mod 9: Player Character Switcher (Card 3b: 614..710)
+                            else if (contentRelY >= 648.0f * uiScale && contentRelY <= 704.0f * uiScale) {
+                                float midX = drawerX + padX + contentW * 0.5f;
+                                int newChar = (px >= midX) ? 1 : 0;
+                                if (newChar != mSettings.playerCharacter) {
+                                    mSettings.playerCharacter = newChar;
+                                    port_request_character_change(newChar);
+                                }
+                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            }
+                            // Mod 10: Game Language Slider (Card 3c: 718..814)
+                            else if (contentRelY >= 746.0f * uiScale && contentRelY <= 810.0f * uiScale) {
+                                float trackX0 = drawerX + padX + 24.0f * uiScale;
+                                float trackX1 = drawerX + drawerW - padX - 24.0f * uiScale;
+                                float t = (px - trackX0) / std::max(1.0f, trackX1 - trackX0);
+                                int newLang = std::max(0, std::min(6, (int)(t * 6.0f + 0.5f)));
+                                if (newLang != mSettings.languageIndex) {
+                                    mSettings.languageIndex = newLang;
+                                    port_set_game_language(newLang);
+                                    mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                                }
                             }
                         } else {
                             // Vanilla System Tab items
@@ -1033,13 +1119,28 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                                 mSettings.modAdvancedHaptics = !mSettings.modAdvancedHaptics;
                                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                             }
+                            // Game Language Slider (Card 3b: 398..462)
+                            else if (contentRelY >= 398.0f * uiScale && contentRelY <= 462.0f * uiScale) {
+                                float trackX0 = drawerX + padX + 24.0f * uiScale;
+                                float trackX1 = drawerX + drawerW - padX - 24.0f * uiScale;
+                                float t = (px - trackX0) / std::max(1.0f, trackX1 - trackX0);
+                                int newLang = std::max(0, std::min(6, (int)(t * 6.0f + 0.5f)));
+                                if (newLang != mSettings.languageIndex) {
+                                    mSettings.languageIndex = newLang;
+                                    port_set_game_language(newLang);
+                                    mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                                }
+                            }
                         }
                     }
 
                     if (!mSavePath.empty()) mSettings.save(mSavePath);
+                } else if (mDraggingLanguageSlider) {
+                    if (!mSavePath.empty()) mSettings.save(mSavePath);
                 }
                 mDrawerScrollPointerId = -1;
                 mDrawerIsScrolling = false;
+                mDraggingLanguageSlider = false;
                 mDirty = true;
                 return true;
             }
@@ -1154,6 +1255,25 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                     mDrawerTouchStartX = px;
                     mDrawerScrollStartOffset = mDrawerScrollY;
                     mDrawerIsScrolling = false;
+                    mDraggingLanguageSlider = false;
+                    if (mSettingsTab == 2) {
+                        float contentRelY = py - contentTop + mDrawerScrollY;
+                        float langMinY = mPlusEdition ? (746.0f * uiScale) : (398.0f * uiScale);
+                        float langMaxY = mPlusEdition ? (810.0f * uiScale) : (462.0f * uiScale);
+                        if (contentRelY >= langMinY && contentRelY <= langMaxY) {
+                            mDraggingLanguageSlider = true;
+                            float trackX0 = drawerX + padX + 24.0f * uiScale;
+                            float trackX1 = drawerX + drawerW - padX - 24.0f * uiScale;
+                            float t = (px - trackX0) / std::max(1.0f, trackX1 - trackX0);
+                            int newLang = std::max(0, std::min(6, (int)(t * 6.0f + 0.5f)));
+                            if (newLang != mSettings.languageIndex) {
+                                mSettings.languageIndex = newLang;
+                                port_set_game_language(newLang);
+                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            }
+                            mDirty = true;
+                        }
+                    }
                     return true;
                 }
             }
@@ -1181,7 +1301,8 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
     mBtnDpadDown = false;
 
     // Button layout positions
-    float btnBaseX = w - 160.0f * scale + mSettings.buttonOffsetX;
+    float cutoutInset = mSettings.showCameraCutout ? 0.0f : (42.0f * uiScale);
+    float btnBaseX = w - 160.0f * scale - cutoutInset + mSettings.buttonOffsetX;
     float btnBaseY = h - 160.0f * scale + mSettings.buttonOffsetY;
 
     // A (Jump) - Primary action
@@ -1193,10 +1314,10 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
     // Z (Crouch) - Top left of A
     float zX = btnBaseX - 90.0f * scale, zY = btnBaseY - 105.0f * scale, zR = 44.0f * scale;
     // Plus (+) - Top right
-    float plusX = w - 70.0f * scale, plusY = 70.0f * scale, plusR = 34.0f * scale;
+    float plusX = w - 70.0f * scale - cutoutInset, plusY = 70.0f * scale, plusR = 34.0f * scale;
 
     // Camera D-Pad position
-    float baseDpadX = mSettings.dpadOnRight ? (w - 380.0f * scale) : (140.0f * scale);
+    float baseDpadX = mSettings.dpadOnRight ? (w - 380.0f * scale - cutoutInset) : (140.0f * scale + cutoutInset);
     float baseDpadY = mSettings.dpadOnRight ? (h - 220.0f * scale) : (h - 390.0f * scale);
     float dpadX = baseDpadX + mSettings.dpadOffsetX;
     float dpadY = baseDpadY + mSettings.dpadOffsetY;
@@ -1205,7 +1326,7 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
     float dpadTotalR = (dpadArmDist + dpadArmR) * 1.15f;
 
     // Stick default position - Bottom left thumb area
-    float defaultStickX = 175.0f * scale + mSettings.stickOffsetX;
+    float defaultStickX = 175.0f * scale + cutoutInset + mSettings.stickOffsetX;
     float defaultStickY = h - 175.0f * scale + mSettings.stickOffsetY;
     float stickBaseR = 95.0f * scale;
     float stickMaxR = 100.0f * scale;
@@ -1455,6 +1576,7 @@ void UIOverlay::render(int screenW, int screenH) {
     updateSwAnim(mSwAnimShowControls, mSettings.showControls);
     updateSwAnim(mSwAnimShowDpad, mSettings.showDpad);
     updateSwAnim(mSwAnimFullscreen, mSettings.fullscreen);
+    updateSwAnim(mSwAnimCameraCutout, mSettings.showCameraCutout);
     updateSwAnim(mSwAnimHdUi, mSettings.hdUiTextures);
     updateSwAnim(mSwAnimSkipCutscenes, mSettings.modSkipCutscenes);
     updateSwAnim(mSwAnimInfiniteHp, mSettings.modInfiniteHealth);
@@ -1676,11 +1798,12 @@ void UIOverlay::render(int screenW, int screenH) {
     // -------------------------------------------------------------
     if (mSettings.showControls && mDrawerAnim < 0.98f) {
         float hudOp = op * (1.0f - mDrawerAnim * 0.75f);
+        float cutoutInset = mSettings.showCameraCutout ? 0.0f : (42.0f * uiScale);
 
         // ---------------------------------------------------------
         // 1. Virtual Joystick - Precision Minimalist Reticle & Laser Tether
         // ---------------------------------------------------------
-        float defaultStickX = 175.0f * scale + mSettings.stickOffsetX;
+        float defaultStickX = 175.0f * scale + cutoutInset + mSettings.stickOffsetX;
         float defaultStickY = h - 175.0f * scale + mSettings.stickOffsetY;
         float baseX = (mStickPointerId >= 0) ? mStickBaseX : defaultStickX;
         float baseY = (mStickPointerId >= 0) ? mStickBaseY : defaultStickY;
@@ -1736,7 +1859,7 @@ void UIOverlay::render(int screenW, int screenH) {
         // ---------------------------------------------------------
         // 2. Action Buttons - Frosted Glass with Signature Micro-Accents
         // ---------------------------------------------------------
-        float btnBaseX = w - 160.0f * scale + mSettings.buttonOffsetX;
+        float btnBaseX = w - 160.0f * scale - cutoutInset + mSettings.buttonOffsetX;
         float btnBaseY = h - 160.0f * scale + mSettings.buttonOffsetY;
 
         auto drawModernButton = [&](float cx, float cy, float r, const char* label, uint32_t accentHex, bool pressed, int specialGlyph = 0) {
@@ -1787,13 +1910,13 @@ void UIOverlay::render(int screenW, int screenH) {
         drawModernButton(btnBaseX - 90.0f * scale, btnBaseY - 105.0f * scale, 44.0f * scale, "Z", 0xA78BFA, mBtnZPressed);
 
         // Button + (Pause) - Minimalist Pearl Slate (#E2E8F0) with Vector Cross
-        drawModernButton(w - 70.0f * scale, 70.0f * scale, 34.0f * scale, "+", 0x94A3B8, mBtnPlusPressed, 2);
+        drawModernButton(w - 70.0f * scale - cutoutInset, 70.0f * scale, 34.0f * scale, "+", 0x94A3B8, mBtnPlusPressed, 2);
 
         // ---------------------------------------------------------
         // 3. Camera D-Pad - Directional Precision Disc with Chevrons & Camera Icon
         // ---------------------------------------------------------
         if (mSettings.showDpad) {
-            float baseDpadX = mSettings.dpadOnRight ? (w - 380.0f * scale) : (140.0f * scale);
+            float baseDpadX = mSettings.dpadOnRight ? (w - 380.0f * scale - cutoutInset) : (140.0f * scale + cutoutInset);
             float baseDpadY = mSettings.dpadOnRight ? (h - 220.0f * scale) : (h - 390.0f * scale);
             float dpadX = baseDpadX + mSettings.dpadOffsetX;
             float dpadY = baseDpadY + mSettings.dpadOffsetY;
@@ -1934,11 +2057,11 @@ void UIOverlay::render(int screenW, int screenH) {
         } else if (mSettingsTab == 0) {
             totalContentH = 474.0f * uiScale;
         } else if (mSettingsTab == 1) {
-            totalContentH = 384.0f * uiScale;
+            totalContentH = 432.0f * uiScale;
         } else if (mSettingsTab == 2) {
-            totalContentH = mPlusEdition ? (720.0f * uiScale) : (460.0f * uiScale);
+            totalContentH = mPlusEdition ? (928.0f * uiScale) : (562.0f * uiScale);
         } else {
-            totalContentH = 750.0f * uiScale;
+            totalContentH = 780.0f * uiScale;
         }
         float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
 
@@ -2204,9 +2327,9 @@ void UIOverlay::render(int screenW, int screenH) {
                 // Tab 1: Display
                 // =========================================================
 
-                // Card 1: Viewport & Horizon
-                renderCardBlock(6.0f * uiScale, 88.0f * uiScale, [&](float y) {
-                    drawCard(cX0, y, cX1, y + 88.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+                // Card 1: Viewport & Horizon (H = 136)
+                renderCardBlock(6.0f * uiScale, 136.0f * uiScale, [&](float y) {
+                    drawCard(cX0, y, cX1, y + 136.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
 
                     drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
                     drawText("DISPLAY & VIEWPORT", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
@@ -2215,10 +2338,17 @@ void UIOverlay::render(int screenW, int screenH) {
                     drawText("Native Ultrawide (Hor+)", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
                     drawText("Expand horizontal FOV to fill entire phone screen", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
                     drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimFullscreen);
+
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 80.0f * uiScale, cX1 - 14.0f * uiScale, y + 81.0f * uiScale, 0.5f, cDivider);
+
+                    float r2Y = y + 82.0f * uiScale;
+                    drawText("Show Camera Cutout", cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
+                    drawText("Extend display into camera notch / punch-hole area", cX0 + 14.0f * uiScale, r2Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                    drawM3Switch(cX1 - swW - 14.0f * uiScale, r2Y + 8.0f * uiScale, swW, swH, mSwAnimCameraCutout);
                 });
 
                 // Card 2: 3D Render Resolution Preset
-                renderCardBlock(102.0f * uiScale, 176.0f * uiScale, [&](float y) {
+                renderCardBlock(150.0f * uiScale, 176.0f * uiScale, [&](float y) {
                     drawCard(cX0, y, cX1, y + 176.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
 
                     drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
@@ -2266,7 +2396,7 @@ void UIOverlay::render(int screenW, int screenH) {
                 });
 
                 // Card 3: Texture Remaster
-                renderCardBlock(286.0f * uiScale, 88.0f * uiScale, [&](float y) {
+                renderCardBlock(334.0f * uiScale, 88.0f * uiScale, [&](float y) {
                     drawCard(cX0, y, cX1, y + 88.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
 
                     drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
@@ -2278,6 +2408,49 @@ void UIOverlay::render(int screenW, int screenH) {
                     drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimHdUi);
                 });
             } else if (mSettingsTab == 2) {
+                static const char* kLangNames[7] = {
+                    "English", "Espanol", "Francais", "Deutsch", "Italiano", "Nederlands", "Japanese"
+                };
+                static const char* kLangCodes[7] = {
+                    "EN", "ES", "FR", "DE", "IT", "NL", "JP"
+                };
+
+                auto drawLanguageSliderCard = [&](float y) {
+                    drawCard(cX0, y, cX1, y + 96.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+
+                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
+                    drawText("GAME LANGUAGE (SLIDER)", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+
+                    int curLang = std::max(0, std::min(6, mSettings.languageIndex));
+                    drawText(kLangNames[curLang], cX1 - 14.0f * uiScale, y + 23.0f * uiScale, 0.34f * uiScale, rgba(0.40f, 0.85f, 1.0f, 1.0f), 2);
+
+                    float trackX0 = cX0 + 24.0f * uiScale;
+                    float trackX1 = cX1 - 24.0f * uiScale;
+                    float trackY = y + 52.0f * uiScale;
+                    float frac = (float)curLang / 6.0f;
+                    float knobX = trackX0 + frac * (trackX1 - trackX0);
+
+                    // Inactive track
+                    drawRoundRect(trackX0, trackY - 3.5f * uiScale, trackX1, trackY + 3.5f * uiScale, 3.5f * uiScale, rgba(0.18f, 0.20f, 0.25f, 0.95f));
+                    // Active filled track
+                    if (knobX > trackX0 + 1.0f) {
+                        drawRoundRect(trackX0, trackY - 3.5f * uiScale, knobX, trackY + 3.5f * uiScale, 3.5f * uiScale, rgba(0.043f, 0.380f, 0.880f, 1.0f));
+                    }
+
+                    // Step ticks and short language codes
+                    for (int l = 0; l < 7; l++) {
+                        float stepX = trackX0 + ((float)l / 6.0f) * (trackX1 - trackX0);
+                        bool isCur = (l == curLang);
+                        Color dotCol = (l <= curLang) ? rgba(0.75f, 0.90f, 1.0f, 0.95f) : rgba(0.45f, 0.50f, 0.58f, 0.80f);
+                        drawCircle(stepX, trackY, 3.0f * uiScale, dotCol);
+                        Color codeCol = isCur ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : cTextSecondary;
+                        drawText(kLangCodes[l], stepX, y + 80.0f * uiScale, (isCur ? 0.30f : 0.25f) * uiScale, codeCol, 1);
+                    }
+
+                    // Slider thumb knob
+                    drawCircle(knobX, trackY, 11.0f * uiScale, rgba(0.220f, 0.741f, 0.969f, 0.98f));
+                    drawCircle(knobX, trackY, 6.0f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f));
+                };
                 // =========================================================
                 // Tab 2: System (Vanilla) or Advanced (Plus)
                 // =========================================================
@@ -2403,8 +2576,34 @@ void UIOverlay::render(int screenW, int screenH) {
                         drawText(isSpinUnlocked ? "Unlocked" : "Unlock Spin", cX1 - 14.0f * uiScale - sBtnW * 0.5f, r2Y + 26.0f * uiScale, 0.33f * uiScale, sBtnTxt, 1);
                     });
 
+                    // Card 3b: Player Character Switcher (Mario / Luigi)
+                    renderCardBlock(614.0f * uiScale, 96.0f * uiScale, [&](float y) {
+                        drawCard(cX0, y, cX1, y + 96.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+
+                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
+                        drawText("PLAYER CHARACTER (MARIO / LUIGI)", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+                        drawText("Switch character in solo or multiplayer (Host=Mario, Joiner=Luigi)", cX0 + 14.0f * uiScale, y + 38.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
+
+                        float mBtnY = y + 48.0f * uiScale;
+                        float mBtnW = (contentW - 36.0f * uiScale) * 0.5f;
+                        bool isLuigi = (mSettings.playerCharacter != 0);
+
+                        Color marioBg = !isLuigi ? rgba(0.75f, 0.16f, 0.18f, 0.95f) : rgba(0.165f, 0.180f, 0.215f, 0.90f);
+                        Color marioTxt = !isLuigi ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.70f, 0.74f, 0.80f, 0.80f);
+                        drawRoundRect(cX0 + 14.0f * uiScale, mBtnY, cX0 + 14.0f * uiScale + mBtnW, mBtnY + 36.0f * uiScale, 16.0f * uiScale, marioBg);
+                        drawText("MARIO", cX0 + 14.0f * uiScale + mBtnW * 0.5f, mBtnY + 23.0f * uiScale, 0.33f * uiScale, marioTxt, 1);
+
+                        Color luigiBg = isLuigi ? rgba(0.14f, 0.54f, 0.24f, 0.95f) : rgba(0.165f, 0.180f, 0.215f, 0.90f);
+                        Color luigiTxt = isLuigi ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.70f, 0.74f, 0.80f, 0.80f);
+                        drawRoundRect(cX1 - 14.0f * uiScale - mBtnW, mBtnY, cX1 - 14.0f * uiScale, mBtnY + 36.0f * uiScale, 16.0f * uiScale, luigiBg);
+                        drawText("LUIGI", cX1 - 14.0f * uiScale - mBtnW * 0.5f, mBtnY + 23.0f * uiScale, 0.33f * uiScale, luigiTxt, 1);
+                    });
+
+                    // Card 3c: Game Language Slider
+                    renderCardBlock(718.0f * uiScale, 96.0f * uiScale, drawLanguageSliderCard);
+
                     // Card 4: System Info
-                    renderCardBlock(618.0f * uiScale, 80.0f * uiScale, [&](float y) {
+                    renderCardBlock(822.0f * uiScale, 80.0f * uiScale, [&](float y) {
                         drawCard(cX0, y, cX1, y + 80.0f * uiScale, 18.0f * uiScale, rgba(0.165f, 0.180f, 0.215f, 0.95f), cCardBorder);
 
                         drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "GalaxyMobile+ v0.7.0", rgba(0.38f, 0.28f, 0.08f, 0.95f), rgba(1.0f, 0.88f, 0.40f, 1.0f), rgba(0.988f, 0.827f, 0.302f, 1.0f));
@@ -2468,8 +2667,11 @@ void UIOverlay::render(int screenW, int screenH) {
                         drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimHaptics);
                     });
 
+                    // Card 3b: Game Language Slider
+                    renderCardBlock(370.0f * uiScale, 96.0f * uiScale, drawLanguageSliderCard);
+
                     // Card 4: System Info
-                    renderCardBlock(370.0f * uiScale, 80.0f * uiScale, [&](float y) {
+                    renderCardBlock(474.0f * uiScale, 80.0f * uiScale, [&](float y) {
                         drawCard(cX0, y, cX1, y + 80.0f * uiScale, 18.0f * uiScale, rgba(0.165f, 0.180f, 0.215f, 0.95f), cCardBorder);
 
                         drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "GalaxyMobile v0.7.0", rgba(0.10f, 0.28f, 0.44f, 0.90f), rgba(0.40f, 0.85f, 1.0f, 1.0f), cHeader);
@@ -2535,31 +2737,45 @@ void UIOverlay::render(int screenW, int screenH) {
                     }
                 });
 
-                // Card 2: Multiplayer Mode Selection (H = 88)
-                renderCardBlock(124.0f * uiScale, 88.0f * uiScale, [&](float y) {
-                    drawCard(cX0, y, cX1, y + 88.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+                // Card 2: Multiplayer Mode & Character Selection (H = 132)
+                renderCardBlock(124.0f * uiScale, 132.0f * uiScale, [&](float y) {
+                    drawCard(cX0, y, cX1, y + 132.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
 
                     drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                    drawText("GAMEPLAY MODE", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+                    drawText("GAMEPLAY MODE & CHARACTER", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
 
-                    float mBtnY = y + 36.0f * uiScale;
+                    float mBtnY = y + 32.0f * uiScale;
                     float mBtnW = (contentW - 36.0f * uiScale) * 0.5f;
 
                     bool isCoop = (netMode == 1);
                     Color coopBg = isCoop ? rgba(0.043f, 0.341f, 0.816f, 0.95f) : rgba(0.165f, 0.180f, 0.215f, 0.90f);
                     Color coopTxt = isCoop ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.70f, 0.74f, 0.80f, 0.80f);
-                    drawRoundRect(cX0 + 14.0f * uiScale, mBtnY, cX0 + 14.0f * uiScale + mBtnW, mBtnY + 38.0f * uiScale, 16.0f * uiScale, coopBg);
-                    drawText("Mario & Luigi Co-op", cX0 + 14.0f * uiScale + mBtnW * 0.5f, mBtnY + 24.0f * uiScale, 0.30f * uiScale, coopTxt, 1);
+                    drawRoundRect(cX0 + 14.0f * uiScale, mBtnY, cX0 + 14.0f * uiScale + mBtnW, mBtnY + 36.0f * uiScale, 16.0f * uiScale, coopBg);
+                    drawText("Mario & Luigi Co-op", cX0 + 14.0f * uiScale + mBtnW * 0.5f, mBtnY + 23.0f * uiScale, 0.30f * uiScale, coopTxt, 1);
 
                     bool isCostar = (netMode == 2);
                     Color csBg = isCostar ? rgba(0.38f, 0.20f, 0.68f, 0.95f) : rgba(0.165f, 0.180f, 0.215f, 0.90f);
                     Color csTxt = isCostar ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.70f, 0.74f, 0.80f, 0.80f);
-                    drawRoundRect(cX1 - 14.0f * uiScale - mBtnW, mBtnY, cX1 - 14.0f * uiScale, mBtnY + 38.0f * uiScale, 16.0f * uiScale, csBg);
-                    drawText("Co-Star Assist Mode", cX1 - 14.0f * uiScale - mBtnW * 0.5f, mBtnY + 24.0f * uiScale, 0.30f * uiScale, csTxt, 1);
+                    drawRoundRect(cX1 - 14.0f * uiScale - mBtnW, mBtnY, cX1 - 14.0f * uiScale, mBtnY + 36.0f * uiScale, 16.0f * uiScale, csBg);
+                    drawText("Co-Star Assist Mode", cX1 - 14.0f * uiScale - mBtnW * 0.5f, mBtnY + 23.0f * uiScale, 0.30f * uiScale, csTxt, 1);
+
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 76.0f * uiScale, cX1 - 14.0f * uiScale, y + 77.0f * uiScale, 0.5f, cDivider);
+
+                    float cBtnY = y + 84.0f * uiScale;
+                    bool isLuigi = (mSettings.playerCharacter != 0);
+                    Color marioBg = !isLuigi ? rgba(0.75f, 0.16f, 0.18f, 0.95f) : rgba(0.165f, 0.180f, 0.215f, 0.90f);
+                    Color marioTxt = !isLuigi ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.70f, 0.74f, 0.80f, 0.80f);
+                    drawRoundRect(cX0 + 14.0f * uiScale, cBtnY, cX0 + 14.0f * uiScale + mBtnW, cBtnY + 36.0f * uiScale, 16.0f * uiScale, marioBg);
+                    drawText("Play as MARIO (Host)", cX0 + 14.0f * uiScale + mBtnW * 0.5f, cBtnY + 23.0f * uiScale, 0.29f * uiScale, marioTxt, 1);
+
+                    Color luigiBg = isLuigi ? rgba(0.14f, 0.54f, 0.24f, 0.95f) : rgba(0.165f, 0.180f, 0.215f, 0.90f);
+                    Color luigiTxt = isLuigi ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.70f, 0.74f, 0.80f, 0.80f);
+                    drawRoundRect(cX1 - 14.0f * uiScale - mBtnW, cBtnY, cX1 - 14.0f * uiScale, cBtnY + 36.0f * uiScale, 16.0f * uiScale, luigiBg);
+                    drawText("Play as LUIGI (Joiner)", cX1 - 14.0f * uiScale - mBtnW * 0.5f, cBtnY + 23.0f * uiScale, 0.29f * uiScale, luigiTxt, 1);
                 });
 
                 // Card 3: Host a Room (H = 100)
-                renderCardBlock(220.0f * uiScale, 100.0f * uiScale, [&](float y) {
+                renderCardBlock(264.0f * uiScale, 100.0f * uiScale, [&](float y) {
                     drawCard(cX0, y, cX1, y + 100.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
 
                     drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, rgba(0.988f, 0.827f, 0.302f, 1.0f));
@@ -2576,7 +2792,7 @@ void UIOverlay::render(int screenW, int screenH) {
                 });
 
                 // Card 4: Discovered LAN Rooms (H = 190)
-                renderCardBlock(328.0f * uiScale, 190.0f * uiScale, [&](float y) {
+                renderCardBlock(372.0f * uiScale, 190.0f * uiScale, [&](float y) {
                     drawCard(cX0, y, cX1, y + 190.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
 
                     drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
@@ -2619,7 +2835,7 @@ void UIOverlay::render(int screenW, int screenH) {
                 });
 
                 // Card 5: Direct Online Connect (H = 110)
-                renderCardBlock(526.0f * uiScale, 110.0f * uiScale, [&](float y) {
+                renderCardBlock(570.0f * uiScale, 110.0f * uiScale, [&](float y) {
                     drawCard(cX0, y, cX1, y + 110.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
 
                     drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
@@ -2633,7 +2849,7 @@ void UIOverlay::render(int screenW, int screenH) {
                 });
 
                 // Card 6: Info & Guidance (H = 80)
-                renderCardBlock(644.0f * uiScale, 80.0f * uiScale, [&](float y) {
+                renderCardBlock(688.0f * uiScale, 80.0f * uiScale, [&](float y) {
                     drawCard(cX0, y, cX1, y + 80.0f * uiScale, 18.0f * uiScale, rgba(0.165f, 0.180f, 0.215f, 0.95f), cCardBorder);
 
                     drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "Galaxy Netplay Core v1.0", rgba(0.38f, 0.28f, 0.08f, 0.95f), rgba(1.0f, 0.88f, 0.40f, 1.0f), rgba(0.988f, 0.827f, 0.302f, 1.0f));

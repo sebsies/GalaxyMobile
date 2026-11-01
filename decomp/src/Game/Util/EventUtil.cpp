@@ -15,6 +15,7 @@
 #include "Game/Util/PlayerUtil.hpp"
 #include "Game/Util/SceneUtil.hpp"
 #include "Game/Util/StringUtil.hpp"
+#include "port/port.h"
 #include <cstdio>
 
 void EventUtil_FORCE_MATCH_STRINGS() {
@@ -148,6 +149,11 @@ namespace MR {
     }
 
     bool isPlayerLuigi() {
+#ifdef TARGET_PC
+        if (port_is_plus_edition()) {
+            return port_get_player_character() != 0;
+        }
+#endif
         return !GameDataFunction::isDataMario();
     }
 

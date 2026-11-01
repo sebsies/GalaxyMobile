@@ -198,6 +198,15 @@ int port_has_game_data(void);
 void port_open_installer(void);
 int port_is_plus_installed(void);
 void port_install_plus(void);
+void port_set_game_language(int index);
+int port_get_game_language(void);
+int port_take_language_change_request(int* outLangIndex);
+void port_set_camera_cutout(int show);
+int port_get_camera_cutout(void);
+void port_set_player_character(int isLuigi);
+int port_get_player_character(void);
+void port_request_character_change(int isLuigi);
+int port_take_character_change_request(void);
 int64_t port_host_time_ns(void);
 void port_host_sleep_ns(int64_t ns);
 // Delivers pending interrupts (a safe point; only from the thread holding the
