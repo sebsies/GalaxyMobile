@@ -73,6 +73,9 @@ PlayerHeapHolder::PlayerHeapHolder() : mCondition(), mNapaHeap(), mGDDRHeap(), m
 }
 
 void PlayerHeapHolder::adjust() {
+#ifdef TARGET_PC
+    return;
+#endif
     JKRExpHeap* napa = mNapaHeap;
     if (!napa->isEmpty()) {
         napa->alloc(0x10000, 0);
@@ -302,6 +305,19 @@ void GameSystemStationedArchiveLoader::createAndAddPlayerArchives(bool isDataMar
     }
 
     ResourceHolder* pMarioAnimeHolder = MR::createAndAddResourceHolder("MarioAnime.arc");
+#ifdef TARGET_PC
+    if (port_is_plus_edition()) {
+        pMarioAnimeHolder->newMaterialAnmBuffer(
+            static_cast< J3DModelData* >(MR::createAndAddResourceHolder("Luigi.arc")->mModelResTable->getRes("luigi")));
+        pMarioAnimeHolder->newMaterialAnmBuffer(
+            static_cast< J3DModelData* >(MR::createAndAddResourceHolder("Mario.arc")->mModelResTable->getRes("mario")));
+        if (!isDataMario) {
+            pMarioAnimeHolder->newMaterialAnmBuffer(
+                static_cast< J3DModelData* >(MR::createAndAddResourceHolder("Luigi.arc")->mModelResTable->getRes("luigi")));
+        }
+        return;
+    }
+#endif
 
     if (isDataMario) {
         pMarioAnimeHolder->newMaterialAnmBuffer(

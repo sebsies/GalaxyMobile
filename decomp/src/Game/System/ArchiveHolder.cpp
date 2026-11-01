@@ -19,7 +19,7 @@ ArchiveHolderArchiveEntry::~ArchiveHolderArchiveEntry() {
 }
 
 ArchiveHolder::ArchiveHolder() {
-    mEntries.init(0x180);
+    mEntries.init(0x400);
     OSInitMutex(&mMutex);
 }
 

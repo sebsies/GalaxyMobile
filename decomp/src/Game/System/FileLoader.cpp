@@ -9,10 +9,10 @@ FileLoader::FileLoader() {
     mRequestedFileCount = 0;
     mFileHolder = nullptr;
     mArchiveHolder = nullptr;
-    mLoaderThread = new FileLoaderThread(13, 320, MR::getStationedHeapNapa());
+    mLoaderThread = new FileLoaderThread(13, 0x400, MR::getStationedHeapNapa());
     OSResumeThread(mLoaderThread->mThread);
     OSInitMutex(&mMutex);
-    mRequestFileInfos = new RequestFileInfo[0x140];
+    mRequestFileInfos = new RequestFileInfo[0x400];
     mFileHolder = new FileHolder();
     mArchiveHolder = new ArchiveHolder();
     mRequestedFileCount = 0;
@@ -134,6 +134,7 @@ RequestFileInfo* FileLoader::addRequest(const char* pName) {
     OSMutex* mutex = &mMutex;
     OSLockMutex(mutex);
 
+    if (mRequestedFileCount >= 0x400) mRequestedFileCount = 0x3FF;
     RequestFileInfo* info = &mRequestFileInfos[mRequestedFileCount];
     mRequestedFileCount++;
     info->mFileEntry = nullptr;

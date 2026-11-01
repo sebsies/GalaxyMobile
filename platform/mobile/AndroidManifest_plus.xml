@@ -37,7 +37,7 @@
             android:launchMode="singleTask"
             android:screenOrientation="sensorLandscape"
             android:resizeableActivity="false"
-            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+            android:theme="@style/Theme.GalaxyGame"
             android:configChanges="density|keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|uiMode">
             <meta-data android:name="android.app.lib_name" android:value="main" />
             <intent-filter>

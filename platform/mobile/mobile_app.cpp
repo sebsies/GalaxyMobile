@@ -266,18 +266,10 @@ static void presentGameImage(MobileApp& a) {
 
 void updateViewport(MobileApp& a) {
     if (mobile_ui::get().settings().fullscreen) {
-        if (mobile_ui::get().settings().showCameraCutout) {
-            a.vpX = 0;
-            a.vpY = 0;
-            a.vpW = a.screenWidth;
-            a.vpH = a.screenHeight;
-        } else {
-            int cutoutMargin = std::max(44, (int)lroundf((float)a.screenWidth * 0.042f));
-            a.vpX = cutoutMargin;
-            a.vpY = 0;
-            a.vpW = std::max(1, a.screenWidth - cutoutMargin * 2);
-            a.vpH = a.screenHeight;
-        }
+        a.vpX = 0;
+        a.vpY = 0;
+        a.vpW = a.screenWidth;
+        a.vpH = a.screenHeight;
     } else {
         float targetAspect = 16.0f / 9.0f;
         float screenAspect = (float)a.screenWidth / (float)a.screenHeight;
@@ -558,6 +550,7 @@ void onAppCmd(android_app* app, int32_t cmd) {
     switch (cmd) {
     case APP_CMD_INIT_WINDOW:
         LOGI("APP_CMD_INIT_WINDOW");
+        port_set_camera_cutout(mobile_ui::get().settings().showCameraCutout ? 1 : 0);
         initEgl(*a);
         createSurface(*a);
         break;
@@ -576,6 +569,7 @@ void onAppCmd(android_app* app, int32_t cmd) {
     case APP_CMD_RESUME:
         LOGI("APP_CMD_RESUME");
         port_set_paused(0);
+        port_set_camera_cutout(mobile_ui::get().settings().showCameraCutout ? 1 : 0);
         if (!a->gameBooted && a->dataRoot.empty()) {
             std::string ext = (a->android && a->android->activity && a->android->activity->externalDataPath) ? a->android->activity->externalDataPath : "/sdcard/Android/data/com.galaxy.mobile/files";
             a->dataRoot = findGameData(ext);
@@ -685,6 +679,17 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
 
         if (!a.windowReady) {
             continue;
+        }
+
+        if (a.android && a.android->window && a.surface != EGL_NO_SURFACE) {
+            int winW = ANativeWindow_getWidth(a.android->window);
+            int winH = ANativeWindow_getHeight(a.android->window);
+            if (winW > 0 && winH > 0 && (winW != a.screenWidth || winH != a.screenHeight)) {
+                LOGI("Window dimensions changed (%dx%d -> %dx%d), recreating EGL surface", a.screenWidth, a.screenHeight, winW, winH);
+                destroySurface(a);
+                createSurface(a);
+                if (!a.windowReady) continue;
+            }
         }
 
         // Boot game once window and data are available
@@ -1125,6 +1130,48 @@ void port_install_plus(void) {
 static std::atomic<int> sShowCameraCutout{1};
 void port_set_camera_cutout(int show) {
     sShowCameraCutout.store(show ? 1 : 0, std::memory_order_relaxed);
+    if (!gMobile.android || !gMobile.android->activity) return;
+    ANativeActivity* activity = gMobile.android->activity;
+    if (!activity->vm || !activity->clazz) return;
+    JNIEnv* env = nullptr;
+    bool attached = false;
+    if (activity->vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
+        if (activity->vm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+            attached = true;
+        }
+    }
+    if (!env) return;
+
+    jclass actClass = env->GetObjectClass(activity->clazz);
+    jmethodID getClassLoaderMethod = env->GetMethodID(actClass, "getClassLoader", "()Ljava/lang/ClassLoader;");
+    jobject classLoader = env->CallObjectMethod(activity->clazz, getClassLoaderMethod);
+
+    jclass clClass = env->FindClass("java/lang/ClassLoader");
+    jmethodID loadClassMethod = env->GetMethodID(clClass, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+    jstring clsName = env->NewStringUTF("com.galaxy.installer.AppInstaller");
+    jclass appInstallerClass = (jclass)env->CallObjectMethod(classLoader, loadClassMethod, clsName);
+
+    if (env->ExceptionCheck() || !appInstallerClass) {
+        env->ExceptionClear();
+    } else {
+        jmethodID cutoutMethod = env->GetStaticMethodID(appInstallerClass, "setDisplayCutoutMode", "(Landroid/app/Activity;Z)V");
+        if (cutoutMethod) {
+            env->CallStaticVoidMethod(appInstallerClass, cutoutMethod, activity->clazz, show ? JNI_TRUE : JNI_FALSE);
+        }
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+        env->DeleteLocalRef(appInstallerClass);
+    }
+
+    env->DeleteLocalRef(clsName);
+    env->DeleteLocalRef(clClass);
+    env->DeleteLocalRef(classLoader);
+    env->DeleteLocalRef(actClass);
+
+    if (attached) {
+        activity->vm->DetachCurrentThread();
+    }
 }
 int port_get_camera_cutout(void) {
     return sShowCameraCutout.load(std::memory_order_relaxed);

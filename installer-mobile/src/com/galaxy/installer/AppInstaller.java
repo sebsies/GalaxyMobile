@@ -21,6 +21,44 @@ public class AppInstaller {
     private static final String TAG = "AppInstaller";
     public static final String PLUS_PACKAGE = "com.galaxy.mobile.plus";
 
+    public static void setDisplayCutoutMode(Activity activity, boolean extendIntoCutout) {
+        if (activity == null) return;
+        activity.runOnUiThread(() -> {
+            try {
+                android.view.Window window = activity.getWindow();
+                if (window == null) return;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    window.setDecorFitsSystemWindows(false);
+                }
+                android.view.WindowManager.LayoutParams lp = window.getAttributes();
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    if (extendIntoCutout) {
+                        lp.layoutInDisplayCutoutMode = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+                                ? android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                                : android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+                    } else {
+                        lp.layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_NEVER;
+                    }
+                    window.setAttributes(lp);
+                }
+                android.view.View decorView = window.getDecorView();
+                if (decorView != null) {
+                    decorView.setSystemUiVisibility(
+                            android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                            | android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                            | android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            | android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+                    );
+                    decorView.requestLayout();
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to set display cutout mode", e);
+            }
+        });
+    }
+
     public static boolean isPlusInstalled(Context context) {
         if (context == null) return false;
         try {

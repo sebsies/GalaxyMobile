@@ -287,7 +287,7 @@ namespace MR {
 
         pSys->mObjHolder->mLanguage = chosenId;
 
-        JKRHeap* stationedHeap = MR::getStationedHeapNapa();
+        JKRHeap* stationedHeap = MR::getStationedHeapGDDR3();
         if (stationedHeap == nullptr) {
             return;
         }

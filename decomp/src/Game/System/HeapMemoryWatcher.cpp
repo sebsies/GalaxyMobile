@@ -80,6 +80,9 @@ void HeapMemoryWatcher::createSceneHeapOnGameHeap() {
 }
 
 void HeapMemoryWatcher::adjustStationedHeaps() {
+#ifdef TARGET_PC
+    return;
+#endif
     MR::adjustHeapSize(mStationedHeapNapa, 0);
     MR::adjustHeapSize(mStationedHeapGDDR, 0);
 }

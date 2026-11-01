@@ -38,7 +38,7 @@ void FileHolderFileEntry::setContext(void* pContext, JKRHeap* pHeap) {
 }
 
 FileHolder::FileHolder() {
-    mEntries.init(0x180);
+    mEntries.init(0x400);
 }
 
 FileHolderFileEntry* FileHolder::add(const char* pFilePath, JKRHeap* pHeap, void* pContext) {
