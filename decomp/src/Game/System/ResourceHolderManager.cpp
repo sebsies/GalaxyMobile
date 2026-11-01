@@ -119,6 +119,10 @@ ResourceHolderManagerName2Resource* ResourceHolderManager::createAndAddInner(con
 }
 
 ResourceHolderManagerName2Resource* ResourceHolderManager::createAndAddInnerStationed(const char* pParam1, FuncPtrC pParam2) {
+    ResourceHolderManagerName2Resource* existing = find(MR::getBasename(pParam1));
+    if (existing != nullptr) {
+        return existing;
+    }
     CreateResourceHolderArgs args = CreateResourceHolderArgs();
 
     MR::startFunctionAsyncExecuteOnMainThread(MR::Functor(this, pParam2, pParam1, &args), pParam1);

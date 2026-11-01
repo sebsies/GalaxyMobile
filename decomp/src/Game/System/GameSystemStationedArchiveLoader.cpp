@@ -63,7 +63,7 @@ JKRHeap* ConditionUsePlayerHeap::getProperHeap(const MR::StationedFileInfo* pInf
 
 PlayerHeapHolder::PlayerHeapHolder() : mCondition(), mNapaHeap(), mGDDRHeap(), mIsDataMario(true) {
     ConditionUsePlayerHeap* condition = new ConditionUsePlayerHeap();
-    mNapaHeap = PlayerHeapHolder::createHeap(0xC00000, MR::getStationedHeapNapa());
+    mNapaHeap = PlayerHeapHolder::createHeap(0x1000000, MR::getStationedHeapNapa());
     JKRExpHeap* gddr = PlayerHeapHolder::createHeap(0xC00000, MR::getStationedHeapGDDR3());
     mGDDRHeap = gddr;
     condition->mNapaHeap = mNapaHeap;
