@@ -68,6 +68,11 @@ struct MobileApp {
     uint32_t gamepadAxisButtons = 0;
     float gamepadStickX = 0.0f;
     float gamepadStickY = 0.0f;
+    float gamepadRightStickX = 0.0f;
+    float gamepadRightStickY = 0.0f;
+    uint32_t gamepadCameraPulsedButtons = 0;
+    int camRepeatLeft = 0;
+    int camRepeatRight = 0;
     bool gamepadRTrigWasDown = false;
     bool touchActive = false;
     float touchX = 0.0f, touchY = 0.0f;
@@ -356,7 +361,6 @@ void destroySurface(MobileApp& a) {
 
 void syncMergedPad(MobileApp& a) {
     a.pad.connected = 1;
-    a.pad.buttons = a.touchPad.buttons | a.gamepadKeyButtons | a.gamepadAxisButtons;
     if (fabsf(a.gamepadStickX) > fabsf(a.touchPad.stickX) ||
         fabsf(a.gamepadStickY) > fabsf(a.touchPad.stickY)) {
         a.pad.stickX = a.gamepadStickX;
@@ -365,6 +369,19 @@ void syncMergedPad(MobileApp& a) {
         a.pad.stickX = a.touchPad.stickX;
         a.pad.stickY = a.touchPad.stickY;
     }
+
+    uint32_t rawButtons = a.touchPad.buttons | a.gamepadKeyButtons | a.gamepadAxisButtons;
+    uint32_t nonCamButtons = rawButtons & ~(0x0001u | 0x0002u);
+
+    // Right Stick Vertical: Up for First-Person, Down for Center Camera & Exit FP
+    if (a.gamepadRightStickY < -0.45f) {
+        nonCamButtons |= 0x0008; // WPAD_BUTTON_UP
+    } else if (a.gamepadRightStickY > 0.45f) {
+        nonCamButtons |= (0x4000 | 0x0004); // WPAD_BUTTON_C | WPAD_BUTTON_DOWN
+    }
+
+    a.pad.buttons = nonCamButtons | a.gamepadCameraPulsedButtons;
+
     a.pad.pointerX = a.touchPad.pointerX;
     a.pad.pointerY = a.touchPad.pointerY;
     a.pad.pointerValid = a.touchPad.pointerValid;
@@ -378,10 +395,10 @@ int32_t onInput(android_app* app, AInputEvent* event) {
     int32_t eventType = AInputEvent_getType(event);
     if (eventType == AINPUT_EVENT_TYPE_MOTION) {
         int32_t source = AInputEvent_getSource(event);
-        bool isJoystickSource = (source & AINPUT_SOURCE_CLASS_JOYSTICK) != 0 || (source & AINPUT_SOURCE_GAMEPAD) != 0;
+        bool isPointer = (source & AINPUT_SOURCE_CLASS_POINTER) != 0;
 
         // Physical gamepad analog sticks, D-Pad hat axes, and analog triggers
-        if (isJoystickSource) {
+        if (!isPointer) {
             float stickX = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_X, 0);
             float stickY = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_Y, 0);
             if (fabsf(stickX) > 0.15f || fabsf(stickY) > 0.15f) {
@@ -394,38 +411,54 @@ int32_t onInput(android_app* app, AInputEvent* event) {
 
             uint32_t axisBtns = 0;
 
-            // D-Pad Hat Axes (standard on Xbox, DualShock/DualSense, Switch Pro, Backbone, Razer Kishi)
+            // D-Pad Hat Axes (standard on Xbox, DualShock/DualSense, Switch Pro, 8BitDo, Razer Kishi)
             float hatX = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_HAT_X, 0);
             float hatY = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_HAT_Y, 0);
             if (hatX < -0.45f) axisBtns |= 0x0001; // D-Pad Left (Camera Orbit Left)
             if (hatX >  0.45f) axisBtns |= 0x0002; // D-Pad Right (Camera Orbit Right)
             if (hatY < -0.45f) axisBtns |= 0x0008; // D-Pad Up (First-Person Camera)
-            if (hatY >  0.45f) axisBtns |= 0x0004; // D-Pad Down (Center Camera)
+            if (hatY >  0.45f) axisBtns |= (0x4000 | 0x0004); // D-Pad Down (Center Camera & Exit FP)
 
-            // Right Stick Camera Control (AXIS_Z / AXIS_RZ on standard Android gamepads, fallback to AXIS_RX / AXIS_RY)
-            float rx = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_Z, 0);
-            float ry = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_RZ, 0);
-            if (fabsf(rx) < 0.10f && fabsf(ry) < 0.10f) {
-                float altRx = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_RX, 0);
-                float altRy = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_RY, 0);
-                if (altRx > -0.85f && altRy > -0.85f) {
-                    rx = altRx;
-                    ry = altRy;
-                }
+            // Right Stick Camera Control
+            float valZ  = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_Z, 0);
+            float valRz = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_RZ, 0);
+            float valRx = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_RX, 0);
+            float valRy = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_RY, 0);
+
+            // A stick never rests at -1.0f. If Z or RZ rests at < -0.5f, they are analog triggers!
+            bool zIsTrigger = (valZ < -0.5f || valRz < -0.5f);
+
+            float rightX = 0.0f;
+            float rightY = 0.0f;
+
+            if (fabsf(valRx) > 0.15f || fabsf(valRy) > 0.15f) {
+                // AXIS_RX / AXIS_RY is active right stick
+                rightX = valRx;
+                rightY = valRy;
+            } else if (!zIsTrigger && (fabsf(valZ) > 0.15f || fabsf(valRz) > 0.15f)) {
+                // AXIS_Z / AXIS_RZ is active right stick (standard AOSP)
+                rightX = valZ;
+                rightY = valRz;
             }
-            if (rx < -0.38f) axisBtns |= 0x0001; // Camera Orbit Left
-            if (rx >  0.38f) axisBtns |= 0x0002; // Camera Orbit Right
-            if (ry < -0.38f) axisBtns |= 0x0008; // Camera First-Person / Up
-            if (ry >  0.38f) axisBtns |= 0x0004; // Camera Center / Down
+
+            a->gamepadRightStickX = rightX;
+            a->gamepadRightStickY = rightY;
 
             // Analog Triggers (L2/LT = Crouch/Ground Pound, R2/RT = Spin)
-            float lTrig = std::max(AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_LTRIGGER, 0),
-                                   AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_BRAKE, 0));
+            float lTrig = std::max({
+                AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_LTRIGGER, 0),
+                AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_BRAKE, 0),
+                (zIsTrigger && valZ > -0.9f) ? ((valZ + 1.0f) * 0.5f) : 0.0f
+            });
+            float rTrig = std::max({
+                AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_RTRIGGER, 0),
+                AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_GAS, 0),
+                (zIsTrigger && valRz > -0.9f) ? ((valRz + 1.0f) * 0.5f) : 0.0f
+            });
+
             if (lTrig > 0.30f) {
                 axisBtns |= 0x2000;
             }
-            float rTrig = std::max(AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_RTRIGGER, 0),
-                                   AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_GAS, 0));
             bool rTrigDown = (rTrig > 0.30f);
             if (rTrigDown && !a->gamepadRTrigWasDown) {
                 a->spinFrames = 6;
@@ -433,6 +466,16 @@ int32_t onInput(android_app* app, AInputEvent* event) {
             a->gamepadRTrigWasDown = rTrigDown;
 
             a->gamepadAxisButtons = axisBtns;
+
+            // Immediate responsive pulse for newly pressed camera directions
+            uint32_t rawCam = a->touchPad.buttons | a->gamepadKeyButtons | a->gamepadAxisButtons;
+            bool wantLeft = (rawCam & 0x0001u) != 0 || (a->gamepadRightStickX < -0.35f);
+            bool wantRight = (rawCam & 0x0002u) != 0 || (a->gamepadRightStickX > 0.35f);
+            if (wantLeft && a->camRepeatLeft == 0) a->gamepadCameraPulsedButtons |= 0x0001;
+            else if (!wantLeft) { a->gamepadCameraPulsedButtons &= ~0x0001; a->camRepeatLeft = 0; }
+            if (wantRight && a->camRepeatRight == 0) a->gamepadCameraPulsedButtons |= 0x0002;
+            else if (!wantRight) { a->gamepadCameraPulsedButtons &= ~0x0002; a->camRepeatRight = 0; }
+
             syncMergedPad(*a);
             port_input_set(0, &a->pad);
             return 1;
@@ -489,8 +532,8 @@ int32_t onInput(android_app* app, AInputEvent* event) {
             else a->gamepadKeyButtons &= ~0x2000;
             break;
         case AKEYCODE_BUTTON_THUMBL:
-            if (down) a->gamepadKeyButtons |= 0x0004;  // L3: Center Camera behind player
-            else a->gamepadKeyButtons &= ~0x0004;
+            if (down) a->gamepadKeyButtons |= (0x4000 | 0x0004);  // L3: Center Camera behind player & Exit FP
+            else a->gamepadKeyButtons &= ~(0x4000 | 0x0004);
             break;
         case AKEYCODE_BUTTON_R1:
         case AKEYCODE_BUTTON_R2:
@@ -512,8 +555,8 @@ int32_t onInput(android_app* app, AInputEvent* event) {
             else a->gamepadKeyButtons &= ~0x0008;
             break;
         case AKEYCODE_DPAD_DOWN:
-            if (down) a->gamepadKeyButtons |= 0x0004;
-            else a->gamepadKeyButtons &= ~0x0004;
+            if (down) a->gamepadKeyButtons |= (0x4000 | 0x0004); // D-Pad Down: Center camera & Exit FP
+            else a->gamepadKeyButtons &= ~(0x4000 | 0x0004);
             break;
         case AKEYCODE_DPAD_LEFT:
             if (down) a->gamepadKeyButtons |= 0x0001;
@@ -534,6 +577,15 @@ int32_t onInput(android_app* app, AInputEvent* event) {
         default:
             return 0;
         }
+
+        // Immediate responsive pulse for newly pressed camera directions
+        uint32_t rawCam = a->touchPad.buttons | a->gamepadKeyButtons | a->gamepadAxisButtons;
+        bool wantLeft = (rawCam & 0x0001u) != 0 || (a->gamepadRightStickX < -0.35f);
+        bool wantRight = (rawCam & 0x0002u) != 0 || (a->gamepadRightStickX > 0.35f);
+        if (wantLeft && a->camRepeatLeft == 0) a->gamepadCameraPulsedButtons |= 0x0001;
+        else if (!wantLeft) { a->gamepadCameraPulsedButtons &= ~0x0001; a->camRepeatLeft = 0; }
+        if (wantRight && a->camRepeatRight == 0) a->gamepadCameraPulsedButtons |= 0x0002;
+        else if (!wantRight) { a->gamepadCameraPulsedButtons &= ~0x0002; a->camRepeatRight = 0; }
 
         syncMergedPad(*a);
         port_input_set(0, &a->pad);
@@ -713,6 +765,47 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
                 }
             }
         }
+
+        // Camera Auto-Repeat Manager (Runs once per frame at 60 FPS)
+        uint32_t rawButtons = a.touchPad.buttons | a.gamepadKeyButtons | a.gamepadAxisButtons;
+        bool wantCamLeft = (rawButtons & 0x0001u) != 0 || (a.gamepadRightStickX < -0.35f);
+        bool wantCamRight = (rawButtons & 0x0002u) != 0 || (a.gamepadRightStickX > 0.35f);
+
+        uint32_t pulsed = 0;
+        if (wantCamLeft) {
+            int interval = (fabsf(a.gamepadRightStickX) > 0.70f) ? 9 : 12;
+            if (a.camRepeatLeft == 0) {
+                pulsed |= 0x0001;
+            } else if (a.camRepeatLeft >= 14) {
+                int cycle = (a.camRepeatLeft - 14) % interval;
+                if (cycle != 0) {
+                    pulsed |= 0x0001;
+                }
+            } else {
+                pulsed |= 0x0001;
+            }
+            a.camRepeatLeft++;
+        } else {
+            a.camRepeatLeft = 0;
+        }
+
+        if (wantCamRight) {
+            int interval = (fabsf(a.gamepadRightStickX) > 0.70f) ? 9 : 12;
+            if (a.camRepeatRight == 0) {
+                pulsed |= 0x0002;
+            } else if (a.camRepeatRight >= 14) {
+                int cycle = (a.camRepeatRight - 14) % interval;
+                if (cycle != 0) {
+                    pulsed |= 0x0002;
+                }
+            } else {
+                pulsed |= 0x0002;
+            }
+            a.camRepeatRight++;
+        } else {
+            a.camRepeatRight = 0;
+        }
+        a.gamepadCameraPulsedButtons = pulsed;
 
         // Handle spin shake decay and feed input state
         syncMergedPad(a);

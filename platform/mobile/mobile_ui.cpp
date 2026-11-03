@@ -1506,7 +1506,7 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                                 touchButtons |= 0x0008; // WPAD_BUTTON_UP (first-person view / zoom)
                                 mBtnDpadUp = true;
                             } else if (dDpadY > deadzone && fabsf(dDpadY) > fabsf(dDpadX) * 0.40f) {
-                                touchButtons |= 0x0004; // WPAD_BUTTON_DOWN (recenter camera)
+                                touchButtons |= (0x4000 | 0x0004); // WPAD_BUTTON_C | WPAD_BUTTON_DOWN (recenter camera & exit FP)
                                 mBtnDpadDown = true;
                             }
                         }
