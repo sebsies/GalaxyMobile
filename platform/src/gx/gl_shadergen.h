@@ -56,7 +56,7 @@ struct ShaderUidHash {
 // vertex layout.
 ShaderUid makeShaderUid(const uint32_t* bp, const uint32_t* xfRegs, uint32_t vtxFlags, bool hud);
 
-std::string genVertexShader(const ShaderUid& uid);
+std::string genVertexShader(const ShaderUid& uid, bool useVertexTextures = false);
 std::string genFragmentShader(const ShaderUid& uid);
 
 // Per-frame shader data (see gl_renderer.cpp).  Draws are batched, so

@@ -313,13 +313,17 @@ struct Renderer::Impl {
     // it never waits for the GPU to finish the renders before.
     GLuint eyeUbos[8] = {};
     int eyeUboNext = 0;
+    static bool sUseVertexTextures;
     GLuint rowBuf = 0, recBuf = 0, stateBuf = 0;
+    GLuint rowTex = 0, recTex = 0, stateTex = 0, vtxRecTex = 0;
     // Each frame's data goes into the next of three buffer sets, which the
     // GPU finished drawing from frames ago: refilling buffers still in use
     // made the driver wait for the GPU (up to 15 ms per frame at 120 Hz).
     struct FrameBuffers {
         GLuint buf[6] = {};    // vbo, recVbo, ibo, rowBuf, recBuf, stateBuf
         size_t cap[6] = {};    // bytes allocated
+        GLuint vtfTex[4] = {}; // rowTex, recTex, stateTex, vtxRecTex
+        u32 vtfCap[4] = {};    // allocated heights
     };
     FrameBuffers frameBufs[3];
     int frameBufNext = 0;
@@ -417,22 +421,38 @@ void main() {
 }
 )";
 
-void Renderer::Impl::init() {
-    for (FrameBuffers& fb : frameBufs) {
-        glGenBuffers(6, fb.buf);
-    }
-    glGenBuffers(8, eyeUbos);
-    for (GLuint b : eyeUbos) {
-        glBindBuffer(GL_UNIFORM_BUFFER, b);
-        glBufferData(GL_UNIFORM_BUFFER, sizeof(EyeBlock), nullptr, GL_DYNAMIC_DRAW);
-    }
+bool Renderer::Impl::sUseVertexTextures = false;
 
+void Renderer::Impl::init() {
     GLint attribs = 0, vsBlocks = 0, fsBlocks = 0, blockSize = 0;
     glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &attribs);
     glGetIntegerv(GL_MAX_VERTEX_SHADER_STORAGE_BLOCKS, &vsBlocks);
     glGetIntegerv(GL_MAX_FRAGMENT_SHADER_STORAGE_BLOCKS, &fsBlocks);
     glGetIntegerv(GL_MAX_SHADER_STORAGE_BLOCK_SIZE, &blockSize);
     port_log("gl: %d vertex attribs, %d/%d storage blocks (vs/fs), %d MB max block", attribs, vsBlocks, fsBlocks, blockSize >> 20);
+    sUseVertexTextures = (vsBlocks < 4) || (debugEnv("PETARI_VTF") != nullptr);
+    if (sUseVertexTextures) {
+        port_log("gl: vertex SSBOs unavailable or forced (%d < 4); using vertex texture fetch fallback", vsBlocks);
+    }
+
+    for (FrameBuffers& fb : frameBufs) {
+        glGenBuffers(6, fb.buf);
+        if (sUseVertexTextures) {
+            glGenTextures(4, fb.vtfTex);
+            for (int i = 0; i < 4; i++) {
+                glBindTexture(GL_TEXTURE_2D, fb.vtfTex[i]);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            }
+        }
+    }
+    glGenBuffers(8, eyeUbos);
+    for (GLuint b : eyeUbos) {
+        glBindBuffer(GL_UNIFORM_BUFFER, b);
+        glBufferData(GL_UNIFORM_BUFFER, sizeof(EyeBlock), nullptr, GL_DYNAMIC_DRAW);
+    }
     GLint numExt = 0, numBinFmt = 0;
     glGetIntegerv(GL_NUM_EXTENSIONS, &numExt);
     glGetIntegerv(GL_NUM_PROGRAM_BINARY_FORMATS, &numBinFmt);
@@ -445,8 +465,11 @@ void Renderer::Impl::init() {
         }
     }
     port_log("gl: %d program binary formats; extensions: %s", numBinFmt, exts.c_str());
-    if (vsBlocks < 4 || fsBlocks < 1) {
+    if (!sUseVertexTextures && vsBlocks < 4) {
         port_log("gl: this GPU lacks the vertex attributes or storage blocks the renderer needs");
+    }
+    if (fsBlocks < 1) {
+        port_log("gl: this GPU lacks fragment shader storage blocks (%d < 1)", fsBlocks);
     }
 
     GLuint vs = compileShader(GL_VERTEX_SHADER, kCopyVs), fs = compileShader(GL_FRAGMENT_SHADER, kCopyFs);
@@ -612,7 +635,7 @@ GLuint Renderer::Impl::program(const ShaderUid& uid, bool sync) {
 void Renderer::Impl::generateSources(const ShaderUid& uid, std::string* vs, std::string* fs) {
     static std::mutex genLock;  // the generator keeps scratch buffers
     std::lock_guard<std::mutex> lock(genLock);
-    *vs = genVertexShader(uid);
+    *vs = genVertexShader(uid, sUseVertexTextures);
     *fs = genFragmentShader(uid);
 }
 
@@ -655,6 +678,14 @@ GLuint Renderer::Impl::buildProgram(const ShaderUid& uid) {
     }
     if (vs) glDeleteShader(vs);
     if (fs) glDeleteShader(fs);
+    if (prog && sUseVertexTextures) {
+        glUseProgram(prog);
+        GLint loc;
+        if ((loc = glGetUniformLocation(prog, "s_rowTex")) >= 0) glUniform1i(loc, 8);
+        if ((loc = glGetUniformLocation(prog, "s_recTex")) >= 0) glUniform1i(loc, 9);
+        if ((loc = glGetUniformLocation(prog, "s_stateTex")) >= 0) glUniform1i(loc, 10);
+        if ((loc = glGetUniformLocation(prog, "s_vtxRecTex")) >= 0) glUniform1i(loc, 11);
+    }
     static std::atomic<int> built{0};
     if ((++built % 50) == 0) {
         port_log("gl: %d shader programs built", built.load());
@@ -1490,17 +1521,69 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
         }
     };
     put(0, GL_ARRAY_BUFFER, f.verts.data(), f.verts.size() * 4);
-    put(1, GL_SHADER_STORAGE_BUFFER, p.vtxRec.data(), p.vtxRec.size() * 4);
     put(2, GL_ELEMENT_ARRAY_BUFFER, p.indices.data(), p.indices.size() * 4);
-    put(3, GL_SHADER_STORAGE_BUFFER, p.rows.data(), p.rows.size() * 4);
-    put(4, GL_SHADER_STORAGE_BUFFER, p.recs.data(), p.recs.size() * 4);
     put(5, GL_SHADER_STORAGE_BUFFER, p.states.data(), p.states.size() * 4);
     vbo = fb.buf[0];
-    recVbo = fb.buf[1];
     ibo = fb.buf[2];
-    rowBuf = fb.buf[3];
-    recBuf = fb.buf[4];
     stateBuf = fb.buf[5];
+    if (!sUseVertexTextures) {
+        put(1, GL_SHADER_STORAGE_BUFFER, p.vtxRec.data(), p.vtxRec.size() * 4);
+        put(3, GL_SHADER_STORAGE_BUFFER, p.rows.data(), p.rows.size() * 4);
+        put(4, GL_SHADER_STORAGE_BUFFER, p.recs.data(), p.recs.size() * 4);
+        recVbo = fb.buf[1];
+        rowBuf = fb.buf[3];
+        recBuf = fb.buf[4];
+    } else {
+        const u32 kTexWidth = 2048;
+        // Upload rows texture (GL_RGBA32F, 4 floats per row)
+        size_t rowPad = (kTexWidth - (p.rows.size() / 4) % kTexWidth) % kTexWidth;
+        if (rowPad) p.rows.resize(p.rows.size() + rowPad * 4, 0.0f);
+        u32 rowH = (u32)(p.rows.size() / (kTexWidth * 4));
+        glBindTexture(GL_TEXTURE_2D, fb.vtfTex[0]);
+        if (rowH > fb.vtfCap[0]) {
+            fb.vtfCap[0] = rowH + 4;
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[0], 0, GL_RGBA, GL_FLOAT, nullptr);
+        }
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)rowH, GL_RGBA, GL_FLOAT, p.rows.data());
+
+        // Upload recs texture (GL_R32UI, 1 uint per element)
+        size_t recPad = (kTexWidth - p.recs.size() % kTexWidth) % kTexWidth;
+        if (recPad) p.recs.resize(p.recs.size() + recPad, 0);
+        u32 recH = (u32)(p.recs.size() / kTexWidth);
+        glBindTexture(GL_TEXTURE_2D, fb.vtfTex[1]);
+        if (recH > fb.vtfCap[1]) {
+            fb.vtfCap[1] = recH + 4;
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[1], 0, GL_RED_INTEGER, GL_UNSIGNED_INT, nullptr);
+        }
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)recH, GL_RED_INTEGER, GL_UNSIGNED_INT, p.recs.data());
+
+        // Upload states texture (GL_RGBA32F, 4 floats per state vec4)
+        size_t statePad = (kTexWidth - (p.states.size() / 4) % kTexWidth) % kTexWidth;
+        if (statePad) p.states.resize(p.states.size() + statePad * 4, 0.0f);
+        u32 stateH = (u32)(p.states.size() / (kTexWidth * 4));
+        glBindTexture(GL_TEXTURE_2D, fb.vtfTex[2]);
+        if (stateH > fb.vtfCap[2]) {
+            fb.vtfCap[2] = stateH + 4;
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[2], 0, GL_RGBA, GL_FLOAT, nullptr);
+        }
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)stateH, GL_RGBA, GL_FLOAT, p.states.data());
+
+        // Upload vtxRec texture (GL_R32UI, 1 uint per ordinal)
+        size_t vtxPad = (kTexWidth - p.vtxRec.size() % kTexWidth) % kTexWidth;
+        if (vtxPad) p.vtxRec.resize(p.vtxRec.size() + vtxPad, 0);
+        u32 vtxH = (u32)(p.vtxRec.size() / kTexWidth);
+        glBindTexture(GL_TEXTURE_2D, fb.vtfTex[3]);
+        if (vtxH > fb.vtfCap[3]) {
+            fb.vtfCap[3] = vtxH + 4;
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[3], 0, GL_RED_INTEGER, GL_UNSIGNED_INT, nullptr);
+        }
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)vtxH, GL_RED_INTEGER, GL_UNSIGNED_INT, p.vtxRec.data());
+
+        rowTex = fb.vtfTex[0];
+        recTex = fb.vtfTex[1];
+        stateTex = fb.vtfTex[2];
+        vtxRecTex = fb.vtfTex[3];
+    }
 
     // New textures.
     for (auto& img : f.textures) {
@@ -1970,10 +2053,28 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
         }
     };
     glBindBufferBase(GL_UNIFORM_BUFFER, 2, eyeUbo);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, rowBuf);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, recBuf);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, stateBuf);
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, recVbo);
+    if (!sUseVertexTextures) {
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, rowBuf);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, recBuf);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, stateBuf);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, recVbo);
+    } else {
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, stateBuf);
+        glActiveTexture(GL_TEXTURE8);
+        glBindTexture(GL_TEXTURE_2D, rowTex);
+        glBindSampler(8, 0);
+        glActiveTexture(GL_TEXTURE9);
+        glBindTexture(GL_TEXTURE_2D, recTex);
+        glBindSampler(9, 0);
+        glActiveTexture(GL_TEXTURE10);
+        glBindTexture(GL_TEXTURE_2D, stateTex);
+        glBindSampler(10, 0);
+        glActiveTexture(GL_TEXTURE11);
+        glBindTexture(GL_TEXTURE_2D, vtxRecTex);
+        glBindSampler(11, 0);
+        glActiveTexture(GL_TEXTURE0);
+        gs.unit = 0;
+    }
 
     int stopAfter = gDebugStopAfterDraws;
     for (const Item& it : items) {
