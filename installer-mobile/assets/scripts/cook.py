@@ -213,7 +213,11 @@ def process(job):
             out = cook_blob(src.replace('\\', '/'), bytearray(content), stats)
             del content
         elif mode == 'thp':
-            thp.cook_thp(src, dst)
+            try:
+                thp.cook_thp(src, dst)
+            except Exception as e:
+                notes.append('%s: thp patch skipped (%r), copying raw' % (src, e))
+                shutil.copyfile(src, dst)
             stats['movies'] += 1
             return stats, notes, None
         else:

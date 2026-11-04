@@ -15,6 +15,8 @@ AUDIO_HEADER_HALFWORDS = 16 + 16 + 4  # lCoef[8][2], rCoef[8][2], lYn1/2, rYn1/2
 def _swap32(fh, off, count):
     fh.seek(off)
     raw = fh.read(4 * count)
+    if len(raw) < 4 * count:
+        return (0,) * count
     fh.seek(off)
     fh.write(struct.pack('<%dI' % count, *struct.unpack('>%dI' % count, raw)))
     return struct.unpack('>%dI' % count, raw)
@@ -23,8 +25,11 @@ def _swap32(fh, off, count):
 def _swap16(fh, off, count):
     fh.seek(off)
     raw = fh.read(2 * count)
+    if len(raw) < 2 * count:
+        return ()
     fh.seek(off)
     fh.write(struct.pack('<%dH' % count, *struct.unpack('>%dH' % count, raw)))
+    return struct.unpack('>%dH' % count, raw)
 
 
 def cook_thp(src, dst):
@@ -35,6 +40,9 @@ def cook_thp(src, dst):
         raise ValueError('%s: not a version 1.1 THP file' % src)
     shutil.copyfile(src, dst)
     with open(dst, 'r+b') as fh:
+        fh.seek(0, 2)
+        file_len = fh.tell()
+
         fields = _swap32(fh, 4, 11)  # everything after the magic (frameRate swaps like a u32)
         (_version, _buf, _maxSamples, _rate, num_frames, first_size, _data_size,
          comp_off, _offsets_off, movie_off, _final_off) = fields
@@ -56,16 +64,21 @@ def cook_thp(src, dst):
 
         off, size = movie_off, first_size
         for _ in range(num_frames):
+            if off + 8 + 4 * ncomp > file_len:
+                break
             words = _swap32(fh, off, 2 + ncomp)
             next_size, comp_sizes = words[0], words[2:]
             data = off + 8 + 4 * ncomp
             for kind, comp_size in zip(kinds, comp_sizes):
-                if kind == 1:
+                if kind == 1 and comp_size >= 8 + 2 * AUDIO_HEADER_HALFWORDS:
                     for t in range(tracks):
                         rec = data + comp_size * t
-                        _swap32(fh, rec, 2)  # offsetNextChannel, sampleSize
-                        _swap16(fh, rec + 8, AUDIO_HEADER_HALFWORDS)
+                        if rec + 8 + 2 * AUDIO_HEADER_HALFWORDS <= file_len:
+                            _swap32(fh, rec, 2)  # offsetNextChannel, sampleSize
+                            _swap16(fh, rec + 8, AUDIO_HEADER_HALFWORDS)
                 data += comp_size
+            if next_size == 0 or off + size >= file_len:
+                break
             off += size
             size = next_size
     return num_frames
