@@ -15,12 +15,21 @@ lists, textures, sequences, ghost data) keep their original byte order.
 import argparse
 import collections
 import concurrent.futures
+import gc
 import multiprocessing
 import os
 import shutil
 import struct
 import sys
 import time
+
+try:
+    import ctypes
+    _libc = ctypes.CDLL(None)
+    _has_malloc_trim = hasattr(_libc, 'malloc_trim')
+except Exception:
+    _libc = None
+    _has_malloc_trim = False
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -162,10 +171,14 @@ def cook_rarc(data, stats, replace=None):
 
 
 def cook_archive(src, dst, stats, notes):
-    raw = open(src, 'rb').read()
+    with open(src, 'rb') as f:
+        raw = f.read()
     data = bytearray(yaz0_decompress(raw))
+    del raw
     if data[:4] == b'AA_<':
-        return cook_blob(src.replace('\\', '/'), data, stats)
+        res = cook_blob(src.replace('\\', '/'), data, stats)
+        del data
+        return res
     if data[:4] != b'RARC':
         notes.append('%s: not a RARC archive (%r), copied decompressed' % (src, bytes(data[:4])))
         return data
@@ -177,7 +190,9 @@ def cook_archive(src, dst, stats, notes):
             files = {path: bytes(data[off:off + size]) for _, path, flags, off, size in rarc_swap.entries(data)
                      if not flags & rarc_swap.FLAG_COMPRESSED}
             replace = collision.rebuild(files, model)
-    return cook_rarc(data, stats, replace)
+    res = cook_rarc(data, stats, replace)
+    del data
+    return res
 
 
 def process(job):
@@ -189,7 +204,10 @@ def process(job):
         if mode == 'archive':
             out = cook_archive(src, dst, stats, notes)
         elif mode == 'file':
-            out = cook_blob(src.replace('\\', '/'), bytearray(open(src, 'rb').read()), stats)
+            with open(src, 'rb') as f:
+                content = f.read()
+            out = cook_blob(src.replace('\\', '/'), bytearray(content), stats)
+            del content
         elif mode == 'thp':
             thp.cook_thp(src, dst + '.tmp')
             os.replace(dst + '.tmp', dst)
@@ -201,6 +219,7 @@ def process(job):
             return stats, notes, None
         with open(dst + '.tmp', 'wb') as fh:
             fh.write(out)
+        del out
         os.replace(dst + '.tmp', dst)
     except Exception as e:  # report and continue with the other files
         return stats, notes, '%s: %r' % (src, e)
@@ -300,7 +319,8 @@ def convert(data_dir, out_dir, jobs=None, only=None, no_audio=False,
     notes = collections.Counter()
     # On Android embedded Python, child processes cannot be spawned,
     # so we use ThreadPoolExecutor which runs natively within the app.
-    workers = min(4, args.jobs or 4)
+    # Cap concurrency to 2 workers to avoid peak memory pressure on 4GB devices.
+    workers = min(2, args.jobs or 2)
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
         for done, (stats, n, err) in enumerate(ex.map(process, jobs), 1):
             total.update(stats)
@@ -309,6 +329,19 @@ def convert(data_dir, out_dir, jobs=None, only=None, no_audio=False,
                 errors.append(err)
             if progress and (done % 16 == 0 or done == len(jobs)):
                 progress(done, len(jobs))
+            if done % 16 == 0:
+                gc.collect()
+                if _has_malloc_trim:
+                    try:
+                        _libc.malloc_trim(0)
+                    except Exception:
+                        pass
+    gc.collect()
+    if _has_malloc_trim:
+        try:
+            _libc.malloc_trim(0)
+        except Exception:
+            pass
     print('cooked %d disc files in %.1fs' % (len(jobs), time.time() - t0))
     for k, v in sorted(total.items()):
         print('  %-24s %6d' % (k, v))

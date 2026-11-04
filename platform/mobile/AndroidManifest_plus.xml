@@ -28,6 +28,7 @@
         android:hasCode="true"
         android:debuggable="true"
         android:extractNativeLibs="true"
+        android:largeHeap="true"
         android:allowBackup="false">
 
         <activity
@@ -48,6 +49,7 @@
 
         <activity
             android:name="com.galaxy.installer.InstallerActivity"
+            android:process=":installer"
             android:exported="false"
             android:screenOrientation="sensorLandscape"
             android:theme="@style/Theme.GalaxyInstaller"

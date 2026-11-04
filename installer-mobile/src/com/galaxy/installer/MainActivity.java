@@ -21,6 +21,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
+import java.util.ArrayDeque;
 
 public class MainActivity extends Activity {
     private static final String TAG = "GalaxyInstaller";
@@ -37,6 +38,10 @@ public class MainActivity extends Activity {
     private ProgressBar progressBar;
     private TextView txtProgressStatus;
     private TextView txtLogOutput;
+
+    private static final int MAX_LOG_LINES = 250;
+    private final ArrayDeque<String> mLogLines = new ArrayDeque<>();
+    private boolean mLogUpdatePending = false;
 
     private String mSelectedSourcePath = "";
     private final Handler mHandler = new Handler(Looper.getMainLooper());
@@ -480,6 +485,7 @@ public class MainActivity extends Activity {
             appendLog("[FAILURE] " + (message != null ? message : "Error during conversion."));
             Toast.makeText(this, "Preparation failed. Check terminal log.", Toast.LENGTH_LONG).show();
         }
+        flushLog();
     }
 
     private void launchGalaxyMobile() {
@@ -495,13 +501,34 @@ public class MainActivity extends Activity {
     }
 
     private void appendLog(String line) {
+        if (line == null) return;
         mHandler.post(() -> {
-            txtLogOutput.append(line + "\n");
+            mLogLines.addLast(line);
+            while (mLogLines.size() > MAX_LOG_LINES) {
+                mLogLines.removeFirst();
+            }
+            if (!mLogUpdatePending) {
+                mLogUpdatePending = true;
+                mHandler.postDelayed(() -> {
+                    mLogUpdatePending = false;
+                    flushLog();
+                }, 40);
+            }
+        });
+    }
+
+    private void flushLog() {
+        if (txtLogOutput != null) {
+            StringBuilder sb = new StringBuilder(mLogLines.size() * 64);
+            for (String l : mLogLines) {
+                sb.append(l).append('\n');
+            }
+            txtLogOutput.setText(sb.toString());
             final int scrollAmount = txtLogOutput.getLayout() != null ?
                     txtLogOutput.getLayout().getLineTop(txtLogOutput.getLineCount()) - txtLogOutput.getHeight() : 0;
             if (scrollAmount > 0) {
                 txtLogOutput.scrollTo(0, scrollAmount);
             }
-        });
+        }
     }
 }
