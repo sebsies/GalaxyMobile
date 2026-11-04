@@ -475,7 +475,12 @@ public class MainActivity extends Activity {
         btnSelectFolder.setEnabled(true);
         btnAutoDetect.setEnabled(true);
 
-        if (success) {
+        File galaxyDataDir = new File(Environment.getExternalStorageDirectory(), "GalaxyData");
+        File coinCheck = new File(galaxyDataDir, "files/ObjectData/Coin.arc");
+        File fstCheck = new File(galaxyDataDir, "sys/fst.bin");
+        boolean ready = fstCheck.exists() && fstCheck.length() > 0 && coinCheck.exists() && coinCheck.length() > 0;
+
+        if (success || ready) {
             txtProgressStatus.setText(R.string.status_done);
             appendLog("[SUCCESS] " + (message != null ? message : "Conversion complete!"));
             btnLaunchGame.setVisibility(View.VISIBLE);

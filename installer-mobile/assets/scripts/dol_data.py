@@ -41,7 +41,7 @@ def find_error_archive(dol):
                 names = [p.lower().split('/', 1)[-1] for p, _ in rarc_list(dol[pos:pos + size])]
             except Exception:  # not an archive after all
                 names = []
-            if ERROR_WINDOW in names:
+            if ERROR_WINDOW in names or any(n.endswith('errormessagewindow.arc') for n in names):
                 return bytes(dol[pos:pos + size])
         pos = dol.find(b'RARC', pos + 4)
     return None
