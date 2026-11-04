@@ -316,6 +316,17 @@ struct Renderer::Impl {
     static bool sUseVertexTextures;
     GLuint rowBuf = 0, recBuf = 0, stateBuf = 0;
     GLuint rowTex = 0, recTex = 0, stateTex = 0, vtxRecTex = 0;
+    GLuint vtfSampler = 0;
+    std::unordered_set<GLuint> vtfInitPrograms;
+    void ensureVtfUniforms(GLuint prog) {
+        if (vtfInitPrograms.insert(prog).second) {
+            GLint loc;
+            if ((loc = glGetUniformLocation(prog, "s_rowTex")) >= 0) glUniform1i(loc, 8);
+            if ((loc = glGetUniformLocation(prog, "s_recTex")) >= 0) glUniform1i(loc, 9);
+            if ((loc = glGetUniformLocation(prog, "s_stateTex")) >= 0) glUniform1i(loc, 10);
+            if ((loc = glGetUniformLocation(prog, "s_vtxRecTex")) >= 0) glUniform1i(loc, 11);
+        }
+    }
     // Each frame's data goes into the next of three buffer sets, which the
     // GPU finished drawing from frames ago: refilling buffers still in use
     // made the driver wait for the GPU (up to 15 ms per frame at 120 Hz).
@@ -445,8 +456,17 @@ void Renderer::Impl::init() {
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
             }
         }
+    }
+    if (sUseVertexTextures) {
+        glGenSamplers(1, &vtfSampler);
+        glSamplerParameteri(vtfSampler, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glSamplerParameteri(vtfSampler, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glSamplerParameteri(vtfSampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glSamplerParameteri(vtfSampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
     glGenBuffers(8, eyeUbos);
     for (GLuint b : eyeUbos) {
@@ -486,7 +506,7 @@ void Renderer::Impl::init() {
 // ---------------------------------------------------------------------------
 // Programs: disk cache of linked binaries + background compilation
 // ---------------------------------------------------------------------------
-static const u32 kCacheMagic = 0x32434750;  // "PGC2"
+static const u32 kCacheMagic = 0x33434750;  // "PGC3"
 
 void Renderer::Impl::loadShaderCache() {
     if (sShaderCachePath.empty()) {
@@ -514,6 +534,10 @@ void Renderer::Impl::loadShaderCache() {
                 GLint ok = 0;
                 glGetProgramiv(prog, GL_LINK_STATUS, &ok);
                 if (ok) {
+                    if (sUseVertexTextures) {
+                        glUseProgram(prog);
+                        ensureVtfUniforms(prog);
+                    }
                     programs[uid] = prog;
                     loaded++;
                 } else {
@@ -1535,6 +1559,16 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
         recBuf = fb.buf[4];
     } else {
         const u32 kTexWidth = 2048;
+        auto setupVtfTex = [](GLuint tex) {
+            glBindTexture(GL_TEXTURE_2D, tex);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+        };
+
         // Upload rows texture (GL_RGBA32F, 4 floats per row)
         size_t rowPad = (kTexWidth - (p.rows.size() / 4) % kTexWidth) % kTexWidth;
         if (rowPad) p.rows.resize(p.rows.size() + rowPad * 4, 0.0f);
@@ -1543,6 +1577,7 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
         if (rowH > fb.vtfCap[0]) {
             fb.vtfCap[0] = rowH + 4;
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[0], 0, GL_RGBA, GL_FLOAT, nullptr);
+            setupVtfTex(fb.vtfTex[0]);
         }
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)rowH, GL_RGBA, GL_FLOAT, p.rows.data());
 
@@ -1554,6 +1589,7 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
         if (recH > fb.vtfCap[1]) {
             fb.vtfCap[1] = recH + 4;
             glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[1], 0, GL_RED_INTEGER, GL_UNSIGNED_INT, nullptr);
+            setupVtfTex(fb.vtfTex[1]);
         }
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)recH, GL_RED_INTEGER, GL_UNSIGNED_INT, p.recs.data());
 
@@ -1565,6 +1601,7 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
         if (stateH > fb.vtfCap[2]) {
             fb.vtfCap[2] = stateH + 4;
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[2], 0, GL_RGBA, GL_FLOAT, nullptr);
+            setupVtfTex(fb.vtfTex[2]);
         }
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)stateH, GL_RGBA, GL_FLOAT, p.states.data());
 
@@ -1576,6 +1613,7 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
         if (vtxH > fb.vtfCap[3]) {
             fb.vtfCap[3] = vtxH + 4;
             glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[3], 0, GL_RED_INTEGER, GL_UNSIGNED_INT, nullptr);
+            setupVtfTex(fb.vtfTex[3]);
         }
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)vtxH, GL_RED_INTEGER, GL_UNSIGNED_INT, p.vtxRec.data());
 
@@ -2062,18 +2100,27 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, stateBuf);
         glActiveTexture(GL_TEXTURE8);
         glBindTexture(GL_TEXTURE_2D, rowTex);
-        glBindSampler(8, 0);
+        glBindSampler(8, vtfSampler);
         glActiveTexture(GL_TEXTURE9);
         glBindTexture(GL_TEXTURE_2D, recTex);
-        glBindSampler(9, 0);
+        glBindSampler(9, vtfSampler);
         glActiveTexture(GL_TEXTURE10);
         glBindTexture(GL_TEXTURE_2D, stateTex);
-        glBindSampler(10, 0);
+        glBindSampler(10, vtfSampler);
         glActiveTexture(GL_TEXTURE11);
         glBindTexture(GL_TEXTURE_2D, vtxRecTex);
-        glBindSampler(11, 0);
+        glBindSampler(11, vtfSampler);
         glActiveTexture(GL_TEXTURE0);
         gs.unit = 0;
+    }
+
+    static int sVtfErrCount = 0;
+    if (sUseVertexTextures && sVtfErrCount < 5) {
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            port_log("gl: vtf execute error 0x%x", err);
+            sVtfErrCount++;
+        }
     }
 
     int stopAfter = gDebugStopAfterDraws;
@@ -2205,6 +2252,9 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
             glUseProgram(prog);
             lastProgram = prog;
             ordinalLoc = firstOrdinalLoc(prog);
+            if (sUseVertexTextures) {
+                ensureVtfUniforms(prog);
+            }
         }
         glUniform1ui(ordinalLoc, it.firstOrdinal);
         for (int u = 0; u < 8; u++) {
