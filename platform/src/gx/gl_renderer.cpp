@@ -660,7 +660,7 @@ void Renderer::Impl::generateSources(const ShaderUid& uid, std::string* vs, std:
     static std::mutex genLock;  // the generator keeps scratch buffers
     std::lock_guard<std::mutex> lock(genLock);
     *vs = genVertexShader(uid, sUseVertexTextures);
-    *fs = genFragmentShader(uid);
+    *fs = genFragmentShader(uid, sUseVertexTextures);
 }
 
 // Identifies the generated code, so cached binaries from an older generator
@@ -1546,17 +1546,17 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
     };
     put(0, GL_ARRAY_BUFFER, f.verts.data(), f.verts.size() * 4);
     put(2, GL_ELEMENT_ARRAY_BUFFER, p.indices.data(), p.indices.size() * 4);
-    put(5, GL_SHADER_STORAGE_BUFFER, p.states.data(), p.states.size() * 4);
     vbo = fb.buf[0];
     ibo = fb.buf[2];
-    stateBuf = fb.buf[5];
     if (!sUseVertexTextures) {
         put(1, GL_SHADER_STORAGE_BUFFER, p.vtxRec.data(), p.vtxRec.size() * 4);
         put(3, GL_SHADER_STORAGE_BUFFER, p.rows.data(), p.rows.size() * 4);
         put(4, GL_SHADER_STORAGE_BUFFER, p.recs.data(), p.recs.size() * 4);
+        put(5, GL_SHADER_STORAGE_BUFFER, p.states.data(), p.states.size() * 4);
         recVbo = fb.buf[1];
         rowBuf = fb.buf[3];
         recBuf = fb.buf[4];
+        stateBuf = fb.buf[5];
     } else {
         const u32 kTexWidth = 2048;
         auto setupVtfTex = [](GLuint tex) {
@@ -1913,7 +1913,7 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
     eyeUboNext = (eyeUboNext + 1) % 8;
     glBindBuffer(GL_UNIFORM_BUFFER, eyeUbo);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(eb), &eb);
-    glBindBufferBase(GL_UNIFORM_BUFFER, 2, eyeUbo);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 4, eyeUbo);
     // With the cutaway on, 3D draws use their cutaway variants, compiled in
     // the background on first use (a draw keeps its plain program until
     // then).  The variants are only used while needed: their discard costs
@@ -2090,26 +2090,25 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
             gs.stencilRef = ref;
         }
     };
-    glBindBufferBase(GL_UNIFORM_BUFFER, 2, eyeUbo);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 4, eyeUbo);
     if (!sUseVertexTextures) {
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, rowBuf);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, recBuf);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, stateBuf);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, recVbo);
     } else {
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, stateBuf);
         glActiveTexture(GL_TEXTURE8);
         glBindTexture(GL_TEXTURE_2D, rowTex);
-        glBindSampler(8, vtfSampler);
+        glBindSampler(8, 0);
         glActiveTexture(GL_TEXTURE9);
         glBindTexture(GL_TEXTURE_2D, recTex);
-        glBindSampler(9, vtfSampler);
+        glBindSampler(9, 0);
         glActiveTexture(GL_TEXTURE10);
         glBindTexture(GL_TEXTURE_2D, stateTex);
-        glBindSampler(10, vtfSampler);
+        glBindSampler(10, 0);
         glActiveTexture(GL_TEXTURE11);
         glBindTexture(GL_TEXTURE_2D, vtxRecTex);
-        glBindSampler(11, vtfSampler);
+        glBindSampler(11, 0);
         glActiveTexture(GL_TEXTURE0);
         gs.unit = 0;
     }

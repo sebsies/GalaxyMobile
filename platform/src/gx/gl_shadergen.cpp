@@ -25,7 +25,7 @@ struct Out {
 };
 
 const char* kEyeBlock = R"(
-layout(std140, binding = 2) uniform EyeBlock {
+layout(std140, binding = 4) uniform EyeBlock {
     vec4 vrView[4];
     vec4 vrProj[4];
     ivec4 vrFlags;
@@ -451,10 +451,16 @@ const char* alphaTest(uint32_t func, const char* ref) {
 
 }  // namespace
 
-std::string genFragmentShader(const ShaderUid& u) {
+std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
     Out o;
     o.w("#version 320 es\nprecision highp float;\nprecision highp int;\n");
-    o.s += kFragmentUniformBlocks;
+    if (!useVertexTextures) {
+        o.s += kFragmentUniformBlocks;
+        o.w("#define ST(i) st[i]\n");
+    } else {
+        o.w("layout(binding = 10) uniform highp sampler2D s_stateTex;\n");
+        o.w("#define ST(i) texelFetch(s_stateTex, ivec2(int((i) & 2047u), int((i) >> 11u)), 0)\n");
+    }
     o.s += kEyeBlock;
     for (int i = 0; i < 8; i++) {
         o.w("layout(binding = %d) uniform sampler2D s_tex%d;\n", i, i);
@@ -486,12 +492,12 @@ std::string genFragmentShader(const ShaderUid& u) {
     o.w("    if (cut > (kBayer[q.y * 4 + q.x] + 0.5) / 16.0) discard;\n");
     o.w("  }\n");
     }
-    o.w("  vec4 tevReg[4] = vec4[4](st[v_pix], st[v_pix + 1u], st[v_pix + 2u], st[v_pix + 3u]);\n");
-    o.w("  ivec4 konst[4];\n  for (int i = 0; i < 4; i++) konst[i] = ivec4(round(st[v_pix + 4u + uint(i)] * 255.0));\n");
-    o.w("  vec4 alphaRef = st[v_pix + 8u];\n  vec4 fogColor = st[v_pix + 9u];\n  vec4 fogParams = st[v_pix + 10u];\n");
-    o.w("  vec4 fogRange = st[v_pix + 11u];\n");
-    o.w("  vec4 texSize[8];\n  for (int i = 0; i < 8; i++) texSize[i] = st[v_pix + 12u + uint(i)];\n");
-    o.w("  vec4 indMtx[6];\n  for (int i = 0; i < 6; i++) indMtx[i] = st[v_pix + 20u + uint(i)];\n");
+    o.w("  vec4 tevReg[4] = vec4[4](ST(v_pix), ST(v_pix + 1u), ST(v_pix + 2u), ST(v_pix + 3u));\n");
+    o.w("  ivec4 konst[4];\n  for (int i = 0; i < 4; i++) konst[i] = ivec4(round(ST(v_pix + 4u + uint(i)) * 255.0));\n");
+    o.w("  vec4 alphaRef = ST(v_pix + 8u);\n  vec4 fogColor = ST(v_pix + 9u);\n  vec4 fogParams = ST(v_pix + 10u);\n");
+    o.w("  vec4 fogRange = ST(v_pix + 11u);\n");
+    o.w("  vec4 texSize[8];\n  for (int i = 0; i < 8; i++) texSize[i] = ST(v_pix + 12u + uint(i));\n");
+    o.w("  vec4 indMtx[6];\n  for (int i = 0; i < 6; i++) indMtx[i] = ST(v_pix + 20u + uint(i));\n");
     o.w("  ivec4 prev = ivec4(round(tevReg[0] * 255.0));\n  ivec4 c0 = ivec4(round(tevReg[1] * 255.0));\n");
     o.w("  ivec4 c1 = ivec4(round(tevReg[2] * 255.0));\n  ivec4 c2 = ivec4(round(tevReg[3] * 255.0));\n");
     o.w("  ivec4 tex = ivec4(0);\n  ivec4 ras = ivec4(0);\n  ivec3 kc = ivec3(0);\n  int ka = 0;\n");
