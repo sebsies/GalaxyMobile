@@ -863,6 +863,7 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
             glDisable(GL_CULL_FACE);
             glDisable(GL_BLEND);
             glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+            glDepthMask(GL_TRUE);
 
             // Clear black pillarbox borders
             glClearColor(0.0f, 0.0f, 0.0f, 1.0f);

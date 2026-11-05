@@ -34,13 +34,14 @@ def _swap16(fh, off, count):
 
 def cook_thp(src, dst):
     """Writes the little-endian movie to dst; returns the frame count."""
-    with open(src, 'rb') as fh:
-        head = fh.read(0x30)
-    if head[:4] != b'THP\0' or head[4:8] != b'\x00\x01\x10\x00':
-        raise ValueError('%s: not a version 1.1 THP file' % src)
-    shutil.copyfile(src, dst)
-    num_frames = 0
     try:
+        with open(src, 'rb') as fh:
+            head = fh.read(0x30)
+        if len(head) < 0x30 or head[:4] != b'THP\0' or head[4:8] != b'\x00\x01\x10\x00':
+            shutil.copyfile(src, dst)
+            return 0
+        shutil.copyfile(src, dst)
+        num_frames = 0
         with open(dst, 'r+b') as fh:
             fh.seek(0, 2)
             file_len = fh.tell()
@@ -62,7 +63,7 @@ def cook_thp(src, dst):
                     tracks = _swap32(fh, pos, 4)[3]
                     pos += 16
                 else:
-                    raise ValueError('%s: unknown THP component %d' % (src, kind))
+                    break
 
             off, size = movie_off, first_size
             for _ in range(num_frames):
@@ -86,6 +87,11 @@ def cook_thp(src, dst):
                     break
                 off += size
                 size = next_size
+        return num_frames
     except Exception as e:
-        print('warning: %s: error swapping movie frames (%s), using raw copy' % (src, e))
-    return num_frames
+        print('warning: %s: movie swapping failed (%r), copying raw' % (src, e))
+        try:
+            shutil.copyfile(src, dst)
+        except Exception:
+            pass
+        return 0

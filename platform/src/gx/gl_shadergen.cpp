@@ -254,13 +254,13 @@ std::string genVertexShader(const ShaderUid& u, bool useVertexTextures) {
                     o.w("      vec3 dlt = lpos - pos; float d2 = dot(dlt, dlt); float d = sqrt(max(0.0, d2)); vec3 ldir = d > 0.0001 ? dlt / d : vec3(0.0, 0.0, 1.0);\n");
                     o.w("      float a = max(0.0, dot(ldir, ldirv));\n");
                     o.w("      float denom = dot(ldist, vec3(1.0, d, d2));\n");
-                    o.w("      float att = denom > 0.000001 ? max(0.0, dot(lcos, vec3(1.0, a, a * a))) / denom : 0.0;\n");
+                    o.w("      float att = denom > 0.000001 ? clamp(dot(lcos, vec3(1.0, a, a * a)) / denom, 0.0, 1.0) : 0.0;\n");
                 } else {
                     o.w("      vec3 dlt = lpos - pos; float d = length(dlt); vec3 ldir = d > 0.0001 ? dlt / d : nrm;\n");
                     o.w("      float a = (dot(nrm, ldir) >= 0.0) ? max(0.0, dot(nrm, ldirv)) : 0.0;\n");
                     o.w("      vec3 distAttn = diffuse == 0 ? ldist : (length(ldist) > 0.0001 ? normalize(ldist) : vec3(1.0, 0.0, 0.0));\n");
                     o.w("      float denom = dot(distAttn, vec3(1.0, a, a * a));\n");
-                    o.w("      float att = denom > 0.000001 ? max(0.0, dot(lcos, vec3(1.0, a, a * a))) / denom : 0.0;\n");
+                    o.w("      float att = denom > 0.000001 ? clamp(dot(lcos, vec3(1.0, a, a * a)) / denom, 0.0, 1.0) : 0.0;\n");
                 }
                 const char* dif = diffuse == 0 ? "1.0" : diffuse == 1 ? "dot(ldir, nrm)" : "max(0.0, dot(ldir, nrm))";
                 o.w("      lit += att * %s * lcol.%s;\n", dif, sw);
@@ -422,31 +422,22 @@ std::string swapString(const ShaderUid& u, uint32_t table) {
     return s;
 }
 
-const char* alphaTest(uint32_t func, const char* ref) {
-    static char buf[4][96];
-    static int slot;
-    char* b = buf[slot++ & 3];
+std::string alphaTest(uint32_t func, const std::string& ref) {
     switch (func) {
     case 0:
         return "false";
     case 1:
-        snprintf(b, 96, "(a < %s)", ref);
-        return b;
+        return "(a < " + ref + ")";
     case 2:
-        snprintf(b, 96, "(a == %s)", ref);
-        return b;
+        return "(a == " + ref + ")";
     case 3:
-        snprintf(b, 96, "(a <= %s)", ref);
-        return b;
+        return "(a <= " + ref + ")";
     case 4:
-        snprintf(b, 96, "(a > %s)", ref);
-        return b;
+        return "(a > " + ref + ")";
     case 5:
-        snprintf(b, 96, "(a != %s)", ref);
-        return b;
+        return "(a != " + ref + ")";
     case 6:
-        snprintf(b, 96, "(a >= %s)", ref);
-        return b;
+        return "(a >= " + ref + ")";
     default:
         return "true";
     }
@@ -456,14 +447,9 @@ const char* alphaTest(uint32_t func, const char* ref) {
 
 std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
     Out o;
-    o.w("#version 320 es\nprecision highp float;\nprecision highp int;\n");
-    if (!useVertexTextures) {
-        o.s += kFragmentUniformBlocks;
-        o.w("#define ST(i) st[i]\n");
-    } else {
-        o.w("layout(binding = 10) uniform highp sampler2D s_stateTex;\n");
-        o.w("#define ST(i) texelFetch(s_stateTex, ivec2(int((i) & 2047u), int((i) >> 11u)), 0)\n");
-    }
+    o.w("#version 320 es\nprecision highp float;\nprecision highp int;\nprecision highp uint;\n");
+    o.s += kFragmentUniformBlocks;
+    o.w("#define ST(i) st[i]\n");
     o.s += kEyeBlock;
     for (int i = 0; i < 8; i++) {
         o.w("layout(binding = %d) uniform sampler2D s_tex%d;\n", i, i);
@@ -636,10 +622,10 @@ std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
         uint32_t f0 = u.alphaFunc & 7, f1 = (u.alphaFunc >> 3) & 7, logic = (u.alphaFunc >> 6) & 3;
         if (!(f0 == 7 && f1 == 7)) {
             o.w("  float a = float(outi.a);\n");
-            const char* t0 = alphaTest(f0, "alphaRef.x");
-            const char* t1 = alphaTest(f1, "alphaRef.y");
+            std::string t0 = alphaTest(f0, "alphaRef.x");
+            std::string t1 = alphaTest(f1, "alphaRef.y");
             const char* ops[4] = {"&&", "||", "!=", "=="};
-            o.w("  if (!((%s) %s (%s))) discard;\n", t0, ops[logic], t1);
+            o.w("  if (!((%s) %s (%s))) discard;\n", t0.c_str(), ops[logic], t1.c_str());
         }
     }
     // Z texture: the last texture sample, read as a 8/16/24-bit depth, plus

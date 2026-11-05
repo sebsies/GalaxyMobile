@@ -218,6 +218,7 @@ const u64 kXfbCopyKey = ~0ull;
 struct Prepared {
     std::shared_ptr<const Frame> frame;
     u64 number = 0;
+    int fbIndex = -1;
     std::vector<Item> items;
     std::vector<ShaderUid> uids;
     std::vector<GLuint> cutProgs;  // cutaway variants of uids' programs, 0 until resolved
@@ -303,7 +304,6 @@ struct Renderer::Impl {
     // compile thread rebuilds them as soon as it starts (during the title
     // screen) rather than when a scene first needs them.
     std::vector<ShaderUid> staleUids;
-    std::unordered_map<u32, GLuint> vaos;
     std::unordered_map<u64, GLuint> samplers;
     std::unordered_map<u64, CopyTex> copies;  // by copyKey()
     u32 copySlot = 0;                          // of the render in progress
@@ -332,13 +332,18 @@ struct Renderer::Impl {
     // Each frame's data goes into the next of three buffer sets, which the
     // GPU finished drawing from frames ago: refilling buffers still in use
     // made the driver wait for the GPU (up to 15 ms per frame at 120 Hz).
+    // Quad-buffered frame ring buffer with GPU synchronization fences and buffer orphaning
+    // to prevent CPU/GPU write collisions during deep Android TV / Tegra X1 pipeline frames.
     struct FrameBuffers {
         GLuint buf[6] = {};    // vbo, recVbo, ibo, rowBuf, recBuf, stateBuf
         size_t cap[6] = {};    // bytes allocated
         GLuint vtfTex[4] = {}; // rowTex, recTex, stateTex, vtxRecTex
         u32 vtfCap[4] = {};    // allocated heights
+        GLsync fence = nullptr;
+        std::unordered_map<u32, GLuint> vaos;
     };
-    FrameBuffers frameBufs[3];
+    static constexpr int kNumFrameBufs = 4;
+    FrameBuffers frameBufs[kNumFrameBufs];
     int frameBufNext = 0;
     GLuint copyProgram = 0, copyVao = 0;
     GLint copyRectLoc = -1, copyModeLoc = -1, copyDepthLoc = -1;
@@ -375,7 +380,7 @@ struct Renderer::Impl {
         ordinalLocs[prog] = loc;
         return loc;
     }
-    GLuint vao(u32 flags);
+    GLuint vao(u32 flags, FrameBuffers& fb);
     GLuint sampler(u32 mode0, u32 mode1, u32 levels);
     void upload(Prepared& p, bool syncPrograms);
     void workerMain();
@@ -460,6 +465,8 @@ void Renderer::Impl::init() {
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 2048, 1, 0, GL_RGBA, GL_FLOAT, nullptr);
+                fb.vtfCap[i] = 1;
             }
         }
     }
@@ -473,7 +480,7 @@ void Renderer::Impl::init() {
     glGenBuffers(8, eyeUbos);
     for (GLuint b : eyeUbos) {
         glBindBuffer(GL_UNIFORM_BUFFER, b);
-        glBufferData(GL_UNIFORM_BUFFER, sizeof(EyeBlock), nullptr, GL_DYNAMIC_DRAW);
+        glBufferData(GL_UNIFORM_BUFFER, sizeof(EyeBlock), nullptr, GL_STREAM_DRAW);
     }
     GLint numExt = 0, numBinFmt = 0;
     glGetIntegerv(GL_NUM_EXTENSIONS, &numExt);
@@ -508,7 +515,7 @@ void Renderer::Impl::init() {
 // ---------------------------------------------------------------------------
 // Programs: disk cache of linked binaries + background compilation
 // ---------------------------------------------------------------------------
-static const u32 kCacheMagic = 0x37434750;  // "PGC7"
+static const u32 kCacheMagic = 0x39434750;  // "PGC9"
 
 void Renderer::Impl::loadShaderCache() {
     if (sShaderCachePath.empty()) {
@@ -719,14 +726,15 @@ GLuint Renderer::Impl::buildProgram(const ShaderUid& uid) {
     return prog;
 }
 
-GLuint Renderer::Impl::vao(u32 flags) {
-    auto it = vaos.find(flags);
-    if (it != vaos.end()) {
+GLuint Renderer::Impl::vao(u32 flags, FrameBuffers& fb) {
+    auto it = fb.vaos.find(flags);
+    if (it != fb.vaos.end()) {
         return it->second;
     }
     GLuint v;
     glGenVertexArrays(1, &v);
     glBindVertexArray(v);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, fb.buf[2]);
     u32 off = 0;
     auto attr = [&](GLuint loc, GLint size, GLenum type, bool normalized, bool integer, u32 bytes) {
         glEnableVertexAttribArray(loc);
@@ -752,7 +760,7 @@ GLuint Renderer::Impl::vao(u32 flags) {
     }
     if (flags & VF_TEXMTX) attr(15, 2, GL_UNSIGNED_INT, false, true, 8);
     glBindVertexArray(0);
-    vaos[flags] = v;
+    fb.vaos[flags] = v;
     return v;
 }
 
@@ -1533,16 +1541,30 @@ void Builder::build(std::shared_ptr<const Frame> frame, Prepared& out) {
 // Render thread: uploads a built frame and resolves its programs.
 void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
     const Frame& f = *p.frame;
+    p.fbIndex = frameBufNext;
     FrameBuffers& fb = frameBufs[frameBufNext];
-    frameBufNext = (frameBufNext + 1) % 3;
+    frameBufNext = (frameBufNext + 1) % kNumFrameBufs;
+    if (fb.fence) {
+        GLenum waitRes = glClientWaitSync(fb.fence, 0, 100000000ull);
+        if (waitRes == GL_WAIT_FAILED) {
+            port_log("gl: wait for buffer fence failed");
+        }
+        glDeleteSync(fb.fence);
+        fb.fence = nullptr;
+    }
     glBindVertexArray(0);  // the element buffer binding belongs to the bound VAO
     auto put = [&fb](int i, GLenum target, const void* data, size_t bytes) {
         glBindBuffer(target, fb.buf[i]);
         if (bytes > fb.cap[i]) {
             fb.cap[i] = bytes + bytes / 4 + 4096;
-            glBufferData(target, (GLsizeiptr)fb.cap[i], nullptr, GL_DYNAMIC_DRAW);
         }
-        if (bytes) {
+        if (fb.cap[i] == 0) {
+            fb.cap[i] = 4096;
+        }
+        // Always orphan the buffer before writing so the driver allocates a fresh
+        // memory block if the GPU is still referencing previous storage.
+        glBufferData(target, (GLsizeiptr)fb.cap[i], nullptr, GL_STREAM_DRAW);
+        if (bytes && data) {
             glBufferSubData(target, 0, (GLsizeiptr)bytes, data);
         }
     };
@@ -1581,7 +1603,7 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[0], 0, GL_RGBA, GL_FLOAT, nullptr);
             setupVtfTex(fb.vtfTex[0]);
         }
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)rowH, GL_RGBA, GL_FLOAT, p.rows.data());
+        if (rowH > 0) glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)rowH, GL_RGBA, GL_FLOAT, p.rows.data());
 
         // Upload recs texture (GL_RGBA32F, 4 uints packed as floats per texel)
         size_t numTexels = (p.recs.size() + 3) / 4;
@@ -1601,7 +1623,7 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[1], 0, GL_RGBA, GL_FLOAT, nullptr);
             setupVtfTex(fb.vtfTex[1]);
         }
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)recH, GL_RGBA, GL_FLOAT, vtfRecFloats.data());
+        if (recH > 0) glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)recH, GL_RGBA, GL_FLOAT, vtfRecFloats.data());
 
         // Upload states texture (GL_RGBA32F, 4 floats per state vec4)
         size_t statePad = (kTexWidth - (p.states.size() / 4) % kTexWidth) % kTexWidth;
@@ -1613,7 +1635,7 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[2], 0, GL_RGBA, GL_FLOAT, nullptr);
             setupVtfTex(fb.vtfTex[2]);
         }
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)stateH, GL_RGBA, GL_FLOAT, p.states.data());
+        if (stateH > 0) glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)stateH, GL_RGBA, GL_FLOAT, p.states.data());
 
         // Upload vtxRec texture (GL_RGBA32F, 4 ordinals packed as floats per texel)
         size_t vtxTexels = (p.vtxRec.size() + 3) / 4;
@@ -1633,7 +1655,7 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[3], 0, GL_RGBA, GL_FLOAT, nullptr);
             setupVtfTex(fb.vtfTex[3]);
         }
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)vtxH, GL_RGBA, GL_FLOAT, vtfVtxFloats.data());
+        if (vtxH > 0) glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)vtxH, GL_RGBA, GL_FLOAT, vtfVtxFloats.data());
 
         rowTex = fb.vtfTex[0];
         recTex = fb.vtfTex[1];
@@ -1930,6 +1952,7 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
     eyeUbo = eyeUbos[eyeUboNext];
     eyeUboNext = (eyeUboNext + 1) % 8;
     glBindBuffer(GL_UNIFORM_BUFFER, eyeUbo);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(eb), nullptr, GL_STREAM_DRAW);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(eb), &eb);
     glBindBufferBase(GL_UNIFORM_BUFFER, 4, eyeUbo);
     // With the cutaway on, 3D draws use their cutaway variants, compiled in
@@ -2108,6 +2131,20 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
             gs.stencilRef = ref;
         }
     };
+    int curFbIdx = (this->cur && this->cur->fbIndex >= 0 && this->cur->fbIndex < kNumFrameBufs) ? this->cur->fbIndex : 0;
+    FrameBuffers& curFb = frameBufs[curFbIdx];
+    vbo = curFb.buf[0];
+    recVbo = curFb.buf[1];
+    ibo = curFb.buf[2];
+    rowBuf = curFb.buf[3];
+    recBuf = curFb.buf[4];
+    stateBuf = curFb.buf[5];
+    if (sUseVertexTextures) {
+        rowTex = curFb.vtfTex[0];
+        recTex = curFb.vtfTex[1];
+        stateTex = curFb.vtfTex[2];
+        vtxRecTex = curFb.vtfTex[3];
+    }
     glBindBufferBase(GL_UNIFORM_BUFFER, 4, eyeUbo);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, stateBuf);
     if (!sUseVertexTextures) {
@@ -2160,16 +2197,70 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
                                   GL_NEAREST);
                 glBindFramebuffer(GL_FRAMEBUFFER, cur->fbo);
                 gs.forget();
+                lastVao = ~0u;
+                lastProgram = ~0u;
                 snapshotTaken = true;
                 continue;
             }
-            if (it.marker != MARK_HUD_BEGIN && it.marker != MARK_HUD_END) {
+            if (it.marker == MARK_PLAYER_BEGIN) {
+                // Dynamic actor pass (skeletal models):
+                // Invalidate state cache and explicitly enforce depth test & write states
+                // to prevent any state leakage from previous static/transparent passes.
+                gs.forget();
+                lastVao = ~0u;
+                lastProgram = ~0u;
+                glEnable(GL_DEPTH_TEST);
+                glDepthFunc(GL_LEQUAL);
+                glDepthMask(GL_TRUE);
+                glBindBufferBase(GL_UNIFORM_BUFFER, 4, eyeUbo);
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, stateBuf);
+                if (!sUseVertexTextures) {
+                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, rowBuf);
+                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, recBuf);
+                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, recVbo);
+                }
                 continue;
             }
-            inHudSection = it.marker == MARK_HUD_BEGIN;
-            if (hudMode == HudMode::Target) {
-                cur = inHudSection ? hud : &efb;
-                glBindFramebuffer(GL_FRAMEBUFFER, cur->fbo);
+            if (it.marker == MARK_PLAYER_END) {
+                gs.forget();
+                lastVao = ~0u;
+                lastProgram = ~0u;
+                continue;
+            }
+            if (it.marker == MARK_HUD_BEGIN) {
+                inHudSection = true;
+                if (hudMode == HudMode::Target) {
+                    cur = hud;
+                    glBindFramebuffer(GL_FRAMEBUFFER, cur->fbo);
+                }
+                // 2D UI / HUD pass:
+                // Invalidate state cache and explicitly reset depth test/mask so 2D UI
+                // does not leak depth writes or fail depth test against 3D scene depth.
+                gs.forget();
+                lastVao = ~0u;
+                lastProgram = ~0u;
+                glDisable(GL_DEPTH_TEST);
+                glDepthMask(GL_FALSE);
+                glBindBufferBase(GL_UNIFORM_BUFFER, 4, eyeUbo);
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, stateBuf);
+                if (!sUseVertexTextures) {
+                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, rowBuf);
+                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, recBuf);
+                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, recVbo);
+                }
+                continue;
+            }
+            if (it.marker == MARK_HUD_END) {
+                inHudSection = false;
+                if (hudMode == HudMode::Target) {
+                    cur = &efb;
+                    glBindFramebuffer(GL_FRAMEBUFFER, cur->fbo);
+                }
+                gs.forget();
+                lastVao = ~0u;
+                lastProgram = ~0u;
+                glDepthMask(GL_TRUE);
+                continue;
             }
             continue;
         }
@@ -2287,7 +2378,7 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
             }
         }
 
-        GLuint v = vao(it.flags);
+        GLuint v = vao(it.flags, curFb);
         if (v != lastVao) {
             glBindVertexArray(v);
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
@@ -2314,6 +2405,10 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
         glBindFramebuffer(GL_FRAMEBUFFER, hud->fbo);
         glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, depthOnly);
     }
+    if (curFb.fence) {
+        glDeleteSync(curFb.fence);
+    }
+    curFb.fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 }
 
 // ---------------------------------------------------------------------------
