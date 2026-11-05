@@ -506,7 +506,7 @@ void Renderer::Impl::init() {
 // ---------------------------------------------------------------------------
 // Programs: disk cache of linked binaries + background compilation
 // ---------------------------------------------------------------------------
-static const u32 kCacheMagic = 0x35434750;  // "PGC5"
+static const u32 kCacheMagic = 0x36434750;  // "PGC6"
 
 void Renderer::Impl::loadShaderCache() {
     if (sShaderCachePath.empty()) {
@@ -1548,15 +1548,15 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
     put(2, GL_ELEMENT_ARRAY_BUFFER, p.indices.data(), p.indices.size() * 4);
     vbo = fb.buf[0];
     ibo = fb.buf[2];
+    put(5, GL_SHADER_STORAGE_BUFFER, p.states.data(), p.states.size() * 4);
+    stateBuf = fb.buf[5];
     if (!sUseVertexTextures) {
         put(1, GL_SHADER_STORAGE_BUFFER, p.vtxRec.data(), p.vtxRec.size() * 4);
         put(3, GL_SHADER_STORAGE_BUFFER, p.rows.data(), p.rows.size() * 4);
         put(4, GL_SHADER_STORAGE_BUFFER, p.recs.data(), p.recs.size() * 4);
-        put(5, GL_SHADER_STORAGE_BUFFER, p.states.data(), p.states.size() * 4);
         recVbo = fb.buf[1];
         rowBuf = fb.buf[3];
         recBuf = fb.buf[4];
-        stateBuf = fb.buf[5];
     } else {
         const u32 kTexWidth = 2048;
         auto setupVtfTex = [](GLuint tex) {
@@ -2091,10 +2091,10 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
         }
     };
     glBindBufferBase(GL_UNIFORM_BUFFER, 4, eyeUbo);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, stateBuf);
     if (!sUseVertexTextures) {
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, rowBuf);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, recBuf);
-        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, stateBuf);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, recVbo);
     } else {
         glActiveTexture(GL_TEXTURE8);

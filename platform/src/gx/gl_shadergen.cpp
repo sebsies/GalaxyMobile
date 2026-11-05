@@ -256,9 +256,10 @@ std::string genVertexShader(const ShaderUid& u, bool useVertexTextures) {
                     o.w("      float denom = dot(ldist, vec3(1.0, d, d2));\n");
                     o.w("      float att = denom > 0.000001 ? max(0.0, dot(lcos, vec3(1.0, a, a * a))) / denom : 0.0;\n");
                 } else {
-                    o.w("      vec3 ldir = length(lpos) > 0.0001 ? normalize(lpos) : vec3(0.0, 0.0, 1.0);\n");
+                    o.w("      vec3 dlt = lpos - pos; float d = length(dlt); vec3 ldir = d > 0.0001 ? dlt / d : nrm;\n");
                     o.w("      float a = (dot(nrm, ldir) >= 0.0) ? max(0.0, dot(nrm, ldirv)) : 0.0;\n");
-                    o.w("      float denom = dot(ldist, vec3(1.0, a, a * a));\n");
+                    o.w("      vec3 distAttn = diffuse == 0 ? ldist : (length(ldist) > 0.0001 ? normalize(ldist) : vec3(1.0, 0.0, 0.0));\n");
+                    o.w("      float denom = dot(distAttn, vec3(1.0, a, a * a));\n");
                     o.w("      float att = denom > 0.000001 ? max(0.0, dot(lcos, vec3(1.0, a, a * a))) / denom : 0.0;\n");
                 }
                 const char* dif = diffuse == 0 ? "1.0" : diffuse == 1 ? "dot(ldir, nrm)" : "max(0.0, dot(ldir, nrm))";
@@ -456,13 +457,8 @@ const char* alphaTest(uint32_t func, const char* ref) {
 std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
     Out o;
     o.w("#version 320 es\nprecision highp float;\nprecision highp int;\n");
-    if (!useVertexTextures) {
-        o.s += kFragmentUniformBlocks;
-        o.w("#define ST(i) st[i]\n");
-    } else {
-        o.w("layout(binding = 10) uniform highp sampler2D s_stateTex;\n");
-        o.w("#define ST(i) texelFetch(s_stateTex, ivec2(int((i) & 2047u), int((i) >> 11u)), 0)\n");
-    }
+    o.s += kFragmentUniformBlocks;
+    o.w("#define ST(i) st[i]\n");
     o.s += kEyeBlock;
     for (int i = 0; i < 8; i++) {
         o.w("layout(binding = %d) uniform sampler2D s_tex%d;\n", i, i);
