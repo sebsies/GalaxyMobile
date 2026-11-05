@@ -447,7 +447,7 @@ std::string alphaTest(uint32_t func, const std::string& ref) {
 
 std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
     Out o;
-    o.w("#version 320 es\nprecision highp float;\nprecision highp int;\nprecision highp uint;\n");
+    o.w("#version 320 es\nprecision highp float;\nprecision highp int;\n");
     o.s += kFragmentUniformBlocks;
     o.w("#define ST(i) st[i]\n");
     o.s += kEyeBlock;
