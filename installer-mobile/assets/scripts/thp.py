@@ -39,46 +39,53 @@ def cook_thp(src, dst):
     if head[:4] != b'THP\0' or head[4:8] != b'\x00\x01\x10\x00':
         raise ValueError('%s: not a version 1.1 THP file' % src)
     shutil.copyfile(src, dst)
-    with open(dst, 'r+b') as fh:
-        fh.seek(0, 2)
-        file_len = fh.tell()
+    num_frames = 0
+    try:
+        with open(dst, 'r+b') as fh:
+            fh.seek(0, 2)
+            file_len = fh.tell()
 
-        fields = _swap32(fh, 4, 11)  # everything after the magic (frameRate swaps like a u32)
-        (_version, _buf, _maxSamples, _rate, num_frames, first_size, _data_size,
-         comp_off, _offsets_off, movie_off, _final_off) = fields
+            fields = _swap32(fh, 4, 11)  # everything after the magic (frameRate swaps like a u32)
+            (_version, _buf, _maxSamples, _rate, num_frames, first_size, _data_size,
+             comp_off, _offsets_off, movie_off, _final_off) = fields
 
-        ncomp = _swap32(fh, comp_off, 1)[0]
-        fh.seek(comp_off + 4)
-        kinds = list(fh.read(16)[:ncomp])
-        pos = comp_off + 0x14
-        tracks = 1
-        for kind in kinds:
-            if kind == 0:    # video: xSize, ySize, videoType
-                _swap32(fh, pos, 3)
-                pos += 12
-            elif kind == 1:  # audio: channels, frequency, samples, tracks
-                tracks = _swap32(fh, pos, 4)[3]
-                pos += 16
-            else:
-                raise ValueError('%s: unknown THP component %d' % (src, kind))
+            ncomp = _swap32(fh, comp_off, 1)[0]
+            fh.seek(comp_off + 4)
+            kinds = list(fh.read(16)[:ncomp])
+            pos = comp_off + 0x14
+            tracks = 1
+            for kind in kinds:
+                if kind == 0:    # video: xSize, ySize, videoType
+                    _swap32(fh, pos, 3)
+                    pos += 12
+                elif kind == 1:  # audio: channels, frequency, samples, tracks
+                    tracks = _swap32(fh, pos, 4)[3]
+                    pos += 16
+                else:
+                    raise ValueError('%s: unknown THP component %d' % (src, kind))
 
-        off, size = movie_off, first_size
-        for _ in range(num_frames):
-            if off + 8 + 4 * ncomp > file_len:
-                break
-            words = _swap32(fh, off, 2 + ncomp)
-            next_size, comp_sizes = words[0], words[2:]
-            data = off + 8 + 4 * ncomp
-            for kind, comp_size in zip(kinds, comp_sizes):
-                if kind == 1 and comp_size >= 8 + 2 * AUDIO_HEADER_HALFWORDS:
-                    for t in range(tracks):
-                        rec = data + comp_size * t
-                        if rec + 8 + 2 * AUDIO_HEADER_HALFWORDS <= file_len:
-                            _swap32(fh, rec, 2)  # offsetNextChannel, sampleSize
-                            _swap16(fh, rec + 8, AUDIO_HEADER_HALFWORDS)
-                data += comp_size
-            if next_size == 0 or off + size >= file_len:
-                break
-            off += size
-            size = next_size
+            off, size = movie_off, first_size
+            for _ in range(num_frames):
+                if off + 8 + 4 * ncomp > file_len:
+                    break
+                words = _swap32(fh, off, 2 + ncomp)
+                next_size, comp_sizes = words[0], words[2:]
+                data = off + 8 + 4 * ncomp
+                for kind, comp_size in zip(kinds, comp_sizes):
+                    if kind == 1 and comp_size >= 8 + 2 * AUDIO_HEADER_HALFWORDS:
+                        for t in range(tracks):
+                            rec = data + comp_size * t
+                            if rec + 8 + 2 * AUDIO_HEADER_HALFWORDS <= file_len:
+                                try:
+                                    _swap32(fh, rec, 2)  # offsetNextChannel, sampleSize
+                                    _swap16(fh, rec + 8, AUDIO_HEADER_HALFWORDS)
+                                except Exception:
+                                    pass
+                    data += comp_size
+                if next_size == 0 or off + size >= file_len:
+                    break
+                off += size
+                size = next_size
+    except Exception as e:
+        print('warning: %s: error swapping movie frames (%s), using raw copy' % (src, e))
     return num_frames

@@ -93,7 +93,7 @@ ShaderUid makeShaderUid(const uint32_t* bp, const uint32_t* xf, uint32_t vtxFlag
 // ---------------------------------------------------------------------------
 std::string genVertexShader(const ShaderUid& u, bool useVertexTextures) {
     Out o;
-    o.w("#version 320 es\nprecision highp float;\nprecision highp int;\n");
+    o.w("#version 320 es\nprecision highp float;\nprecision highp int;\nprecision highp uint;\n");
     if (!useVertexTextures) {
         o.w("layout(std430, binding = 0) readonly buffer RowBuf { vec4 rows[]; };\n");
         o.w("layout(std430, binding = 1) readonly buffer RecBuf { uint recs[]; };\n");
@@ -127,8 +127,8 @@ std::string genVertexShader(const ShaderUid& u, bool useVertexTextures) {
     if (f & VF_TEXMTX) o.w("layout(location = 15) in uvec2 a_texmtx;\n");
     // Draw record of this vertex: indices are relative to the batch's first
     // vertex, so gl_VertexID + the batch's first ordinal indexes vtxRec[].
-    o.w("uniform uint u_firstOrdinal;\n");
-    o.w("flat out uint v_pix;\n");
+    o.w("uniform highp uint u_firstOrdinal;\n");
+    o.w("flat out highp uint v_pix;\n");
     o.w("out vec4 v_clr0;\nout vec4 v_clr1;\n");
     for (uint32_t i = 0; i < u.numTexGens; i++) o.w("out vec3 v_tex%u;\n", i);
     o.w("out float v_viewz;\nout float v_gxz;\n");
@@ -249,15 +249,17 @@ std::string genVertexShader(const ShaderUid& u, bool useVertexTextures) {
                 // in VR it belongs on the eye, or rims land mid-face.
                 o.w("      if (vrDraw && lpos == vec3(0.0)) lpos = vrEyePos.xyz;\n");
                 if (!atten) {
-                    o.w("      vec3 ldir = normalize(lpos - pos); float att = 1.0;\n");
+                    o.w("      vec3 dlt = lpos - pos; float d = length(dlt); vec3 ldir = d > 1e-4 ? dlt / d : vec3(0.0, 0.0, 1.0); float att = 1.0;\n");
                 } else if (spot) {
-                    o.w("      vec3 ldir = lpos - pos; float d2 = dot(ldir, ldir); float d = sqrt(d2); ldir = ldir / d;\n");
+                    o.w("      vec3 dlt = lpos - pos; float d2 = dot(dlt, dlt); float d = sqrt(d2); vec3 ldir = d > 1e-4 ? dlt / d : vec3(0.0, 0.0, 1.0);\n");
                     o.w("      float a = max(0.0, dot(ldir, ldirv));\n");
-                    o.w("      float att = max(0.0, dot(lcos, vec3(1.0, a, a * a))) / dot(ldist, vec3(1.0, d, d2));\n");
+                    o.w("      float denom = dot(ldist, vec3(1.0, d, d2));\n");
+                    o.w("      float att = denom > 1e-6 ? max(0.0, dot(lcos, vec3(1.0, a, a * a))) / denom : 0.0;\n");
                 } else {
-                    o.w("      vec3 ldir = normalize(lpos);\n");
+                    o.w("      vec3 ldir = length(lpos) > 1e-4 ? normalize(lpos) : vec3(0.0, 0.0, 1.0);\n");
                     o.w("      float a = (dot(nrm, ldir) >= 0.0) ? max(0.0, dot(nrm, ldirv)) : 0.0;\n");
-                    o.w("      float att = max(0.0, dot(lcos, vec3(1.0, a, a * a))) / dot(ldist, vec3(1.0, a, a * a));\n");
+                    o.w("      float denom = dot(ldist, vec3(1.0, a, a * a));\n");
+                    o.w("      float att = denom > 1e-6 ? max(0.0, dot(lcos, vec3(1.0, a, a * a))) / denom : 0.0;\n");
                 }
                 const char* dif = diffuse == 0 ? "1.0" : diffuse == 1 ? "dot(ldir, nrm)" : "max(0.0, dot(ldir, nrm))";
                 o.w("      lit += att * %s * lcol.%s;\n", dif, sw);
@@ -453,7 +455,7 @@ const char* alphaTest(uint32_t func, const char* ref) {
 
 std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
     Out o;
-    o.w("#version 320 es\nprecision highp float;\nprecision highp int;\n");
+    o.w("#version 320 es\nprecision highp float;\nprecision highp int;\nprecision highp uint;\n");
     if (!useVertexTextures) {
         o.s += kFragmentUniformBlocks;
         o.w("#define ST(i) st[i]\n");
@@ -465,7 +467,7 @@ std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
     for (int i = 0; i < 8; i++) {
         o.w("layout(binding = %d) uniform sampler2D s_tex%d;\n", i, i);
     }
-    o.w("flat in uint v_pix;\n");
+    o.w("flat in highp uint v_pix;\n");
     o.w("in vec4 v_clr0;\nin vec4 v_clr1;\n");
     for (uint32_t i = 0; i < u.numTexGens; i++) o.w("in vec3 v_tex%u;\n", i);
     o.w("in float v_viewz;\nin float v_gxz;\nout vec4 o_color;\n");
