@@ -105,13 +105,13 @@ std::string genVertexShader(const ShaderUid& u, bool useVertexTextures) {
         o.w("#define FETCH_VTXREC(i) vtxRec[i]\n");
     } else {
         o.w("layout(binding = 8) uniform highp sampler2D s_rowTex;\n");
-        o.w("layout(binding = 9) uniform highp usampler2D s_recTex;\n");
+        o.w("layout(binding = 9) uniform highp sampler2D s_recTex;\n");
         o.w("layout(binding = 10) uniform highp sampler2D s_stateTex;\n");
-        o.w("layout(binding = 11) uniform highp usampler2D s_vtxRecTex;\n");
+        o.w("layout(binding = 11) uniform highp sampler2D s_vtxRecTex;\n");
         o.w("#define FETCH_ROW(i) texelFetch(s_rowTex, ivec2(int((i) & 2047u), int((i) >> 11u)), 0)\n");
-        o.w("#define FETCH_REC(i) texelFetch(s_recTex, ivec2(int((i) & 2047u), int((i) >> 11u)), 0).r\n");
+        o.w("#define FETCH_REC(i) uint(texelFetch(s_recTex, ivec2(int(((i) >> 2u) & 2047u), int((i) >> 13u)), 0)[int((i) & 3u)] + 0.5)\n");
         o.w("#define FETCH_ST(i) texelFetch(s_stateTex, ivec2(int((i) & 2047u), int((i) >> 11u)), 0)\n");
-        o.w("#define FETCH_VTXREC(i) texelFetch(s_vtxRecTex, ivec2(int((i) & 2047u), int((i) >> 11u)), 0).r\n");
+        o.w("#define FETCH_VTXREC(i) uint(texelFetch(s_vtxRecTex, ivec2(int(((i) >> 2u) & 2047u), int((i) >> 13u)), 0)[int((i) & 3u)] + 0.5)\n");
     }
     o.s += kEyeBlock;
     uint32_t f = u.vtxFlags;
@@ -457,8 +457,13 @@ const char* alphaTest(uint32_t func, const char* ref) {
 std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
     Out o;
     o.w("#version 320 es\nprecision highp float;\nprecision highp int;\n");
-    o.s += kFragmentUniformBlocks;
-    o.w("#define ST(i) st[i]\n");
+    if (!useVertexTextures) {
+        o.s += kFragmentUniformBlocks;
+        o.w("#define ST(i) st[i]\n");
+    } else {
+        o.w("layout(binding = 10) uniform highp sampler2D s_stateTex;\n");
+        o.w("#define ST(i) texelFetch(s_stateTex, ivec2(int((i) & 2047u), int((i) >> 11u)), 0)\n");
+    }
     o.s += kEyeBlock;
     for (int i = 0; i < 8; i++) {
         o.w("layout(binding = %d) uniform sampler2D s_tex%d;\n", i, i);

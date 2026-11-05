@@ -318,6 +318,8 @@ struct Renderer::Impl {
     GLuint rowTex = 0, recTex = 0, stateTex = 0, vtxRecTex = 0;
     GLuint vtfSampler = 0;
     std::unordered_set<GLuint> vtfInitPrograms;
+    std::vector<float> vtfRecFloats;
+    std::vector<float> vtfVtxFloats;
     void ensureVtfUniforms(GLuint prog) {
         if (vtfInitPrograms.insert(prog).second) {
             GLint loc;
@@ -506,7 +508,7 @@ void Renderer::Impl::init() {
 // ---------------------------------------------------------------------------
 // Programs: disk cache of linked binaries + background compilation
 // ---------------------------------------------------------------------------
-static const u32 kCacheMagic = 0x36434750;  // "PGC6"
+static const u32 kCacheMagic = 0x37434750;  // "PGC7"
 
 void Renderer::Impl::loadShaderCache() {
     if (sShaderCachePath.empty()) {
@@ -1581,17 +1583,25 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
         }
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)rowH, GL_RGBA, GL_FLOAT, p.rows.data());
 
-        // Upload recs texture (GL_R32UI, 1 uint per element)
-        size_t recPad = (kTexWidth - p.recs.size() % kTexWidth) % kTexWidth;
-        if (recPad) p.recs.resize(p.recs.size() + recPad, 0);
-        u32 recH = (u32)(p.recs.size() / kTexWidth);
+        // Upload recs texture (GL_RGBA32F, 4 uints packed as floats per texel)
+        size_t numTexels = (p.recs.size() + 3) / 4;
+        size_t recPadTexels = (kTexWidth - numTexels % kTexWidth) % kTexWidth;
+        size_t totalTexels = numTexels + recPadTexels;
+        u32 recH = (u32)(totalTexels / kTexWidth);
+        vtfRecFloats.resize(totalTexels * 4);
+        for (size_t i = 0; i < p.recs.size(); i++) {
+            vtfRecFloats[i] = (float)p.recs[i];
+        }
+        for (size_t i = p.recs.size(); i < totalTexels * 4; i++) {
+            vtfRecFloats[i] = 0.0f;
+        }
         glBindTexture(GL_TEXTURE_2D, fb.vtfTex[1]);
         if (recH > fb.vtfCap[1]) {
             fb.vtfCap[1] = recH + 4;
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[1], 0, GL_RED_INTEGER, GL_UNSIGNED_INT, nullptr);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[1], 0, GL_RGBA, GL_FLOAT, nullptr);
             setupVtfTex(fb.vtfTex[1]);
         }
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)recH, GL_RED_INTEGER, GL_UNSIGNED_INT, p.recs.data());
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)recH, GL_RGBA, GL_FLOAT, vtfRecFloats.data());
 
         // Upload states texture (GL_RGBA32F, 4 floats per state vec4)
         size_t statePad = (kTexWidth - (p.states.size() / 4) % kTexWidth) % kTexWidth;
@@ -1605,17 +1615,25 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
         }
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)stateH, GL_RGBA, GL_FLOAT, p.states.data());
 
-        // Upload vtxRec texture (GL_R32UI, 1 uint per ordinal)
-        size_t vtxPad = (kTexWidth - p.vtxRec.size() % kTexWidth) % kTexWidth;
-        if (vtxPad) p.vtxRec.resize(p.vtxRec.size() + vtxPad, 0);
-        u32 vtxH = (u32)(p.vtxRec.size() / kTexWidth);
+        // Upload vtxRec texture (GL_RGBA32F, 4 ordinals packed as floats per texel)
+        size_t vtxTexels = (p.vtxRec.size() + 3) / 4;
+        size_t vtxPadTexels = (kTexWidth - vtxTexels % kTexWidth) % kTexWidth;
+        size_t totalVtxTexels = vtxTexels + vtxPadTexels;
+        u32 vtxH = (u32)(totalVtxTexels / kTexWidth);
+        vtfVtxFloats.resize(totalVtxTexels * 4);
+        for (size_t i = 0; i < p.vtxRec.size(); i++) {
+            vtfVtxFloats[i] = (float)p.vtxRec[i];
+        }
+        for (size_t i = p.vtxRec.size(); i < totalVtxTexels * 4; i++) {
+            vtfVtxFloats[i] = 0.0f;
+        }
         glBindTexture(GL_TEXTURE_2D, fb.vtfTex[3]);
         if (vtxH > fb.vtfCap[3]) {
             fb.vtfCap[3] = vtxH + 4;
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[3], 0, GL_RED_INTEGER, GL_UNSIGNED_INT, nullptr);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[3], 0, GL_RGBA, GL_FLOAT, nullptr);
             setupVtfTex(fb.vtfTex[3]);
         }
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)vtxH, GL_RED_INTEGER, GL_UNSIGNED_INT, p.vtxRec.data());
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)vtxH, GL_RGBA, GL_FLOAT, vtfVtxFloats.data());
 
         rowTex = fb.vtfTex[0];
         recTex = fb.vtfTex[1];
@@ -2099,16 +2117,16 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
     } else {
         glActiveTexture(GL_TEXTURE8);
         glBindTexture(GL_TEXTURE_2D, rowTex);
-        glBindSampler(8, 0);
+        glBindSampler(8, vtfSampler);
         glActiveTexture(GL_TEXTURE9);
         glBindTexture(GL_TEXTURE_2D, recTex);
-        glBindSampler(9, 0);
+        glBindSampler(9, vtfSampler);
         glActiveTexture(GL_TEXTURE10);
         glBindTexture(GL_TEXTURE_2D, stateTex);
-        glBindSampler(10, 0);
+        glBindSampler(10, vtfSampler);
         glActiveTexture(GL_TEXTURE11);
         glBindTexture(GL_TEXTURE_2D, vtxRecTex);
-        glBindSampler(11, 0);
+        glBindSampler(11, vtfSampler);
         glActiveTexture(GL_TEXTURE0);
         gs.unit = 0;
     }
