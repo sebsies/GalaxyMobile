@@ -402,15 +402,16 @@ std::string konstAlpha(uint32_t sel) {
 // A regular TEV operation, (d + bias +- lerp(a, b, c)) * scale, with the
 // hardware's rounding: c runs 0..256, a scale above 1 is applied inside the
 // lerp, and a rounding bias precedes the division by 256 (as in Dolphin).
-std::string tevRegular(const char* comp, uint32_t bias, uint32_t sub, uint32_t scale, bool alpha) {
+std::string tevRegular(uint32_t bias, uint32_t sub, uint32_t scale, bool alpha) {
     static const char* biasStr[3] = {"", " + 128", " - 128"};
     static const char* scaleLeft[4] = {"", " << 1", " << 2", ""};
     static const char* scaleRight[4] = {"", "", "", " >> 1"};
     const char* lerpBias = ((scale == 3) == alpha) ? (sub ? " + 127" : " + 128") : "";
+    const char* p = alpha ? "a" : "c";
     char buf[512];
     snprintf(buf, sizeof(buf),
-             "(((tevin_d.%s%s)%s) %c (((((tevin_a.%s << 8) + (tevin_b.%s - tevin_a.%s) * (tevin_c.%s + (tevin_c.%s >> 7)))%s)%s) >> 8))%s", comp,
-             biasStr[bias], scaleLeft[scale], sub ? '-' : '+', comp, comp, comp, comp, comp, scaleLeft[scale], lerpBias, scaleRight[scale]);
+             "(((%s_d%s)%s) %c (((((%s_a << 8) + (%s_b - %s_a) * (%s_c + (%s_c >> 7)))%s)%s) >> 8))%s", p,
+             biasStr[bias], scaleLeft[scale], sub ? '-' : '+', p, p, p, p, p, scaleLeft[scale], lerpBias, scaleRight[scale]);
     return buf;
 }
 
@@ -448,6 +449,7 @@ std::string alphaTest(uint32_t func, const std::string& ref) {
 }  // namespace
 
 std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
+    (void)useVertexTextures;
     Out o;
     o.w("#version 320 es\nprecision highp float;\nprecision highp int;\n");
     o.s += kFragmentUniformBlocks;
@@ -491,8 +493,7 @@ std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
     o.w("  vec4 indMtx[6];\n  for (int i = 0; i < 6; i++) indMtx[i] = ST(v_pix + 20u + uint(i));\n");
     o.w("  ivec4 prev = ivec4(round(tevReg[0] * 255.0));\n  ivec4 c0 = ivec4(round(tevReg[1] * 255.0));\n");
     o.w("  ivec4 c1 = ivec4(round(tevReg[2] * 255.0));\n  ivec4 c2 = ivec4(round(tevReg[3] * 255.0));\n");
-    o.w("  ivec4 tex = ivec4(0);\n  ivec4 ras = ivec4(0);\n  ivec3 kc = ivec3(0);\n  int ka = 0;\n");
-    o.w("  ivec4 tevin_a, tevin_b, tevin_c, tevin_d;\n");
+    o.w("  ivec4 tex = ivec4(0);\n  ivec4 ras = ivec4(0);\n");
     o.w("  const ivec3 comp16 = ivec3(1, 256, 0);\n  const ivec3 comp24 = ivec3(1, 256, 65536);\n");
     if (u.zTex) {
         o.w("  ivec4 ztex = ivec4(0);\n");
@@ -520,7 +521,7 @@ std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
         uint32_t ksel = u.ksel[s / 2] >> ((s & 1) * 10);
         uint32_t kcsel = (ksel >> 4) & 31, kasel = (ksel >> 9) & 31;
         uint32_t rswap = ac & 3, tswap = (ac >> 2) & 3;
-        o.w("  // stage %u\n", s);
+        o.w("  // stage %u\n  {\n", s);
 
         // Texture coordinate (with optional indirect offset).
         std::string uv = "vec2(0.0)";
@@ -553,36 +554,43 @@ std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
         }
         const char* rasSrc = chan == 0 ? "v_clr0" : chan == 1 ? "v_clr1" : "vec4(0.0)";
         o.w("  ras = ivec4(round(clamp(%s, 0.0, 1.0)%s * 255.0));\n", rasSrc, swapString(u, rswap).c_str());
-        o.w("  kc = %s;\n  ka = %s;\n", konstColor(kcsel).c_str(), konstAlpha(kasel).c_str());
         // Inputs A, B and C are the low 8 bits of their source (a register's
         // sign and overflow bits are dropped); D keeps all 11 bits.
-        {
-            uint32_t ca = (cc >> 12) & 15, cb = (cc >> 8) & 15, cc2 = (cc >> 4) & 15, cd = cc & 15;
-            uint32_t aa = (ac >> 13) & 7, ab = (ac >> 10) & 7, ac2 = (ac >> 7) & 7, ad = (ac >> 4) & 7;
-            o.w("  tevin_a = ivec4(%s, %s) & 255;\n", kColorIn[ca], kAlphaIn[aa]);
-            o.w("  tevin_b = ivec4(%s, %s) & 255;\n", kColorIn[cb], kAlphaIn[ab]);
-            o.w("  tevin_c = ivec4(%s, %s) & 255;\n", kColorIn[cc2], kAlphaIn[ac2]);
-            o.w("  tevin_d = ivec4(%s, %s);\n", kColorIn[cd], kAlphaIn[ad]);
-        }
+        auto colorIn = [&](uint32_t sel) -> std::string {
+            return sel == 14 ? konstColor(kcsel) : std::string(kColorIn[sel]);
+        };
+        auto alphaIn = [&](uint32_t sel) -> std::string {
+            return sel == 6 ? konstAlpha(kasel) : std::string(kAlphaIn[sel]);
+        };
+        uint32_t ca = (cc >> 12) & 15, cb = (cc >> 8) & 15, cc2 = (cc >> 4) & 15, cd = cc & 15;
+        uint32_t aa = (ac >> 13) & 7, ab = (ac >> 10) & 7, ac2 = (ac >> 7) & 7, ad = (ac >> 4) & 7;
+        o.w("  ivec3 c_a = (%s) & ivec3(255);\n", colorIn(ca).c_str());
+        o.w("  ivec3 c_b = (%s) & ivec3(255);\n", colorIn(cb).c_str());
+        o.w("  ivec3 c_c = (%s) & ivec3(255);\n", colorIn(cc2).c_str());
+        o.w("  ivec3 c_d = %s;\n", colorIn(cd).c_str());
+        o.w("  int a_a = (%s) & 255;\n", alphaIn(aa).c_str());
+        o.w("  int a_b = (%s) & 255;\n", alphaIn(ab).c_str());
+        o.w("  int a_c = (%s) & 255;\n", alphaIn(ac2).c_str());
+        o.w("  int a_d = %s;\n", alphaIn(ad).c_str());
 
         // Color combiner.
         {
             uint32_t bias = (cc >> 16) & 3, sub = (cc >> 18) & 1, clampv = (cc >> 19) & 1, scale = (cc >> 20) & 3, dest = (cc >> 22) & 3;
             std::string expr;
             if (bias != 3) {
-                expr = tevRegular("rgb", bias, sub, scale, false);
+                expr = tevRegular(bias, sub, scale, false);
             } else {
                 static const char* cmp[8] = {
-                    "((tevin_a.r > tevin_b.r) ? tevin_c.rgb : ivec3(0))",
-                    "((tevin_a.r == tevin_b.r) ? tevin_c.rgb : ivec3(0))",
-                    "((idot(tevin_a.rgb, comp16) > idot(tevin_b.rgb, comp16)) ? tevin_c.rgb : ivec3(0))",
-                    "((idot(tevin_a.rgb, comp16) == idot(tevin_b.rgb, comp16)) ? tevin_c.rgb : ivec3(0))",
-                    "((idot(tevin_a.rgb, comp24) > idot(tevin_b.rgb, comp24)) ? tevin_c.rgb : ivec3(0))",
-                    "((idot(tevin_a.rgb, comp24) == idot(tevin_b.rgb, comp24)) ? tevin_c.rgb : ivec3(0))",
-                    "(max(sign(tevin_a.rgb - tevin_b.rgb), ivec3(0)) * tevin_c.rgb)",
-                    "((ivec3(1) - sign(abs(tevin_a.rgb - tevin_b.rgb))) * tevin_c.rgb)",
+                    "((c_a.r > c_b.r) ? c_c : ivec3(0))",
+                    "((c_a.r == c_b.r) ? c_c : ivec3(0))",
+                    "((idot(c_a, comp16) > idot(c_b, comp16)) ? c_c : ivec3(0))",
+                    "((idot(c_a, comp16) == idot(c_b, comp16)) ? c_c : ivec3(0))",
+                    "((idot(c_a, comp24) > idot(c_b, comp24)) ? c_c : ivec3(0))",
+                    "((idot(c_a, comp24) == idot(c_b, comp24)) ? c_c : ivec3(0))",
+                    "(max(sign(c_a - c_b), ivec3(0)) * c_c)",
+                    "((ivec3(1) - sign(abs(c_a - c_b))) * c_c)",
                 };
-                expr = std::string("tevin_d.rgb + ") + cmp[(scale << 1) | sub];
+                expr = std::string("c_d + ") + cmp[(scale << 1) | sub];
             }
             o.w("  %s.rgb = clamp(%s, ivec3(%s), ivec3(%s));\n", kDest[dest], expr.c_str(), clampv ? "0" : "-1024", clampv ? "255" : "1023");
             if (s == u.numTevStages - 1) {
@@ -595,29 +603,30 @@ std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
             uint32_t bias = (ac >> 16) & 3, sub = (ac >> 18) & 1, clampv = (ac >> 19) & 1, scale = (ac >> 20) & 3, dest = (ac >> 22) & 3;
             std::string expr;
             if (bias != 3) {
-                expr = tevRegular("a", bias, sub, scale, true);
+                expr = tevRegular(bias, sub, scale, true);
             } else {
                 static const char* cmp[8] = {
-                    "((tevin_a.r > tevin_b.r) ? tevin_c.a : 0)",
-                    "((tevin_a.r == tevin_b.r) ? tevin_c.a : 0)",
-                    "((idot(tevin_a.rgb, comp16) > idot(tevin_b.rgb, comp16)) ? tevin_c.a : 0)",
-                    "((idot(tevin_a.rgb, comp16) == idot(tevin_b.rgb, comp16)) ? tevin_c.a : 0)",
-                    "((idot(tevin_a.rgb, comp24) > idot(tevin_b.rgb, comp24)) ? tevin_c.a : 0)",
-                    "((idot(tevin_a.rgb, comp24) == idot(tevin_b.rgb, comp24)) ? tevin_c.a : 0)",
-                    "((tevin_a.a > tevin_b.a) ? tevin_c.a : 0)",
-                    "((tevin_a.a == tevin_b.a) ? tevin_c.a : 0)",
+                    "((c_a.r > c_b.r) ? a_c : 0)",
+                    "((c_a.r == c_b.r) ? a_c : 0)",
+                    "((idot(c_a, comp16) > idot(c_b, comp16)) ? a_c : 0)",
+                    "((idot(c_a, comp16) == idot(c_b, comp16)) ? a_c : 0)",
+                    "((idot(c_a, comp24) > idot(c_b, comp24)) ? a_c : 0)",
+                    "((idot(c_a, comp24) == idot(c_b, comp24)) ? a_c : 0)",
+                    "((a_a > a_b) ? a_c : 0)",
+                    "((a_a == a_b) ? a_c : 0)",
                 };
-                expr = std::string("tevin_d.a + ") + cmp[(scale << 1) | sub];
+                expr = std::string("a_d + ") + cmp[(scale << 1) | sub];
             }
             o.w("  %s.a = clamp(%s, %s, %s);\n", kDest[dest], expr.c_str(), clampv ? "0" : "-1024", clampv ? "255" : "1023");
             if (s == u.numTevStages - 1) {
                 lastAlphaDest = dest;
             }
         }
+        o.w("  }\n");
     }
     // The TEV's output is 8 bits wide: the upper bits are dropped, not
     // clamped (Mario's eyelids rely on it for their alpha test).
-    o.w("  ivec4 outi = ivec4(%s.rgb, %s.a) & 255;\n", kDest[lastColorDest], kDest[lastAlphaDest]);
+    o.w("  ivec4 outi;\n  outi.rgb = %s.rgb & ivec3(255);\n  outi.a = %s.a & 255;\n", kDest[lastColorDest], kDest[lastAlphaDest]);
     o.w("  vec4 outc = vec4(outi) / 255.0;\n");
     // Alpha test (on the 8-bit value).
     {
