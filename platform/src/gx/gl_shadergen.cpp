@@ -105,13 +105,13 @@ std::string genVertexShader(const ShaderUid& u, bool useVertexTextures) {
         o.w("#define FETCH_VTXREC(i) vtxRec[i]\n");
     } else {
         o.w("layout(binding = 8) uniform highp sampler2D s_rowTex;\n");
-        o.w("layout(binding = 9) uniform highp sampler2D s_recTex;\n");
+        o.w("layout(binding = 9) uniform highp usampler2D s_recTex;\n");
         o.w("layout(binding = 10) uniform highp sampler2D s_stateTex;\n");
-        o.w("layout(binding = 11) uniform highp sampler2D s_vtxRecTex;\n");
+        o.w("layout(binding = 11) uniform highp usampler2D s_vtxRecTex;\n");
         o.w("#define FETCH_ROW(i) texelFetch(s_rowTex, ivec2(int((i) & 2047u), int((i) >> 11u)), 0)\n");
-        o.w("#define FETCH_REC(i) uint(texelFetch(s_recTex, ivec2(int(((i) >> 2u) & 2047u), int((i) >> 13u)), 0)[int((i) & 3u)] + 0.5)\n");
+        o.w("#define FETCH_REC(i) texelFetch(s_recTex, ivec2(int(((i) >> 2u) & 2047u), int((i) >> 13u)), 0)[int((i) & 3u)]\n");
         o.w("#define FETCH_ST(i) texelFetch(s_stateTex, ivec2(int((i) & 2047u), int((i) >> 11u)), 0)\n");
-        o.w("#define FETCH_VTXREC(i) uint(texelFetch(s_vtxRecTex, ivec2(int(((i) >> 2u) & 2047u), int((i) >> 13u)), 0)[int((i) & 3u)] + 0.5)\n");
+        o.w("#define FETCH_VTXREC(i) texelFetch(s_vtxRecTex, ivec2(int(((i) >> 2u) & 2047u), int((i) >> 13u)), 0)[int((i) & 3u)]\n");
     }
     o.s += kEyeBlock;
     uint32_t f = u.vtxFlags;
@@ -251,16 +251,18 @@ std::string genVertexShader(const ShaderUid& u, bool useVertexTextures) {
                 if (!atten) {
                     o.w("      vec3 dlt = lpos - pos; float d = length(dlt); vec3 ldir = d > 0.0001 ? dlt / d : vec3(0.0, 0.0, 1.0); float att = 1.0;\n");
                 } else if (spot) {
-                    o.w("      vec3 dlt = lpos - pos; float d2 = dot(dlt, dlt); float d = sqrt(max(0.0, d2)); vec3 ldir = d > 0.0001 ? dlt / d : vec3(0.0, 0.0, 1.0);\n");
+                    o.w("      vec3 dlt = lpos - pos; float d = length(dlt); vec3 ldir = d > 0.0001 ? dlt / d : vec3(0.0, 0.0, 1.0);\n");
                     o.w("      float a = max(0.0, dot(ldir, ldirv));\n");
-                    o.w("      float denom = dot(ldist, vec3(1.0, d, d2));\n");
-                    o.w("      float att = denom > 0.000001 ? clamp(dot(lcos, vec3(1.0, a, a * a)) / denom, 0.0, 1.0) : 0.0;\n");
+                    o.w("      float cosAttn = lcos.x + ((lcos.y != 0.0 || lcos.z != 0.0) ? a * (lcos.y + a * lcos.z) : 0.0);\n");
+                    o.w("      float denom = ldist.x + ((ldist.y != 0.0 || ldist.z != 0.0) ? d * (ldist.y + d * ldist.z) : 0.0);\n");
+                    o.w("      float att = denom > 0.000001 ? clamp(cosAttn / denom, 0.0, 1.0) : 0.0;\n");
                 } else {
                     o.w("      vec3 dlt = lpos - pos; float d = length(dlt); vec3 ldir = d > 0.0001 ? dlt / d : nrm;\n");
                     o.w("      float a = (dot(nrm, ldir) >= 0.0) ? max(0.0, dot(nrm, ldirv)) : 0.0;\n");
-                    o.w("      vec3 distAttn = diffuse == 0 ? ldist : (length(ldist) > 0.0001 ? normalize(ldist) : vec3(1.0, 0.0, 0.0));\n");
-                    o.w("      float denom = dot(distAttn, vec3(1.0, a, a * a));\n");
-                    o.w("      float att = denom > 0.000001 ? clamp(dot(lcos, vec3(1.0, a, a * a)) / denom, 0.0, 1.0) : 0.0;\n");
+                    o.w("      vec3 distAttn = (%u == 0) ? ldist : (length(ldist) > 0.0001 ? normalize(ldist) : vec3(1.0, 0.0, 0.0));\n", diffuse);
+                    o.w("      float cosAttn = lcos.x + ((lcos.y != 0.0 || lcos.z != 0.0) ? a * (lcos.y + a * lcos.z) : 0.0);\n");
+                    o.w("      float denom = distAttn.x + ((distAttn.y != 0.0 || distAttn.z != 0.0) ? a * (distAttn.y + a * distAttn.z) : 0.0);\n");
+                    o.w("      float att = denom > 0.000001 ? clamp(cosAttn / denom, 0.0, 1.0) : 0.0;\n");
                 }
                 const char* dif = diffuse == 0 ? "1.0" : diffuse == 1 ? "dot(ldir, nrm)" : "max(0.0, dot(ldir, nrm))";
                 o.w("      lit += att * %s * lcol.%s;\n", dif, sw);

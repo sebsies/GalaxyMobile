@@ -8,6 +8,7 @@
 #include "Game/Util/ObjUtil.hpp"
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 const GXLightID cLightDataIDs[8] = {GX_LIGHT0, GX_LIGHT1, GX_LIGHT2, GX_LIGHT3, GX_LIGHT4, GX_LIGHT5, GX_LIGHT6, GX_LIGHT7};
 
@@ -162,8 +163,10 @@ void LightFunction::blendActorLightInfo(ActorLightInfo* pResult, const ActorLigh
 namespace {
     void loadLightDiffuse(GXColor color, const TVec3f& rPos, GXLightID lightID) NO_INLINE {
         GXLightObj lightObj;
+        memset(&lightObj, 0, sizeof(lightObj));
 
         GXInitLightPos(&lightObj, rPos.x, rPos.y, rPos.z);
+        GXInitLightDir(&lightObj, 0.0f, 0.0f, -1.0f);
         GXInitLightAttn(&lightObj, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f);
 
         GXColor new_color(color);
@@ -235,6 +238,7 @@ void LightFunction::loadLightInfoCoin(const LightInfoCoin* pInfo) {
     ::loadLightInfoDiffuse(pInfo->base, GX_LIGHT0);
     TVec3f v7(0.0f, 0.0f, -1.0f);
     GXLightObj obj;
+    memset(&obj, 0, sizeof(obj));
     f32 v = pInfo->_18;
     GXInitLightColor(&obj, GXColor(pInfo->_14));
     GXInitSpecularDir(&obj, v7.x, v7.y, v7.z);
@@ -246,7 +250,9 @@ void LightFunction::loadPointLightInfo(const PointLightInfo* pInfo) {
     TVec3f v7(pInfo->mPos);
     MR::getCameraViewMtx().mult(v7, v7);
     GXLightObj obj;
+    memset(&obj, 0, sizeof(obj));
     GXInitLightPos(&obj, v7.x, v7.y, v7.z);
+    GXInitLightDir(&obj, 0.0f, 0.0f, -1.0f);
     GXInitLightDistAttn(&obj, pInfo->mRefDistance, pInfo->mRefBrightness, pInfo->mDistAttnFn);
     GXInitLightSpot(&obj, 0.0, GX_SP_OFF);
     GXInitLightColor(&obj, pInfo->mColor);
@@ -258,7 +264,10 @@ void LightFunction::loadAllLightWhite() {
 
     for (u32 i = 0; i < ARRAY_SIZE(cLightDataIDs); i++) {
         GXLightObj lightObj;
+        memset(&lightObj, 0, sizeof(lightObj));
         GXInitLightPos(&lightObj, 0.0f, 0.0f, 0.0f);
+        GXInitLightDir(&lightObj, 0.0f, 0.0f, -1.0f);
+        GXInitLightAttn(&lightObj, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f);
 
         GXColor color = {255, 255, 255, 255};
         GXInitLightColor(&lightObj, color);

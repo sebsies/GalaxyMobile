@@ -318,8 +318,6 @@ struct Renderer::Impl {
     GLuint rowTex = 0, recTex = 0, stateTex = 0, vtxRecTex = 0;
     GLuint vtfSampler = 0;
     std::unordered_set<GLuint> vtfInitPrograms;
-    std::vector<float> vtfRecFloats;
-    std::vector<float> vtfVtxFloats;
     void ensureVtfUniforms(GLuint prog) {
         if (vtfInitPrograms.insert(prog).second) {
             GLint loc;
@@ -465,7 +463,10 @@ void Renderer::Impl::init() {
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 2048, 1, 0, GL_RGBA, GL_FLOAT, nullptr);
+                GLenum ifmt = (i == 1 || i == 3) ? GL_RGBA32UI : GL_RGBA32F;
+                GLenum fmt = (i == 1 || i == 3) ? GL_RGBA_INTEGER : GL_RGBA;
+                GLenum type = (i == 1 || i == 3) ? GL_UNSIGNED_INT : GL_FLOAT;
+                glTexImage2D(GL_TEXTURE_2D, 0, ifmt, 2048, 1, 0, fmt, type, nullptr);
                 fb.vtfCap[i] = 1;
             }
         }
@@ -515,7 +516,7 @@ void Renderer::Impl::init() {
 // ---------------------------------------------------------------------------
 // Programs: disk cache of linked binaries + background compilation
 // ---------------------------------------------------------------------------
-static const u32 kCacheMagic = 0x3A434750;  // "PGCA"
+static const u32 kCacheMagic = 0x3A43475D;  // "PGCL"
 
 void Renderer::Impl::loadShaderCache() {
     if (sShaderCachePath.empty()) {
@@ -847,16 +848,33 @@ void Renderer::Impl::evictCopies() {
 // Uniform blocks from the register shadows
 // ---------------------------------------------------------------------------
 void Builder::fillLights(LightState& b) {
+    auto sanitizeFloat = [](float v, float fallback) -> float {
+        if (!isfinite(v)) return fallback;
+        if (v > 1e18f) return 1e18f;
+        if (v < -1e18f) return -1e18f;
+        return v;
+    };
     for (int l = 0; l < 8; l++) {
         const float* m = xfMem + 0x600 + l * 16;
         u32 col;
         memcpy(&col, &m[3], 4);
         rgba8ToVec(col, b.lights[l][0]);
         for (int k = 0; k < 3; k++) {
-            b.lights[l][1][k] = m[4 + k];
-            b.lights[l][2][k] = m[7 + k];
-            b.lights[l][3][k] = m[10 + k];
-            b.lights[l][4][k] = m[13 + k];
+            b.lights[l][1][k] = sanitizeFloat(m[4 + k], k == 0 ? 1.0f : 0.0f);
+            b.lights[l][2][k] = sanitizeFloat(m[7 + k], k == 0 ? 1.0f : 0.0f);
+            b.lights[l][3][k] = sanitizeFloat(m[10 + k], 0.0f);
+            b.lights[l][4][k] = sanitizeFloat(m[13 + k], k == 2 ? 1.0f : 0.0f);
+        }
+        // When cosine attenuation is off (a1 == 0 && a2 == 0), ldirv is unused;
+        // normalize or zero-guard it so uninitialized light directions cannot overflow.
+        if (b.lights[l][1][1] == 0.0f && b.lights[l][1][2] == 0.0f) {
+            float dx = b.lights[l][4][0], dy = b.lights[l][4][1], dz = b.lights[l][4][2];
+            float d2 = dx * dx + dy * dy + dz * dz;
+            if (!(d2 >= 0.0f && d2 <= 100.0f)) {
+                b.lights[l][4][0] = 0.0f;
+                b.lights[l][4][1] = 0.0f;
+                b.lights[l][4][2] = 1.0f;
+            }
         }
         b.lights[l][1][3] = b.lights[l][2][3] = b.lights[l][3][3] = b.lights[l][4][3] = 0.0f;
     }
@@ -1583,6 +1601,7 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
         recBuf = fb.buf[4];
     } else {
         const u32 kTexWidth = 2048;
+        glActiveTexture(GL_TEXTURE0);
         auto setupVtfTex = [](GLuint tex) {
             glBindTexture(GL_TEXTURE_2D, tex);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -1605,25 +1624,21 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
         }
         if (rowH > 0) glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)rowH, GL_RGBA, GL_FLOAT, p.rows.data());
 
-        // Upload recs texture (GL_RGBA32F, 4 uints packed as floats per texel)
+        // Upload recs texture (GL_RGBA32UI, 4 uints per texel)
         size_t numTexels = (p.recs.size() + 3) / 4;
         size_t recPadTexels = (kTexWidth - numTexels % kTexWidth) % kTexWidth;
         size_t totalTexels = numTexels + recPadTexels;
         u32 recH = (u32)(totalTexels / kTexWidth);
-        vtfRecFloats.resize(totalTexels * 4);
-        for (size_t i = 0; i < p.recs.size(); i++) {
-            vtfRecFloats[i] = (float)p.recs[i];
-        }
-        for (size_t i = p.recs.size(); i < totalTexels * 4; i++) {
-            vtfRecFloats[i] = 0.0f;
+        if (totalTexels * 4 > p.recs.size()) {
+            p.recs.resize(totalTexels * 4, 0u);
         }
         glBindTexture(GL_TEXTURE_2D, fb.vtfTex[1]);
         if (recH > fb.vtfCap[1]) {
             fb.vtfCap[1] = recH + 4;
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[1], 0, GL_RGBA, GL_FLOAT, nullptr);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32UI, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[1], 0, GL_RGBA_INTEGER, GL_UNSIGNED_INT, nullptr);
             setupVtfTex(fb.vtfTex[1]);
         }
-        if (recH > 0) glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)recH, GL_RGBA, GL_FLOAT, vtfRecFloats.data());
+        if (recH > 0) glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)recH, GL_RGBA_INTEGER, GL_UNSIGNED_INT, p.recs.data());
 
         // Upload states texture (GL_RGBA32F, 4 floats per state vec4)
         size_t statePad = (kTexWidth - (p.states.size() / 4) % kTexWidth) % kTexWidth;
@@ -1637,25 +1652,21 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
         }
         if (stateH > 0) glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)stateH, GL_RGBA, GL_FLOAT, p.states.data());
 
-        // Upload vtxRec texture (GL_RGBA32F, 4 ordinals packed as floats per texel)
+        // Upload vtxRec texture (GL_RGBA32UI, 4 ordinals per texel)
         size_t vtxTexels = (p.vtxRec.size() + 3) / 4;
         size_t vtxPadTexels = (kTexWidth - vtxTexels % kTexWidth) % kTexWidth;
         size_t totalVtxTexels = vtxTexels + vtxPadTexels;
         u32 vtxH = (u32)(totalVtxTexels / kTexWidth);
-        vtfVtxFloats.resize(totalVtxTexels * 4);
-        for (size_t i = 0; i < p.vtxRec.size(); i++) {
-            vtfVtxFloats[i] = (float)p.vtxRec[i];
-        }
-        for (size_t i = p.vtxRec.size(); i < totalVtxTexels * 4; i++) {
-            vtfVtxFloats[i] = 0.0f;
+        if (totalVtxTexels * 4 > p.vtxRec.size()) {
+            p.vtxRec.resize(totalVtxTexels * 4, 0u);
         }
         glBindTexture(GL_TEXTURE_2D, fb.vtfTex[3]);
         if (vtxH > fb.vtfCap[3]) {
             fb.vtfCap[3] = vtxH + 4;
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[3], 0, GL_RGBA, GL_FLOAT, nullptr);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32UI, (GLsizei)kTexWidth, (GLsizei)fb.vtfCap[3], 0, GL_RGBA_INTEGER, GL_UNSIGNED_INT, nullptr);
             setupVtfTex(fb.vtfTex[3]);
         }
-        if (vtxH > 0) glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)vtxH, GL_RGBA, GL_FLOAT, vtfVtxFloats.data());
+        if (vtxH > 0) glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, (GLsizei)kTexWidth, (GLsizei)vtxH, GL_RGBA_INTEGER, GL_UNSIGNED_INT, p.vtxRec.data());
 
         rowTex = fb.vtfTex[0];
         recTex = fb.vtfTex[1];
@@ -2202,51 +2213,11 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
                 snapshotTaken = true;
                 continue;
             }
-            if (it.marker == MARK_PLAYER_BEGIN) {
-                // Dynamic actor pass (skeletal models):
-                // Invalidate state cache and explicitly enforce depth test & write states
-                // to prevent any state leakage from previous static/transparent passes.
-                gs.forget();
-                lastVao = ~0u;
-                lastProgram = ~0u;
-                glEnable(GL_DEPTH_TEST);
-                glDepthFunc(GL_LEQUAL);
-                glDepthMask(GL_TRUE);
-                glBindBufferBase(GL_UNIFORM_BUFFER, 4, eyeUbo);
-                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, stateBuf);
-                if (!sUseVertexTextures) {
-                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, rowBuf);
-                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, recBuf);
-                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, recVbo);
-                }
-                continue;
-            }
-            if (it.marker == MARK_PLAYER_END) {
-                gs.forget();
-                lastVao = ~0u;
-                lastProgram = ~0u;
-                continue;
-            }
             if (it.marker == MARK_HUD_BEGIN) {
                 inHudSection = true;
                 if (hudMode == HudMode::Target) {
                     cur = hud;
                     glBindFramebuffer(GL_FRAMEBUFFER, cur->fbo);
-                }
-                // 2D UI / HUD pass:
-                // Invalidate state cache and explicitly reset depth test/mask so 2D UI
-                // does not leak depth writes or fail depth test against 3D scene depth.
-                gs.forget();
-                lastVao = ~0u;
-                lastProgram = ~0u;
-                glDisable(GL_DEPTH_TEST);
-                glDepthMask(GL_FALSE);
-                glBindBufferBase(GL_UNIFORM_BUFFER, 4, eyeUbo);
-                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, stateBuf);
-                if (!sUseVertexTextures) {
-                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, rowBuf);
-                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, recBuf);
-                    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, recVbo);
                 }
                 continue;
             }
@@ -2256,10 +2227,6 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
                     cur = &efb;
                     glBindFramebuffer(GL_FRAMEBUFFER, cur->fbo);
                 }
-                gs.forget();
-                lastVao = ~0u;
-                lastProgram = ~0u;
-                glDepthMask(GL_TRUE);
                 continue;
             }
             continue;

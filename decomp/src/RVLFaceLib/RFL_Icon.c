@@ -97,6 +97,8 @@ void RFLiMakeIcon(void* buf, RFLiCharInfo* info, RFLExpression expression, const
     cameraUp = (Vec){0.0f, 1.0f, 0.0f};
 
     C_MTXLookAt(viewMtx, &cameraPos, &cameraUp, &target);
+    GXInitLightAttn(&light, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f);
+    GXInitLightDir(&light, 0.0f, 0.0f, -1.0f);
     GXInitLightColor(&light, (GXColor){255, 255, 255, 255});
 
     pos = (Vec){1600.0f, 1500.0f, 6000.0f};
