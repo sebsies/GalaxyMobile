@@ -70,12 +70,21 @@ bool SaveDataHandler::requestVerifyAfterLoadGameDataFile() {
 
     SaveDataFileHeader* pFileHeader = reinterpret_cast< SaveDataFileHeader* >(_14);
 
-    if (_C != OSRoundUp32B(pFileHeader->mFileSize)) {
+    if (_C < pFileHeader->mFileSize) {
         return false;
     }
 
-    if (pFileHeader->mCheckSum != MR::calcCheckSum(_14 + sizeof(u32), pFileHeader->mFileSize - sizeof(u32))) {
+    u32 checkSumLE = MR::calcCheckSum(_14 + sizeof(u32), pFileHeader->mFileSize - sizeof(u32));
+    u32 checkSumBE = MR::calcCheckSumBE(_14 + sizeof(u32), pFileHeader->mFileSize - sizeof(u32));
+
+    if (pFileHeader->mCheckSum != checkSumLE && pFileHeader->mCheckSum != checkSumBE) {
+#if defined(TARGET_PC)
+        // Recover user data instead of deleting the save file
+        copySaveDataEachFile(_18, _14);
+        return true;
+#else
         return false;
+#endif
     }
 
     copySaveDataEachFile(_18, _14);
@@ -335,8 +344,16 @@ void SaveDataHandler::copySaveDataEachFile(u8* pFileDst, const u8* pFileSrc) {
     SaveDataFileAccessor srcFileAccessor = SaveDataFileAccessor(const_cast< u8* >(pFileSrc));
     SaveDataFileAccessor dstFileAccessor = SaveDataFileAccessor(pFileDst);
 
-    for (int i = 0; i < srcFileAccessor.getHeader()->mUserFileInfoNum; i++) {
-        const char* pFileName = srcFileAccessor.getFileInfo(i)->mName;
+    int fileNum = srcFileAccessor.getHeader()->mUserFileInfoNum;
+    if (fileNum > 24) {
+        fileNum = 24;
+    }
+
+    for (int i = 0; i < fileNum; i++) {
+        const SaveDataFileInfo* pFileInfo = srcFileAccessor.getFileInfo(i);
+        if (!pFileInfo) continue;
+        const char* pFileName = pFileInfo->mName;
+        if (!pFileName || pFileName[0] == '\0') continue;
 
         SaveDataUserFileInfo srcUserFileInfo;
         srcFileAccessor.makeUserFileInfo(&srcUserFileInfo, pFileName);
@@ -344,13 +361,12 @@ void SaveDataHandler::copySaveDataEachFile(u8* pFileDst, const u8* pFileSrc) {
         SaveDataUserFileInfo dstUserFileInfo;
         dstFileAccessor.makeUserFileInfo(&dstUserFileInfo, pFileName);
 
-        if (dstUserFileInfo.mData != nullptr) {
-            int deltaSize = dstUserFileInfo.mDataSize - srcUserFileInfo.mDataSize;
+        if (dstUserFileInfo.mData != nullptr && srcUserFileInfo.mData != nullptr) {
+            u32 copySize = (dstUserFileInfo.mDataSize < srcUserFileInfo.mDataSize) ? dstUserFileInfo.mDataSize : srcUserFileInfo.mDataSize;
+            MR::copyMemory(dstUserFileInfo.mData, srcUserFileInfo.mData, copySize);
 
-            MR::copyMemory(dstUserFileInfo.mData, srcUserFileInfo.mData, dstUserFileInfo.mDataSize);
-
-            if (deltaSize > 0) {
-                MR::fillMemory(dstUserFileInfo.mData + dstUserFileInfo.mDataSize, 0, deltaSize);
+            if (dstUserFileInfo.mDataSize > copySize) {
+                MR::fillMemory(reinterpret_cast< u8* >(dstUserFileInfo.mData) + copySize, 0, dstUserFileInfo.mDataSize - copySize);
             }
         }
     }

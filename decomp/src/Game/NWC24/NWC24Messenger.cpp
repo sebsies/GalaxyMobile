@@ -55,7 +55,7 @@ void NWC24Messenger::send(const char* pTaskName, const wchar_t* pMessage, const 
         return;
     }
 
-    NWC24MessengerSub::SendTask* pTask;
+    NWC24MessengerSub::SendTask* pTask = nullptr;
 
     if (isBG) {
         int i;
@@ -66,7 +66,9 @@ void NWC24Messenger::send(const char* pTaskName, const wchar_t* pMessage, const 
             }
         }
 
-        pTask = &mBackgroundTaskArray[i];
+        if (i < BACKGROUND_TASK_NUM) {
+            pTask = &mBackgroundTaskArray[i];
+        }
     } else {
         pTask = mForegroundTask;
     }

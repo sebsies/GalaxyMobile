@@ -78,6 +78,11 @@ extern "C" int port_mem_init(void) {
     mapAt(PORT_MEM1_UNCACHED, PORT_MEM1_SIZE, fd1);
     close(fd1);
 
+    // Map the gap between MEM1 and MEM2 (0x88000000..0x90000000 and uncached 0xC8000000..0xD0000000)
+    // to prevent crashes if code or hardware addresses access this range (e.g. 0x8c856e80).
+    mapAt(PORT_MEM1_BASE + PORT_MEM1_SIZE, PORT_MEM2_BASE - (PORT_MEM1_BASE + PORT_MEM1_SIZE), -1);
+    mapAt(PORT_MEM1_UNCACHED + PORT_MEM1_SIZE, PORT_MEM2_UNCACHED - (PORT_MEM1_UNCACHED + PORT_MEM1_SIZE), -1);
+
     int fd2 = makeSharedFd("wii-mem2", PORT_MEM2_SIZE);
     mapAt(PORT_MEM2_BASE, PORT_MEM2_SIZE, fd2);
     mapAt(PORT_MEM2_UNCACHED, PORT_MEM2_SIZE, fd2);
@@ -137,9 +142,8 @@ extern "C" void* port_low_alloc(size_t size) {
 
 extern "C" int port_is_game_memory(const void* p) {
     uintptr_t a = (uintptr_t)p;
-    return (a >= PORT_MEM1_BASE && a < PORT_MEM1_BASE + PORT_MEM1_SIZE) || (a >= PORT_MEM2_BASE && a < PORT_MEM2_BASE + PORT_MEM2_SIZE) ||
-           (a >= PORT_MEM1_UNCACHED && a < PORT_MEM1_UNCACHED + PORT_MEM1_SIZE) ||
-           (a >= PORT_MEM2_UNCACHED && a < PORT_MEM2_UNCACHED + PORT_MEM2_SIZE);
+    return (a >= PORT_MEM1_BASE && a < PORT_MEM2_BASE + PORT_MEM2_SIZE) ||
+           (a >= PORT_MEM1_UNCACHED && a < PORT_MEM2_UNCACHED + PORT_MEM2_SIZE);
 }
 
 extern "C" void* port_phys_to_host(uint32_t phys) {

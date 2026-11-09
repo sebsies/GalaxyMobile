@@ -16,11 +16,20 @@ static Backend* sBackend;
 void setBackend(Backend* b) { sBackend = b; }
 Backend* backend() { return sBackend; }
 
+static const u8 sZeroBuffer[256] = {0};
+
 const u8* memPtr(u32 addr) {
     if (addr >= 0x80000000u) {
-        return (const u8*)(uintptr_t)addr;  // cached/uncached virtual
+        if (port_is_game_memory((const void*)(uintptr_t)addr)) {
+            return (const u8*)(uintptr_t)addr;  // cached/uncached virtual
+        }
+        return sZeroBuffer;
     }
-    return (const u8*)port_phys_to_host(addr);
+    void* host = port_phys_to_host(addr);
+    if (port_is_game_memory(host)) {
+        return (const u8*)host;
+    }
+    return sZeroBuffer;
 }
 
 // ---------------------------------------------------------------------------

@@ -55,7 +55,7 @@ namespace MR {
     }
 
     bool tryTalkNearPlayer(TalkMessageCtrl* pCtrl) {
-        if (MR::isTimeKeepDemoActive()) {
+        if (!pCtrl || MR::isTimeKeepDemoActive()) {
             return false;
         }
 
@@ -71,7 +71,7 @@ namespace MR {
     }
 
     bool tryTalkNearPlayerAtEnd(TalkMessageCtrl* pCtrl) {
-        if (MR::isTimeKeepDemoActive()) {
+        if (!pCtrl || MR::isTimeKeepDemoActive()) {
             return false;
         }
 
@@ -88,7 +88,7 @@ namespace MR {
     }
 
     bool tryTalkForce(TalkMessageCtrl* pCtrl) {
-        if (MR::isTimeKeepDemoActive()) {
+        if (!pCtrl || MR::isTimeKeepDemoActive()) {
             return false;
         }
 
@@ -102,7 +102,7 @@ namespace MR {
     }
 
     bool tryTalkForceAtEnd(TalkMessageCtrl* pCtrl) {
-        if (MR::isTimeKeepDemoActive()) {
+        if (!pCtrl || MR::isTimeKeepDemoActive()) {
             return false;
         }
 
@@ -118,7 +118,7 @@ namespace MR {
     }
 
     bool tryTalkForceWithoutDemo(TalkMessageCtrl* pCtrl) {
-        if (MR::isTimeKeepDemoActive()) {
+        if (!pCtrl || MR::isTimeKeepDemoActive()) {
             return false;
         }
 
@@ -132,7 +132,7 @@ namespace MR {
     }
 
     bool tryTalkForceWithoutDemoMarioPuppetable(TalkMessageCtrl* pCtrl) {
-        if (MR::isTimeKeepDemoActive()) {
+        if (!pCtrl || MR::isTimeKeepDemoActive()) {
             return false;
         }
 
@@ -148,7 +148,7 @@ namespace MR {
     }
 
     bool tryTalkForceWithoutDemoAtEnd(TalkMessageCtrl* pCtrl) {
-        if (MR::isTimeKeepDemoActive()) {
+        if (!pCtrl || MR::isTimeKeepDemoActive()) {
             return false;
         }
 
@@ -164,7 +164,7 @@ namespace MR {
     }
 
     bool tryTalkForceWithoutDemoMarioPuppetableAtEnd(TalkMessageCtrl* pCtrl) {
-        if (MR::isTimeKeepDemoActive()) {
+        if (!pCtrl || MR::isTimeKeepDemoActive()) {
             return false;
         }
 
@@ -180,6 +180,10 @@ namespace MR {
     }
 
     bool tryTalkTimeKeepDemo(TalkMessageCtrl* pCtrl) {
+        if (!pCtrl) {
+            return false;
+        }
+
         bool ret = false;
 
         if (pCtrl->requestTalkForce()) {
@@ -192,6 +196,10 @@ namespace MR {
     }
 
     bool tryTalkTimeKeepDemoMarioPuppetable(TalkMessageCtrl* pCtrl) {
+        if (!pCtrl) {
+            return false;
+        }
+
         bool ret = false;
 
         if (pCtrl->requestTalkForce()) {

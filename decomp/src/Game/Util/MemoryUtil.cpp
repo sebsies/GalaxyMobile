@@ -212,6 +212,22 @@ namespace MR {
         return (sum << 16) | invSum;
     }
 
+    u32 calcCheckSumBE(const void* pPtr, u32 size) {
+        u16 sum = 0;
+        u16 invSum = 0;
+
+        const u8* p = static_cast< const u8* >(pPtr);
+        u32 checkSize = size / sizeof(u16);
+
+        for (u32 i = 0; i < checkSize; i++, p += 2) {
+            u16 val = static_cast< u16 >((p[0] << 8) | p[1]);
+            sum += val;
+            invSum += static_cast< u16 >(~val);
+        }
+
+        return (static_cast< u32 >(sum) << 16) | invSum;
+    }
+
     void* allocFromWPadHeap(u32 size) {
         return SingletonHolder< HeapMemoryWatcher >::get()->mWPadHeap->alloc(size, 0);
     }

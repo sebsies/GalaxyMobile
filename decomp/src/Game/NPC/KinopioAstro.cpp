@@ -91,12 +91,24 @@ void KinopioAstro::createLetterIcon(const JMapInfoIter& rIter) {
 }
 
 bool KinopioAstro::sendLetter() {
+    if (!_198) {
+        return true;
+    }
+
     if (!_197) {
-        u32 size;
+        u32 size = 0;
         const char* pImage = MR::isPlayerLuigi() ? "AllCompleteImage2.bin" : "AllCompleteImage1.bin";
 
-        size = _19C->mArchive->getExpandedResSize(_19C->mArchive->getResource(pImage));
-        _198->send(reinterpret_cast< u8* >(_19C->mFileInfoTable->getRes(pImage)), size, false);
+        if (_19C && _19C->mArchive && _19C->mFileInfoTable) {
+            void* res = _19C->mArchive->getResource(pImage);
+            if (res) {
+                size = _19C->mArchive->getExpandedResSize(res);
+            }
+            u8* pData = reinterpret_cast< u8* >(_19C->mFileInfoTable->getRes(pImage));
+            if (pData && size > 0) {
+                _198->send(pData, size, false);
+            }
+        }
         _197 = true;
     }
 
@@ -105,6 +117,9 @@ bool KinopioAstro::sendLetter() {
 }
 
 bool KinopioAstro::branchFunc(u32) {
+    if (!_198) {
+        return true;
+    }
     return !_198->isError();
 }
 
@@ -241,7 +256,7 @@ void KinopioAstro::init(const JMapInfoIter& rIter) {
 }
 
 void KinopioAstro::control() {
-    if (isDispLetterIcon() && MR::calcCameraDistanceZ(mPosition) < ::sMessangerTalkDistance && MR::tryTalkNearPlayer(mLetterIconTalkCtrl) &&
+    if (mLetterIconTalkCtrl != nullptr && isDispLetterIcon() && MR::calcCameraDistanceZ(mPosition) < ::sMessangerTalkDistance && MR::tryTalkNearPlayer(mLetterIconTalkCtrl) &&
         MR::calcDistanceToPlayer(this) <= ::sGotMailSePlayAreaRadius) {
         MR::startLevelSound(this, "SE_SM_LV_KINOMES_GOT_MAIL");
     }

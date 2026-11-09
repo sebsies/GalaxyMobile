@@ -62,6 +62,7 @@ namespace MR {
     /// @param size The number of bytes to process.
     /// @return The computed checksum.
     u32 calcCheckSum(const void* pPtr, u32 size);
+    u32 calcCheckSumBE(const void* pPtr, u32 size);
 
     void* allocFromWPadHeap(u32 size);
     u8 freeFromWPadHeap(void* pPtr);

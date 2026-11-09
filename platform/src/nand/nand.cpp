@@ -81,6 +81,32 @@ s32 NANDPrivateCreate(const char* path, u8 perm, u8 attr) { return NANDCreate(pa
 
 s32 NANDOpen(const char* path, NANDFileInfo* info, u8 mode) {
     std::string hp = hostPath(path);
+
+    if ((mode == NAND_ACCESS_READ || mode == NAND_ACCESS_RW) && strstr(path, "GameData.bin")) {
+        struct stat st;
+        if (stat(hp.c_str(), &st) != 0 || st.st_size < 0x140) {
+            std::string bak = hp + ".bak";
+            struct stat stBak;
+            if (stat(bak.c_str(), &stBak) == 0 && stBak.st_size >= 0x140) {
+                // Restore from backup
+                FILE* src = fopen(bak.c_str(), "rb");
+                if (src) {
+                    makeDirs(hp);
+                    FILE* dst = fopen(hp.c_str(), "wb");
+                    if (dst) {
+                        char buf[4096];
+                        size_t r;
+                        while ((r = fread(buf, 1, sizeof(buf), src)) > 0) {
+                            fwrite(buf, 1, r, dst);
+                        }
+                        fclose(dst);
+                    }
+                    fclose(src);
+                }
+            }
+        }
+    }
+
     int flags = O_CLOEXEC;
     switch (mode) {
     case NAND_ACCESS_READ:
@@ -109,7 +135,29 @@ s32 NANDPrivateOpen(const char* path, NANDFileInfo* info, u8 mode) { return NAND
 s32 NANDClose(NANDFileInfo* info) {
     if (info->fileDescriptor >= 0) {
         if (info->accType != NAND_ACCESS_READ) {
+            off_t pos = lseek(info->fileDescriptor, 0, SEEK_CUR);
+            if (pos > 0) {
+                ftruncate(info->fileDescriptor, pos);
+            }
             fsync(info->fileDescriptor);
+
+            if (strstr(info->origPath, "GameData.bin")) {
+                std::string hp = hostPath(info->origPath);
+                std::string bak = hp + ".bak";
+                FILE* src = fopen(hp.c_str(), "rb");
+                if (src) {
+                    FILE* dst = fopen(bak.c_str(), "wb");
+                    if (dst) {
+                        char buf[4096];
+                        size_t r;
+                        while ((r = fread(buf, 1, sizeof(buf), src)) > 0) {
+                            fwrite(buf, 1, r, dst);
+                        }
+                        fclose(dst);
+                    }
+                    fclose(src);
+                }
+            }
         }
         close(info->fileDescriptor);
         info->fileDescriptor = -1;
@@ -118,13 +166,41 @@ s32 NANDClose(NANDFileInfo* info) {
 }
 
 s32 NANDRead(NANDFileInfo* info, void* buf, u32 length) {
-    ssize_t n = read(info->fileDescriptor, buf, length);
-    return n < 0 ? errnoToNand(errno) : (s32)n;
+    u8* ptr = (u8*)buf;
+    u32 total = 0;
+    while (total < length) {
+        ssize_t n = read(info->fileDescriptor, ptr + total, length - total);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return errnoToNand(errno);
+        }
+        if (n == 0) {
+            break;
+        }
+        total += (u32)n;
+    }
+    return (s32)total;
 }
 
 s32 NANDWrite(NANDFileInfo* info, const void* buf, u32 length) {
-    ssize_t n = write(info->fileDescriptor, buf, length);
-    return n < 0 ? errnoToNand(errno) : (s32)n;
+    const u8* ptr = (const u8*)buf;
+    u32 total = 0;
+    while (total < length) {
+        ssize_t n = write(info->fileDescriptor, ptr + total, length - total);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return errnoToNand(errno);
+        }
+        if (n == 0) {
+            break;
+        }
+        total += (u32)n;
+    }
+    return (s32)total;
 }
 
 s32 NANDSeek(NANDFileInfo* info, s32 offset, s32 whence) {
