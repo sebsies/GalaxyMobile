@@ -142,8 +142,8 @@ extern "C" void* port_low_alloc(size_t size) {
 
 extern "C" int port_is_game_memory(const void* p) {
     uintptr_t a = (uintptr_t)p;
-    return (a >= PORT_MEM1_BASE && a < PORT_MEM2_BASE + PORT_MEM2_SIZE) ||
-           (a >= PORT_MEM1_UNCACHED && a < PORT_MEM2_UNCACHED + PORT_MEM2_SIZE);
+    return (a >= 0x80000000u && a < 0xB0000000u) ||
+           (a >= 0xC0000000u && a < 0xE0004000u);
 }
 
 extern "C" void* port_phys_to_host(uint32_t phys) {

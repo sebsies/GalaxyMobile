@@ -796,7 +796,13 @@ extern "C" int port_is_game_thread(void) { return tlsSelf != nullptr; }
 extern "C" int port_use_game_heap(void) { return tlsSelf != nullptr && tlsHostAllocDepth == 0; }
 extern "C" void port_host_alloc_scope_enter(void) { tlsHostAllocDepth++; }
 extern "C" void port_host_alloc_scope_leave(void) { tlsHostAllocDepth--; }
-extern "C" int port_is_game_heap_ptr(const void* p) { return port_is_game_memory(p); }
+extern "C" int port_is_game_heap_ptr(const void* p) {
+    uintptr_t a = (uintptr_t)p;
+    return (a >= PORT_MEM1_BASE && a < PORT_MEM1_BASE + PORT_MEM1_SIZE) ||
+           (a >= PORT_MEM2_BASE && a < PORT_MEM2_BASE + PORT_MEM2_SIZE) ||
+           (a >= PORT_MEM1_UNCACHED && a < PORT_MEM1_UNCACHED + PORT_MEM1_SIZE) ||
+           (a >= PORT_MEM2_UNCACHED && a < PORT_MEM2_UNCACHED + PORT_MEM2_SIZE);
+}
 extern "C" void* port_host_alloc(size_t size, int align) {
     if (align < 16) {
         align = 16;

@@ -403,15 +403,17 @@ std::string konstAlpha(uint32_t sel) {
 // hardware's rounding: c runs 0..256, a scale above 1 is applied inside the
 // lerp, and a rounding bias precedes the division by 256 (as in Dolphin).
 std::string tevRegular(uint32_t bias, uint32_t sub, uint32_t scale, bool alpha) {
-    static const char* biasStr[3] = {"", " + 128", " - 128"};
+    static const char* biasStrAlpha[3] = {"", " + 128", " - 128"};
+    static const char* biasStrColor[3] = {"", " + ivec3(128)", " - ivec3(128)"};
     static const char* scaleLeft[4] = {"", " << 1", " << 2", ""};
     static const char* scaleRight[4] = {"", "", "", " >> 1"};
-    const char* lerpBias = ((scale == 3) == alpha) ? (sub ? " + 127" : " + 128") : "";
+    const char* biasOp = alpha ? biasStrAlpha[bias] : biasStrColor[bias];
+    const char* lerpBias = alpha ? (sub ? " + 127" : " + 128") : (sub ? " + ivec3(127)" : " + ivec3(128)");
     const char* p = alpha ? "a" : "c";
     char buf[512];
     snprintf(buf, sizeof(buf),
              "(((%s_d%s)%s) %c (((((%s_a << 8) + (%s_b - %s_a) * (%s_c + (%s_c >> 7)))%s)%s) >> 8))%s", p,
-             biasStr[bias], scaleLeft[scale], sub ? '-' : '+', p, p, p, p, p, scaleLeft[scale], lerpBias, scaleRight[scale]);
+             biasOp, scaleLeft[scale], sub ? '-' : '+', p, p, p, p, p, scaleLeft[scale], lerpBias, scaleRight[scale]);
     return buf;
 }
 
