@@ -162,6 +162,7 @@ void port_open_installer(void);
 void port_open_url(const char* url);
 int port_is_plus_installed(void);
 void port_install_plus(void);
+void port_share_log(void);
 void port_set_game_language(int index);
 int port_get_game_language(void);
 int port_take_language_change_request(int* outLangIndex);

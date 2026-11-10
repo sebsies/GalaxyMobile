@@ -704,7 +704,7 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
         } else if (mSettingsTab == 1) {
             totalContentH = 432.0f * uiScale;
         } else if (mSettingsTab == 2) {
-            totalContentH = mPlusEdition ? (1044.0f * uiScale) : (694.0f * uiScale);
+            totalContentH = mPlusEdition ? (1176.0f * uiScale) : (826.0f * uiScale);
         } else {
             totalContentH = 780.0f * uiScale;
         }
@@ -1107,6 +1107,11 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                                 port_open_url("https://ko-fi.com/sebsies");
                                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                             }
+                            // Mod 12: Debug & Diagnostics Card (1040..1156)
+                            else if (contentRelY >= 1040.0f * uiScale && contentRelY <= 1156.0f * uiScale) {
+                                port_share_log();
+                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            }
                         } else {
                             // Vanilla System Tab items
                             // Open Installer Button (Card 1: 80..126)
@@ -1139,6 +1144,11 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                             // Support & Donations Card (564..680)
                             else if (contentRelY >= 564.0f * uiScale && contentRelY <= 680.0f * uiScale) {
                                 port_open_url("https://ko-fi.com/sebsies");
+                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            }
+                            // Debug & Diagnostics Card (690..806)
+                            else if (contentRelY >= 690.0f * uiScale && contentRelY <= 806.0f * uiScale) {
+                                port_share_log();
                                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                             }
                         }
@@ -2079,7 +2089,7 @@ void UIOverlay::render(int screenW, int screenH) {
         } else if (mSettingsTab == 1) {
             totalContentH = 432.0f * uiScale;
         } else if (mSettingsTab == 2) {
-            totalContentH = mPlusEdition ? (1044.0f * uiScale) : (694.0f * uiScale);
+            totalContentH = mPlusEdition ? (1176.0f * uiScale) : (826.0f * uiScale);
         } else {
             totalContentH = 780.0f * uiScale;
         }
@@ -2644,6 +2654,20 @@ void UIOverlay::render(int screenW, int screenH) {
                         drawRoundRect(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + btnH, 16.0f * uiScale, rgba(0.92f, 0.28f, 0.30f, 0.95f));
                         drawText("DONATE ON KO-FI (ko-fi.com/sebsies)", (cX0 + cX1) * 0.5f, btnY + 28.0f * uiScale, 0.33f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
                     });
+
+                    // Card 6: Debug & Diagnostics
+                    renderCardBlock(1040.0f * uiScale, 116.0f * uiScale, [&](float y) {
+                        drawCard(cX0, y, cX1, y + 116.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+
+                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
+                        drawText("DEBUG & DIAGNOSTICS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+                        drawText("Export engine log & device info for troubleshooting", cX0 + 14.0f * uiScale, y + 38.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+
+                        float btnY = y + 54.0f * uiScale;
+                        float btnH = 46.0f * uiScale;
+                        drawRoundRect(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + btnH, 16.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 0.95f));
+                        drawText("SHARE DEBUG LOG", (cX0 + cX1) * 0.5f, btnY + 28.0f * uiScale, 0.33f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                    });
                 } else {
                     // Vanilla Edition System Tab
                     // Card 1: Game Storage & Cooker Setup
@@ -2725,6 +2749,20 @@ void UIOverlay::render(int screenW, int screenH) {
                         float btnH = 46.0f * uiScale;
                         drawRoundRect(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + btnH, 16.0f * uiScale, rgba(0.92f, 0.28f, 0.30f, 0.95f));
                         drawText("DONATE ON KO-FI (ko-fi.com/sebsies)", (cX0 + cX1) * 0.5f, btnY + 28.0f * uiScale, 0.33f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                    });
+
+                    // Card 6: Debug & Diagnostics
+                    renderCardBlock(690.0f * uiScale, 116.0f * uiScale, [&](float y) {
+                        drawCard(cX0, y, cX1, y + 116.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+
+                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
+                        drawText("DEBUG & DIAGNOSTICS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+                        drawText("Export engine log & device info for troubleshooting", cX0 + 14.0f * uiScale, y + 38.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+
+                        float btnY = y + 54.0f * uiScale;
+                        float btnH = 46.0f * uiScale;
+                        drawRoundRect(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + btnH, 16.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 0.95f));
+                        drawText("SHARE DEBUG LOG", (cX0 + cX1) * 0.5f, btnY + 28.0f * uiScale, 0.33f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
                     });
                 }
             } else if (mSettingsTab == 3) {

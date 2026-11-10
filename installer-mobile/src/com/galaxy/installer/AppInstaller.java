@@ -173,4 +173,99 @@ public class AppInstaller {
             }
         }).start();
     }
+
+    public static void shareLogFile(Activity activity) {
+        if (activity == null) return;
+        new Thread(() -> {
+            try {
+                File extFiles = activity.getExternalFilesDir(null);
+                File intFiles = activity.getFilesDir();
+                File extCache = activity.getExternalCacheDir();
+                File cacheDir = activity.getCacheDir();
+
+                File[] candidates = new File[] {
+                    extFiles != null ? new File(extFiles, "petari_mobile_log.txt") : null,
+                    intFiles != null ? new File(intFiles, "petari_mobile_log.txt") : null,
+                    new File("/sdcard/GalaxyData", "petari_mobile_log.txt"),
+                    new File("/sdcard/Android/data/" + activity.getPackageName() + "/files", "petari_mobile_log.txt"),
+                    extFiles != null ? new File(extFiles, "petari_mobile_log.txt.prev") : null,
+                    intFiles != null ? new File(intFiles, "petari_mobile_log.txt.prev") : null
+                };
+
+                File sourceLog = null;
+                for (File c : candidates) {
+                    if (c != null && c.exists() && c.length() > 0) {
+                        sourceLog = c;
+                        break;
+                    }
+                }
+
+                File targetDir = extCache != null ? extCache : cacheDir;
+                if (!targetDir.exists()) {
+                    targetDir.mkdirs();
+                }
+                File targetLog = new File(targetDir, "petari_mobile_log.txt");
+
+                if (sourceLog != null) {
+                    try (InputStream in = new FileInputStream(sourceLog);
+                         OutputStream out = new FileOutputStream(targetLog)) {
+                        byte[] buf = new byte[65536];
+                        int len;
+                        while ((len = in.read(buf)) > 0) {
+                            out.write(buf, 0, len);
+                        }
+                    }
+                }
+
+                if (!targetLog.exists() || targetLog.length() < 64) {
+                    try {
+                        Process process = Runtime.getRuntime().exec(new String[]{"logcat", "-d", "-v", "time"});
+                        try (InputStream in = process.getInputStream();
+                             OutputStream out = new FileOutputStream(targetLog, targetLog.exists())) {
+                            byte[] buf = new byte[65536];
+                            int len;
+                            while ((len = in.read(buf)) > 0) {
+                                out.write(buf, 0, len);
+                            }
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to run logcat fallback", e);
+                    }
+                }
+
+                if (!targetLog.exists() || targetLog.length() == 0) {
+                    try (FileOutputStream fos = new FileOutputStream(targetLog)) {
+                        String info = "Device: " + Build.MANUFACTURER + " " + Build.MODEL + "\n"
+                                    + "Android: " + Build.VERSION.RELEASE + " (SDK " + Build.VERSION.SDK_INT + ")\n"
+                                    + "Package: " + activity.getPackageName() + "\n"
+                                    + "No log file found on disk.\n";
+                        fos.write(info.getBytes("UTF-8"));
+                    }
+                }
+
+                activity.runOnUiThread(() -> {
+                    try {
+                        Uri logUri = Uri.parse("content://" + activity.getPackageName() + ".fileprovider/" + targetLog.getName());
+                        Intent shareIntent = new Intent(Intent.ACTION_SEND);
+                        shareIntent.setType("text/plain");
+                        shareIntent.putExtra(Intent.EXTRA_STREAM, logUri);
+                        shareIntent.putExtra(Intent.EXTRA_SUBJECT, "GalaxyMobile Debug Log (" + Build.MODEL + ")");
+                        shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+
+                        Intent chooser = Intent.createChooser(shareIntent, "Share GalaxyMobile Debug Log");
+                        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        activity.startActivity(chooser);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to share log file", e);
+                        Toast.makeText(activity, "Failed to share log: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    }
+                });
+            } catch (Exception e) {
+                Log.e(TAG, "Error preparing log file for sharing", e);
+                activity.runOnUiThread(() -> 
+                    Toast.makeText(activity, "Error preparing log: " + e.getMessage(), Toast.LENGTH_SHORT).show()
+                );
+            }
+        }).start();
+    }
 }

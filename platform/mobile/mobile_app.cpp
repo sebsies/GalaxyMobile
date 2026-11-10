@@ -702,7 +702,15 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
         port_set_player_character(mobile_ui::get().settings().playerCharacter);
     }
 
-    port_log_file((ext + "/petari_mobile_log.txt").c_str());
+    mkdir(ext.c_str(), 0770);
+    std::string logPath = ext + "/petari_mobile_log.txt";
+    FILE* testLogF = fopen(logPath.c_str(), "a");
+    if (testLogF) {
+        fclose(testLogF);
+        port_log_file(logPath.c_str());
+    } else {
+        port_log_file((internalPath + "/petari_mobile_log.txt").c_str());
+    }
     gpu::setShaderCachePath((std::string(app->activity->internalDataPath) + "/shaders.bin").c_str());
 
     // Search for game data files
@@ -1274,6 +1282,53 @@ void port_install_plus(void) {
         if (installMethod) {
             env->CallStaticVoidMethod(appInstallerClass, installMethod, activity->clazz);
             LOGI("port_install_plus: called AppInstaller.installOrOpenPlus");
+        }
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+        env->DeleteLocalRef(appInstallerClass);
+    }
+
+    env->DeleteLocalRef(clsName);
+    env->DeleteLocalRef(clClass);
+    env->DeleteLocalRef(classLoader);
+    env->DeleteLocalRef(actClass);
+
+    if (attached) {
+        activity->vm->DetachCurrentThread();
+    }
+}
+
+extern "C" void port_share_log(void) {
+    if (!gMobile.android || !gMobile.android->activity) return;
+    ANativeActivity* activity = gMobile.android->activity;
+    if (!activity->vm || !activity->clazz) return;
+    JNIEnv* env = nullptr;
+    bool attached = false;
+    if (activity->vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
+        if (activity->vm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+            attached = true;
+        }
+    }
+    if (!env) return;
+
+    jclass actClass = env->GetObjectClass(activity->clazz);
+    jmethodID getClassLoaderMethod = env->GetMethodID(actClass, "getClassLoader", "()Ljava/lang/ClassLoader;");
+    jobject classLoader = env->CallObjectMethod(activity->clazz, getClassLoaderMethod);
+
+    jclass clClass = env->FindClass("java/lang/ClassLoader");
+    jmethodID loadClassMethod = env->GetMethodID(clClass, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+    jstring clsName = env->NewStringUTF("com.galaxy.installer.AppInstaller");
+    jclass appInstallerClass = (jclass)env->CallObjectMethod(classLoader, loadClassMethod, clsName);
+
+    if (env->ExceptionCheck() || !appInstallerClass) {
+        LOGE("port_share_log: failed to load AppInstaller class");
+        env->ExceptionClear();
+    } else {
+        jmethodID shareMethod = env->GetStaticMethodID(appInstallerClass, "shareLogFile", "(Landroid/app/Activity;)V");
+        if (shareMethod) {
+            env->CallStaticVoidMethod(appInstallerClass, shareMethod, activity->clazz);
+            LOGI("port_share_log: called AppInstaller.shareLogFile");
         }
         if (env->ExceptionCheck()) {
             env->ExceptionClear();

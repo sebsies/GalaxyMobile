@@ -20,13 +20,19 @@ public class GalaxyFileProvider extends ContentProvider {
         String name = uri.getLastPathSegment();
         if (name == null) return null;
         if (getContext() != null) {
-            File f = new File(getContext().getExternalCacheDir(), name);
+            File f = new File(getContext().getCacheDir(), name);
             if (f.exists()) return f;
-            f = new File(getContext().getCacheDir(), name);
+            f = new File(getContext().getExternalCacheDir(), name);
+            if (f.exists()) return f;
+            f = new File(getContext().getFilesDir(), name);
+            if (f.exists()) return f;
+            f = new File(getContext().getExternalFilesDir(null), name);
             if (f.exists()) return f;
         }
         File dl = new File("/sdcard/Download", name);
         if (dl.exists()) return dl;
+        File gData = new File("/sdcard/GalaxyData", name);
+        if (gData.exists()) return gData;
         return null;
     }
 
@@ -41,6 +47,10 @@ public class GalaxyFileProvider extends ContentProvider {
 
     @Override
     public String getType(Uri uri) {
+        String name = uri.getLastPathSegment();
+        if (name != null && name.endsWith(".txt")) {
+            return "text/plain";
+        }
         return "application/vnd.android.package-archive";
     }
 
