@@ -432,7 +432,9 @@ void main() {
     else if (u_mode == 10) o = vec4(c.b, c.b, c.b, c.g); // GB8
     else {                                               // Z copies
         float z = texture(s_depth, v_uv).r;
-        o = vec4(z, fract(z * 256.0), fract(z * 65536.0), z);
+        uint zi = uint(clamp(floor(z * 16777215.0 + 0.5), 0.0, 16777215.0));
+        float hi = float((zi >> 16u) & 255u) / 255.0;
+        o = vec4(hi, float((zi >> 8u) & 255u) / 255.0, float(zi & 255u) / 255.0, hi);
     }
 }
 )";
@@ -516,7 +518,7 @@ void Renderer::Impl::init() {
 // ---------------------------------------------------------------------------
 // Programs: disk cache of linked binaries + background compilation
 // ---------------------------------------------------------------------------
-static const u32 kCacheMagic = 0x3A43475Eu;  // "PGCM"
+static const u32 kCacheMagic = 0x3A43475Fu;  // "PGCM"
 
 void Renderer::Impl::loadShaderCache() {
     if (sShaderCachePath.empty()) {
@@ -735,6 +737,7 @@ GLuint Renderer::Impl::vao(u32 flags, FrameBuffers& fb) {
     GLuint v;
     glGenVertexArrays(1, &v);
     glBindVertexArray(v);
+    glBindBuffer(GL_ARRAY_BUFFER, fb.buf[0]);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, fb.buf[2]);
     u32 off = 0;
     auto attr = [&](GLuint loc, GLint size, GLenum type, bool normalized, bool integer, u32 bytes) {
@@ -850,8 +853,8 @@ void Renderer::Impl::evictCopies() {
 void Builder::fillLights(LightState& b) {
     auto sanitizeFloat = [](float v, float fallback) -> float {
         if (!isfinite(v)) return fallback;
-        if (v > 1e18f) return 1e18f;
-        if (v < -1e18f) return -1e18f;
+        if (v > 1e25f) return 1e25f;
+        if (v < -1e25f) return -1e25f;
         return v;
     };
     for (int l = 0; l < 8; l++) {
@@ -867,14 +870,20 @@ void Builder::fillLights(LightState& b) {
         }
         // When cosine attenuation is off (a1 == 0 && a2 == 0), ldirv is unused;
         // normalize or zero-guard it so uninitialized light directions cannot overflow.
-        if (b.lights[l][1][1] == 0.0f && b.lights[l][1][2] == 0.0f) {
-            float dx = b.lights[l][4][0], dy = b.lights[l][4][1], dz = b.lights[l][4][2];
-            float d2 = dx * dx + dy * dy + dz * dz;
-            if (!(d2 >= 0.0f && d2 <= 100.0f)) {
-                b.lights[l][4][0] = 0.0f;
-                b.lights[l][4][1] = 0.0f;
-                b.lights[l][4][2] = 1.0f;
-            }
+        double px = b.lights[l][3][0], py = b.lights[l][3][1], pz = b.lights[l][3][2];
+        double plen = sqrt(px * px + py * py + pz * pz);
+        if (plen > 1e10) {
+            double s = 1e9 / plen;
+            b.lights[l][3][0] = float(px * s);
+            b.lights[l][3][1] = float(py * s);
+            b.lights[l][3][2] = float(pz * s);
+        }
+        float dx = b.lights[l][4][0], dy = b.lights[l][4][1], dz = b.lights[l][4][2];
+        float d2 = dx * dx + dy * dy + dz * dz;
+        if (!(d2 >= 0.0f && d2 <= 100.0f)) {
+            b.lights[l][4][0] = 0.0f;
+            b.lights[l][4][1] = 0.0f;
+            b.lights[l][4][2] = 1.0f;
         }
         b.lights[l][1][3] = b.lights[l][2][3] = b.lights[l][3][3] = b.lights[l][4][3] = 0.0f;
     }
@@ -1563,7 +1572,7 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
     FrameBuffers& fb = frameBufs[frameBufNext];
     frameBufNext = (frameBufNext + 1) % kNumFrameBufs;
     if (fb.fence) {
-        GLenum waitRes = glClientWaitSync(fb.fence, 0, 100000000ull);
+        GLenum waitRes = glClientWaitSync(fb.fence, GL_SYNC_FLUSH_COMMANDS_BIT, 100000000ull);
         if (waitRes == GL_WAIT_FAILED) {
             port_log("gl: wait for buffer fence failed");
         }
@@ -2372,6 +2381,12 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
         glBindFramebuffer(GL_FRAMEBUFFER, hud->fbo);
         glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, depthOnly);
     }
+    const GLuint maxSamplerUnit = sUseVertexTextures ? 12u : 8u;
+    for (GLuint u = 0; u < maxSamplerUnit; ++u) {
+        glBindSampler(u, 0);
+    }
+    glActiveTexture(GL_TEXTURE0);
+    glBlendEquation(GL_FUNC_ADD);
     if (curFb.fence) {
         glDeleteSync(curFb.fence);
     }

@@ -886,7 +886,7 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
 
             eglSwapBuffers(a.display, a.surface);
         } else {
-            if (!r.hasFrame()) {
+            if (!r.hasFrame() || (mobile_ui::get().isSettingsOpen() && mobile_ui::get().needsRedraw())) {
                 if (mobile_ui::get().needsRedraw()) {
                     glBindFramebuffer(GL_FRAMEBUFFER, 0);
                     glViewport(0, 0, a.screenWidth, a.screenHeight);
@@ -899,6 +899,9 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
                     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
                     glClear(GL_COLOR_BUFFER_BIT);
 
+                    if (r.hasFrame() && a.targetReady) {
+                        presentGameImage(a);
+                    }
                     glViewport(0, 0, a.screenWidth, a.screenHeight);
                     mobile_ui::get().render(a.screenWidth, a.screenHeight);
                     eglSwapBuffers(a.display, a.surface);

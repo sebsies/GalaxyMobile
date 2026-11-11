@@ -59,6 +59,7 @@ class J3DLightObj {
 public:
     J3DLightObj() {
         mInfo = j3dDefaultLightInfo;
+        mLightObj = {};
     }
 
     void load(u32) const;

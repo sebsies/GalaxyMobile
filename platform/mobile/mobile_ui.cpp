@@ -540,6 +540,8 @@ bool UIOverlay::init() {
     glGenTextures(1, &mFontTex);
     glBindTexture(GL_TEXTURE_2D, mFontTex);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, face.width, face.height, 0, GL_RED, GL_UNSIGNED_BYTE, coverage.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -3029,10 +3031,14 @@ void UIOverlay::render(int screenW, int screenH) {
     // Single GLES Draw Call
     // -------------------------------------------------------------
     glEnable(GL_BLEND);
+    glBlendEquation(GL_FUNC_ADD);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_STENCIL_TEST);
     glDisable(GL_CULL_FACE);
     glDisable(GL_SCISSOR_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
     glUseProgram(mProg);
 
@@ -3048,6 +3054,7 @@ void UIOverlay::render(int screenW, int screenH) {
     GLint uFontLoc = glGetUniformLocation(mProg, "uFontTex");
     glUniform1i(uFontLoc, 0);
     glActiveTexture(GL_TEXTURE0);
+    glBindSampler(0, 0);
     glBindTexture(GL_TEXTURE_2D, mFontTex);
 
     glBindVertexArray(mVao);
@@ -3057,6 +3064,7 @@ void UIOverlay::render(int screenW, int screenH) {
     glDrawArrays(GL_TRIANGLES, 0, (GLsizei)verts.size());
 
     glBindVertexArray(0);
+    glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
 }
 

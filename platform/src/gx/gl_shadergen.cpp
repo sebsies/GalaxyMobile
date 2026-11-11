@@ -248,20 +248,26 @@ std::string genVertexShader(const ShaderUid& u, bool useVertexTextures) {
                 // characters' rim light, LightFunction::loadActorLightInfo):
                 // in VR it belongs on the eye, or rims land mid-face.
                 o.w("      if (vrDraw && lpos == vec3(0.0)) lpos = vrEyePos.xyz;\n");
+                const char* fallbackDir = (atten && !spot) ? "nrm" : "vec3(0.0, 0.0, 1.0)";
+                o.w("      vec3 dlt = lpos - pos;\n");
+                o.w("      float mc = max(max(abs(dlt.x), abs(dlt.y)), abs(dlt.z));\n");
+                o.w("      float d = 0.0; vec3 ldir = %s;\n", fallbackDir);
+                o.w("      if (mc > 0.00005) {\n");
+                o.w("        vec3 sdir = dlt / mc; float slen = length(sdir);\n");
+                o.w("        d = mc * slen;\n");
+                o.w("        if (d > 0.0001) ldir = sdir / slen;\n");
+                o.w("      }\n");
                 if (!atten) {
-                    o.w("      vec3 dlt = lpos - pos; float d = length(dlt); vec3 ldir = d > 0.0001 ? dlt / d : vec3(0.0, 0.0, 1.0); float att = 1.0;\n");
+                    o.w("      float att = 1.0;\n");
                 } else if (spot) {
-                    o.w("      vec3 dlt = lpos - pos; float d = length(dlt); vec3 ldir = d > 0.0001 ? dlt / d : vec3(0.0, 0.0, 1.0);\n");
                     o.w("      float a = max(0.0, dot(ldir, ldirv));\n");
                     o.w("      float cosAttn = lcos.x + ((lcos.y != 0.0 || lcos.z != 0.0) ? a * (lcos.y + a * lcos.z) : 0.0);\n");
                     o.w("      float denom = ldist.x + ((ldist.y != 0.0 || ldist.z != 0.0) ? d * (ldist.y + d * ldist.z) : 0.0);\n");
                     o.w("      float att = denom > 0.000001 ? clamp(cosAttn / denom, 0.0, 1.0) : 0.0;\n");
                 } else {
-                    o.w("      vec3 dlt = lpos - pos; float d = length(dlt); vec3 ldir = d > 0.0001 ? dlt / d : nrm;\n");
                     o.w("      float a = (dot(nrm, ldir) >= 0.0) ? max(0.0, dot(nrm, ldirv)) : 0.0;\n");
-                    o.w("      vec3 distAttn = (%u == 0) ? ldist : (length(ldist) > 0.0001 ? normalize(ldist) : vec3(1.0, 0.0, 0.0));\n", diffuse);
                     o.w("      float cosAttn = lcos.x + ((lcos.y != 0.0 || lcos.z != 0.0) ? a * (lcos.y + a * lcos.z) : 0.0);\n");
-                    o.w("      float denom = distAttn.x + ((distAttn.y != 0.0 || distAttn.z != 0.0) ? a * (distAttn.y + a * distAttn.z) : 0.0);\n");
+                    o.w("      float denom = ldist.x + ((ldist.y != 0.0 || ldist.z != 0.0) ? a * (ldist.y + a * ldist.z) : 0.0);\n");
                     o.w("      float att = denom > 0.000001 ? clamp(cosAttn / denom, 0.0, 1.0) : 0.0;\n");
                 }
                 const char* dif = diffuse == 0 ? "1.0" : diffuse == 1 ? "dot(ldir, nrm)" : "max(0.0, dot(ldir, nrm))";
@@ -286,7 +292,13 @@ std::string genVertexShader(const ShaderUid& u, bool useVertexTextures) {
         }
         if (type == 1) {  // emboss
             uint32_t esrc = (info >> 12) & 7, elight = (info >> 15) & 7;
-            o.w("    vec3 ldir = normalize(L(%u).xyz - pos);\n", elight * 5 + 3);
+            o.w("    vec3 dlt = L(%u).xyz - pos;\n", elight * 5 + 3);
+            o.w("    float mc = max(max(abs(dlt.x), abs(dlt.y)), abs(dlt.z));\n");
+            o.w("    vec3 ldir = vec3(0.0, 0.0, 1.0);\n");
+            o.w("    if (mc > 0.00005) {\n");
+            o.w("      vec3 sdir = dlt / mc; float slen = length(sdir);\n");
+            o.w("      if (mc * slen > 0.0001) ldir = sdir / slen;\n");
+            o.w("    }\n");
             if (esrc < i) {
                 o.w("    v_tex%u = v_tex%u + vec3(dot(ldir, tan), dot(ldir, bin), 0.0);\n  }\n", i, esrc);
             } else {
