@@ -29,7 +29,11 @@ foreach ($lib in @("libgame.so", "libmain.so", "libreserve.so")) {
     & $strip --strip-unneeded -o $dst $src
 }
 
-# 3. Strip and copy installer native libraries
+# 3. Strip stray Python bytecode caches from installer assets before linking
+Get-ChildItem "installer-mobile\assets" -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+Get-ChildItem "installer-mobile\assets" -Recurse -File -Filter "*.pyc" -ErrorAction SilentlyContinue | Remove-Item -Force
+
+# 4. Strip and copy installer native libraries
 Write-Host "--- Copying installer native libraries ---"
 $installerLib = "build-installer\native\libinstaller.so"
 $nodtoolLib = "installer-mobile\vendor\nodtool\libnodtool.so"

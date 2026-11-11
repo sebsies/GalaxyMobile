@@ -98,6 +98,14 @@ public class InstallerActivity extends Activity {
         }
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (!mIsCooking && mSelectedSourcePath.isEmpty()) {
+            autoDetectSource();
+        }
+    }
+
     private void returnToGame() {
         finish();
     }
@@ -290,6 +298,12 @@ public class InstallerActivity extends Activity {
 
     private void startCookingProcess() {
         if (mIsCooking) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
+            appendLog("[Permission] All Files Access is required to read your dump and write GalaxyData.");
+            Toast.makeText(this, "Please allow 'All files access' first, then tap Start Cooking again.", Toast.LENGTH_LONG).show();
+            checkStoragePermissions();
+            return;
+        }
         mIsCooking = true;
 
         btnStartCooking.setEnabled(false);
@@ -345,12 +359,20 @@ public class InstallerActivity extends Activity {
                     mHandler.post(() -> txtProgressStatus.setText("Extracting Wii disc image..."));
 
                     tempExtractionDir = new File(getFilesDir(), "extracted_cache");
+                    File extractMarker = new File(tempExtractionDir, ".extract_complete");
+                    String expectedCacheTag = sourcePath + "|" + sourceFile.length() + "|" + withMovies;
                     File fstCheck = new File(tempExtractionDir, "sys/fst.bin");
                     if (!fstCheck.exists()) {
                         fstCheck = new File(tempExtractionDir, "DATA/sys/fst.bin");
                     }
+                    boolean cacheMatches = false;
+                    if (extractMarker.exists() && fstCheck.exists() && fstCheck.length() > 0) {
+                        try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(extractMarker))) {
+                            cacheMatches = expectedCacheTag.equals(br.readLine());
+                        } catch (Exception ignored) {}
+                    }
                     boolean extractSuccess = true;
-                    if (fstCheck.exists() && fstCheck.length() > 0) {
+                    if (cacheMatches) {
                         appendLog("[Stage 1/2] Valid disc cache found from previous extraction. Skipping re-extract.");
                     } else {
                         CookerEngine.deleteRecursive(tempExtractionDir);
@@ -400,6 +422,11 @@ public class InstallerActivity extends Activity {
                                 }
                             );
                             extractSuccess = (extractRet == 0);
+                        }
+                        if (extractSuccess) {
+                            try (java.io.FileWriter fw = new java.io.FileWriter(extractMarker)) {
+                                fw.write(expectedCacheTag);
+                            } catch (Exception ignored) {}
                         }
                     }
 

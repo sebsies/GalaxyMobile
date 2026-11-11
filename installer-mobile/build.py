@@ -82,6 +82,14 @@ run(cmake_cmd, cwd=native_build)
 run([NINJA], cwd=native_build)
 
 print('=== 2. Compiling Resources (AAPT2) ===')
+assets_dir = os.path.join(INSTALLER_DIR, 'assets')
+for root, dirs, files in os.walk(assets_dir, topdown=False):
+    for d in dirs:
+        if d == '__pycache__':
+            shutil.rmtree(os.path.join(root, d), ignore_errors=True)
+    for f in files:
+        if f.endswith('.pyc'):
+            os.remove(os.path.join(root, f))
 res_zip = os.path.join(BUILD_DIR, 'res.zip')
 run([AAPT2, 'compile', '--dir', os.path.join(INSTALLER_DIR, 'res'), '-o', res_zip])
 

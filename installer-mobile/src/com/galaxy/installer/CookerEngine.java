@@ -183,10 +183,12 @@ public class CookerEngine {
         }
 
         // Copy Python cooking scripts from assets/scripts/ into files/scripts/
+        deleteRecursive(new File(scriptsDir, "__pycache__"));
         String[] scriptAssets = context.getAssets().list("scripts");
         if (scriptAssets != null) {
             byte[] buffer = new byte[8192];
             for (String file : scriptAssets) {
+                if (!file.endsWith(".py")) continue;
                 File dest = new File(scriptsDir, file);
                 try (InputStream in = context.getAssets().open("scripts/" + file);
                      OutputStream out = new FileOutputStream(dest)) {

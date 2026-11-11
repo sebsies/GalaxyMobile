@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <android/log.h>
@@ -179,12 +180,31 @@ Java_com_galaxy_installer_CookerEngine_extractDisc(
 // ---------------------------------------------------------------------------
 // JNI Method: runCooker(pythonHome, scriptsDir, inputDir, outputDir, withMovies, Callback)
 // ---------------------------------------------------------------------------
+static std::string escapePyLiteral(const char* raw) {
+    std::string out;
+    if (!raw) return out;
+    for (const char* p = raw; *p; ++p) {
+        char c = *p;
+        if (c == '\\') out += "\\\\";
+        else if (c == '\'') out += "\\'";
+        else if (c == '\n') out += "\\n";
+        else if (c == '\r') out += "\\r";
+        else out += c;
+    }
+    return out;
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_com_galaxy_installer_CookerEngine_runCooker(
         JNIEnv *env, jclass clazz,
         jstring jPythonHome, jstring jScriptsDir,
         jstring jInputDir, jstring jOutputDir,
         jboolean jWithMovies, jobject jCallback) {
+
+    static std::mutex sPyMutex;
+    static std::wstring sPyHome;
+    static bool sPyInited = false;
+    std::lock_guard<std::mutex> lock(sPyMutex);
 
     const char* pythonHome = env->GetStringUTFChars(jPythonHome, nullptr);
     const char* scriptsDir = env->GetStringUTFChars(jScriptsDir, nullptr);
@@ -196,25 +216,40 @@ Java_com_galaxy_installer_CookerEngine_runCooker(
     jclass cbClass = env->GetObjectClass(jCallback);
     gOnLogMethod = env->GetMethodID(cbClass, "onLog", "(Ljava/lang/String;)V");
     gOnProgressMethod = env->GetMethodID(cbClass, "onProgress", "(ILjava/lang/String;)V");
+    env->DeleteLocalRef(cbClass);
 
-    sendLogToJava("[Native] Initializing embedded Python engine...");
+    if (!sPyInited) {
+        sendLogToJava("[Native] Initializing embedded Python engine...");
+        Py_DontWriteBytecodeFlag = 1;
+        PyImport_AppendInittab("android_bridge", PyInit_android_bridge);
 
-    // Register our C module before Py_Initialize
-    PyImport_AppendInittab("android_bridge", PyInit_android_bridge);
+        wchar_t* wHome = Py_DecodeLocale(pythonHome, nullptr);
+        if (wHome) {
+            sPyHome.assign(wHome);
+            PyMem_RawFree(wHome);
+            Py_SetPythonHome(const_cast<wchar_t*>(sPyHome.c_str()));
+        }
 
-    wchar_t* wHome = Py_DecodeLocale(pythonHome, nullptr);
-    if (wHome) {
-        Py_SetPythonHome(wHome);
+        Py_Initialize();
+        PyEval_SaveThread();
+        sPyInited = true;
+        sendLogToJava("[Native] Python engine initialized.");
+    } else {
+        sendLogToJava("[Native] Reusing initialized Python engine.");
     }
 
-    Py_Initialize();
+    PyGILState_STATE gstate = PyGILState_Ensure();
 
-    sendLogToJava("[Native] Python engine initialized.");
+    std::string escScripts = escapePyLiteral(scriptsDir);
+    std::string escInput = escapePyLiteral(inputDir);
+    std::string escOutput = escapePyLiteral(outputDir);
 
     // Setup sys.path and log redirection in Python
     std::string setupScript =
         "import sys, os, android_bridge\n"
-        "sys.path.insert(0, '" + std::string(scriptsDir) + "')\n"
+        "_scripts_dir = '" + escScripts + "'\n"
+        "if _scripts_dir not in sys.path:\n"
+        "    sys.path.insert(0, _scripts_dir)\n"
         "class OutputLogger:\n"
         "    def write(self, s):\n"
         "        for line in s.splitlines():\n"
@@ -236,8 +271,8 @@ Java_com_galaxy_installer_CookerEngine_runCooker(
         "try:\n"
         "    print('[Engine] Beginning conversion...')\n"
         "    ret = cook.convert(\n"
-        "        data_dir='" + std::string(inputDir) + "',\n"
-        "        out_dir='" + std::string(outputDir) + "',\n"
+        "        data_dir='" + escInput + "',\n"
+        "        out_dir='" + escOutput + "',\n"
         "        with_movies=" + (withMovies ? "True" : "False") + ",\n"
         "        progress=on_progress\n"
         "    )\n"
@@ -271,10 +306,7 @@ Java_com_galaxy_installer_CookerEngine_runCooker(
         PyErr_Clear();
     }
 
-    Py_Finalize();
-    if (wHome) {
-        PyMem_RawFree(wHome);
-    }
+    PyGILState_Release(gstate);
 
     env->ReleaseStringUTFChars(jPythonHome, pythonHome);
     env->ReleaseStringUTFChars(jScriptsDir, scriptsDir);
