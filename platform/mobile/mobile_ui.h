@@ -52,7 +52,7 @@ public:
 
     // Processes an Android motion or key event.
     // Returns true if consumed (e.g., settings menu or virtual controls).
-    bool handleInput(const AInputEvent* event, PortPadState& pad, int& spinFrames,
+    bool handleInput(const AInputEvent* event, PortPadState& pad,
                      int screenW, int screenH, int vpX, int vpY, int vpW, int vpH);
 
     // Render the overlay (touch controls + settings menu)

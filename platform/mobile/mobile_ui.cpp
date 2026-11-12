@@ -552,7 +552,7 @@ bool UIOverlay::init() {
     return true;
 }
 
-bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& spinFrames,
+bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                             int screenW, int screenH, int vpX, int vpY, int vpW, int vpH) {
     int32_t eventType = AInputEvent_getType(event);
     if (eventType != AINPUT_EVENT_TYPE_MOTION) {
@@ -1485,7 +1485,7 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad, int& sp
                     hitButton = true;
                 }
                 if (inRadius(px, py, spinX, spinY, spinR)) {
-                    spinFrames = 6;
+                    touchButtons |= 0x0020; // WPAD_BUTTON_SPIN
                     mBtnSpinPressed = true;
                     hitButton = true;
                 }

@@ -1,6 +1,7 @@
 #include <JSystem/JGeometry/TVec.hpp>
 
 #include "Game/System/WPad.hpp"
+#include "Game/System/WPadButton.hpp"
 #include "Game/System/WPadHVSwing.hpp"
 
 void WPadHVSwing_FORCE_MATCH_SDATA2() {
@@ -116,6 +117,15 @@ void WPadHVSwing::update() {
         bool isOffPulseBoundary = (mSwingHoldFrames - 30) % 15 != 0;
 
         if (!isOffPulseBoundary && mSwingCooldownFrames < 15) {
+            mIsTriggerSwing = true;
+        }
+    }
+
+    if (mChannel == WPAD_DEV_CORE && pPad != nullptr && pPad->mButton != nullptr) {
+        if (pPad->mButton->testButtonSpin()) {
+            mIsSwing = true;
+        }
+        if (pPad->mButton->testTriggerSpin()) {
             mIsTriggerSwing = true;
         }
     }

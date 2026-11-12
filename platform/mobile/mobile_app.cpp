@@ -73,7 +73,6 @@ struct MobileApp {
     uint32_t gamepadCameraPulsedButtons = 0;
     int camRepeatLeft = 0;
     int camRepeatRight = 0;
-    bool gamepadRTrigWasDown = false;
     bool touchActive = false;
     float touchX = 0.0f, touchY = 0.0f;
 
@@ -81,8 +80,6 @@ struct MobileApp {
     int stickPointerId = -1;
     float stickOriginX = 0.0f;
     float stickOriginY = 0.0f;
-    int spinFrames = 0;
-
 };
 
 MobileApp gMobile;
@@ -459,11 +456,9 @@ int32_t onInput(android_app* app, AInputEvent* event) {
             if (lTrig > 0.30f) {
                 axisBtns |= 0x2000;
             }
-            bool rTrigDown = (rTrig > 0.30f);
-            if (rTrigDown && !a->gamepadRTrigWasDown) {
-                a->spinFrames = 6;
+            if (rTrig > 0.30f) {
+                axisBtns |= 0x0020;  // WPAD_BUTTON_SPIN
             }
-            a->gamepadRTrigWasDown = rTrigDown;
 
             a->gamepadAxisButtons = axisBtns;
 
@@ -487,7 +482,7 @@ int32_t onInput(android_app* app, AInputEvent* event) {
             ptrW = (int)lroundf((float)a->screenHeight * (16.0f / 9.0f));
             ptrX = (a->screenWidth - ptrW) / 2;
         }
-        if (mobile_ui::get().handleInput(event, a->touchPad, a->spinFrames,
+        if (mobile_ui::get().handleInput(event, a->touchPad,
                                          a->screenWidth, a->screenHeight,
                                          ptrX, ptrY, ptrW, ptrH)) {
             syncMergedPad(*a);
@@ -516,15 +511,12 @@ int32_t onInput(android_app* app, AInputEvent* event) {
             else a->gamepadKeyButtons &= ~0x0400;
             break;
         case AKEYCODE_BUTTON_X:
-            if (down) a->spinFrames = 6;  // Spin (Wiimote shake)
+            if (down) a->gamepadKeyButtons |= 0x0020;  // Spin button
+            else a->gamepadKeyButtons &= ~0x0020;
             break;
         case AKEYCODE_BUTTON_Y:
-            if (down) {
-                a->spinFrames = 6;  // Spin + C
-                a->gamepadKeyButtons |= 0x1000;
-            } else {
-                a->gamepadKeyButtons &= ~0x1000;
-            }
+            if (down) a->gamepadKeyButtons |= (0x0020 | 0x1000);  // Spin + Minus
+            else a->gamepadKeyButtons &= ~(0x0020 | 0x1000);
             break;
         case AKEYCODE_BUTTON_L1:
         case AKEYCODE_BUTTON_L2:
@@ -538,7 +530,8 @@ int32_t onInput(android_app* app, AInputEvent* event) {
         case AKEYCODE_BUTTON_R1:
         case AKEYCODE_BUTTON_R2:
         case AKEYCODE_BUTTON_THUMBR:
-            if (down) a->spinFrames = 6;  // Spin (Wiimote shake)
+            if (down) a->gamepadKeyButtons |= 0x0020;  // Spin button
+            else a->gamepadKeyButtons &= ~0x0020;
             break;
         case AKEYCODE_BUTTON_START:
         case AKEYCODE_MENU:
@@ -815,17 +808,10 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
         }
         a.gamepadCameraPulsedButtons = pulsed;
 
-        // Handle spin shake decay and feed input state
+        // Merge touch and gamepad inputs
         syncMergedPad(a);
-        if (a.spinFrames > 0) {
-            float s = (a.spinFrames & 1) ? 2.5f : -2.5f;
-            a.pad.accX = s;
-            a.pad.accY = s;
-            a.spinFrames--;
-        } else {
-            a.pad.accX = 0.0f;
-            a.pad.accY = 0.0f;
-        }
+        a.pad.accX = 0.0f;
+        a.pad.accY = 0.0f;
         port_input_set(0, &a.pad);
         if (port_is_plus_edition() && port_net_is_connected() &&
             port_net_get_mode() == PORT_NET_MODE_COSTAR &&

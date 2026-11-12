@@ -62,6 +62,10 @@ public:
     /// @return `true` if the Z Button is pressed, `false` otherwise.
     bool testButtonZ() const;
 
+    /// @brief Determines if the dedicated Spin Button is pressed.
+    /// @return `true` if the Spin Button is pressed, `false` otherwise.
+    bool testButtonSpin() const;
+
     /// @brief Determines if up on the +Control Pad was just pressed.
     /// @return `true` if up was just pressed, `false` otherwise.
     bool testTriggerUp() const;
@@ -113,6 +117,10 @@ public:
     /// @brief Determines if the Z Button was just pressed.
     /// @return `true` if the Z Button was just pressed, `false` otherwise.
     bool testTriggerZ() const;
+
+    /// @brief Determines if the dedicated Spin Button was just pressed.
+    /// @return `true` if the Spin Button was just pressed, `false` otherwise.
+    bool testTriggerSpin() const;
 
     /// @brief Determines if the Z Button was just released.
     /// @return `true` if the Z Button was just released, `false` otherwise.

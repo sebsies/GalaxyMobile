@@ -13,6 +13,7 @@ static std::mutex sInputMutex;
 static PortPadState sPad[4];
 static int sRumble[4];
 static u32 sPrevHold[4];
+static u32 sPendingPress[4];
 static WPADConnectCallback sConnectCb[4];
 static WPADExtensionCallback sExtCb[4];
 static int sReportedConnected[4];
@@ -28,6 +29,13 @@ extern "C" void port_input_set(int chan, const PortPadState* state) {
     const uint32_t kPlusMinus = 0x0010 | 0x1000;
     if (chan == 0 && state->connected && (state->buttons & kPlusMinus & ~sPad[0].buttons)) {
         port_input_request_pause();
+    }
+    if (state->connected) {
+        // Latch rising button edges so fast taps between 60 Hz KPADRead polls are not dropped.
+        uint32_t prevBtns = sPad[chan].connected ? (sPad[chan].buttons & 0xFFFFu) : 0u;
+        sPendingPress[chan] |= (state->buttons & 0xFFFFu) & ~prevBtns;
+    } else {
+        sPendingPress[chan] = 0;
     }
     sPad[chan] = *state;
 }
@@ -90,8 +98,12 @@ static Vec remoteGravity(const PortPadState& s) {
     return g;
 }
 
-static PortPadState snapshot(int chan) {
+static PortPadState snapshot(int chan, u32* pendingPress = nullptr) {
     std::lock_guard<std::mutex> lk(sInputMutex);
+    if (pendingPress) {
+        *pendingPress = sPendingPress[chan];
+        sPendingPress[chan] = 0;
+    }
     return sPad[chan];
 }
 
@@ -178,7 +190,11 @@ WPADExtensionCallback WPADSetExtensionCallback(s32 chan, WPADExtensionCallback c
 // KPAD
 // ---------------------------------------------------------------------------
 void KPADInit(void) {}
-void KPADReset(void) { memset(sPrevHold, 0, sizeof(sPrevHold)); }
+void KPADReset(void) {
+    std::lock_guard<std::mutex> lk(sInputMutex);
+    memset(sPrevHold, 0, sizeof(sPrevHold));
+    memset(sPendingPress, 0, sizeof(sPendingPress));
+}
 void KPADSetAccParam(s32, f32, f32) {}
 void KPADSetBtnRepeat(s32, f32, f32) {}
 void KPADSetDistParam(s32, f32, f32) {}
@@ -190,7 +206,8 @@ s32 KPADRead(s32 chan, KPADStatus samples[], u32 length) {
     if (chan < 0 || chan >= 4 || length == 0) {
         return 0;
     }
-    PortPadState s = snapshot(chan);
+    u32 pendingPress = 0;
+    PortPadState s = snapshot(chan, &pendingPress);
     pollConnection(chan, s);
     KPADStatus* k = &samples[0];
     memset(k, 0, sizeof(*k));
@@ -200,7 +217,7 @@ s32 KPADRead(s32 chan, KPADStatus samples[], u32 length) {
         sPrevHold[chan] = 0;
         return 0;
     }
-    u32 hold = s.buttons & 0xFFFF;
+    u32 hold = (s.buttons & 0xFFFFu) | pendingPress;
     if (chan == 0) {
         // While a cutscene is skipped the port presses A for the game, and
         // after a skip A reads as released until the player lets go

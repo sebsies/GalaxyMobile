@@ -79,6 +79,10 @@ bool WPadButton::testButtonZ() const {
     return (mHold & WPAD_BUTTON_Z) != 0;
 }
 
+bool WPadButton::testButtonSpin() const {
+    return (mHold & WPAD_BUTTON_SPIN) != 0;
+}
+
 bool WPadButton::testTriggerUp() const {
     return (mTrigger & WPAD_BUTTON_UP) != 0;
 }
@@ -129,6 +133,10 @@ bool WPadButton::testTriggerC() const {
 
 bool WPadButton::testTriggerZ() const {
     return (mTrigger & WPAD_BUTTON_Z) != 0;
+}
+
+bool WPadButton::testTriggerSpin() const {
+    return (mTrigger & WPAD_BUTTON_SPIN) != 0;
 }
 
 bool WPadButton::testReleaseZ() const {
