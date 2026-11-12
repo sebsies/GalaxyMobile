@@ -1311,7 +1311,8 @@ void Builder::build(std::shared_ptr<const Frame> frame, Prepared& out) {
                 trackTevColorWrite(tevReg, tevKonst, reg, v & 0xFFFFFF);
             }
             // Registers that feed the pixel state.
-            if ((reg >= 0x06 && reg <= 0x0E) || (reg >= 0x88 && reg <= 0x8B) || (reg >= 0xA8 && reg <= 0xAB) || (reg >= 0xE0 && reg <= 0xE7) ||
+            if ((reg >= 0x06 && reg <= 0x0E) || (reg >= 0x80 && reg <= 0x83) || (reg >= 0x88 && reg <= 0x8B) ||
+                (reg >= 0xA0 && reg <= 0xA3) || (reg >= 0xA8 && reg <= 0xAB) || (reg >= 0xE0 && reg <= 0xE7) ||
                 (reg >= 0xEE && reg <= 0xF4)) {
                 pixBase = ~0u;
             }
@@ -1942,7 +1943,8 @@ void Renderer::Impl::doCopy(const Item& it, EfbTarget& src, Renderer& r, bool vr
 }
 
 void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud, HudMode hudMode, Renderer& r) {
-    const std::vector<Item>& items = cur->items;
+    std::vector<Item>& items = cur->items;
+    const std::vector<ShaderUid>& frameUids = cur->uids;
     const std::vector<std::shared_ptr<TexImage>>& textures = cur->frame->textures;
     u32 nativeW = cur->nativeW, nativeH = cur->nativeH;
     u32 clearAR = cur->clearAR, clearGB = cur->clearGB, clearZ = cur->clearZ;
@@ -1989,7 +1991,6 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
         copyDumpFrame = this->cur->number;
     }
     if (cutActive) {
-        const std::vector<ShaderUid>& frameUids = this->cur->uids;
         for (size_t i = 0; i < frameUids.size() && i < cutProgs.size(); i++) {
             if (!cutProgs[i] && !frameUids[i].hud) {
                 ShaderUid u = frameUids[i];
@@ -2198,7 +2199,7 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
     }
 
     int stopAfter = gDebugStopAfterDraws;
-    for (const Item& it : items) {
+    for (Item& it : items) {
         if (stopAfter >= 0 && it.type == IT_DRAW) {
             if (stopAfter < (int)it.draws) {
                 break;
@@ -2253,6 +2254,9 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
             lastVao = ~0u;
             gs.forget();
             continue;
+        }
+        if (!it.program && it.type == IT_DRAW && it.uid < frameUids.size()) {
+            it.program = program(frameUids[it.uid], false);
         }
         if (!it.program || !it.idxCount) {
             continue;

@@ -504,6 +504,7 @@ struct TexEntry {
     std::shared_ptr<TexImage> image;
     u64 dataHash = 0;
     u64 checkedFrame = ~0ull;
+    u32 checkedInval = ~0u;
 };
 
 struct EfbCopyInfo {
@@ -558,6 +559,7 @@ struct Recorder final : Backend {
     // Array ranges hashed during the current FIFO flush (address << 32 | bytes).
     std::unordered_map<u64, u64> flushHashes;
     u64 flushHashesStream = ~0ull;
+    u32 texInvalEpoch = 0;
     struct DlStats {
         u64 calls = 0, hits = 0, recorded = 0, hashedBytes = 0, copiedWords = 0, decodedWords = 0;
     } dlStats;
@@ -803,6 +805,9 @@ struct Recorder final : Backend {
         cmd[1] = (reg << 24) | (value & 0xFFFFFF);
         if ((reg >= 0x80 && reg <= 0xBB) || (reg >= 0x28 && reg <= 0x2F) || reg == 0x00 || reg == 0x27 || reg == 0x66) {
             texDirty = true;
+            if (reg == 0x66) {
+                texInvalEpoch++;
+            }
         }
     }
 
@@ -984,8 +989,9 @@ struct Recorder final : Backend {
         for (u32 l = 0, w = width, h = height; l < levels; l++, w = w > 1 ? w / 2 : 1, h = h > 1 ? h / 2 : 1) {
             total += texLevelSize(fmt, w, h);
         }
-        if (e.checkedFrame != frameNumber) {
+        if (e.checkedFrame != frameNumber || e.checkedInval != texInvalEpoch) {
             e.checkedFrame = frameNumber;
+            e.checkedInval = texInvalEpoch;
             const u8* src = memPtr(addr);
             u64 h = hashBytes(src, total);
             if (ci) {

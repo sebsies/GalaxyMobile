@@ -353,7 +353,7 @@ std::string genVertexShader(const ShaderUid& u, bool useVertexTextures) {
         if (u.dualTex) {
             uint32_t post = u.postMtxInfo[i];
             if ((post >> 8) & 1) {
-                o.w("    t = normalize(t);\n");
+                o.w("    if (dot(t, t) > 0.0) t = normalize(t);\n");
             }
             o.w("    vec4 t4 = vec4(t, 1.0);\n");
             o.w("    uint pr = FETCH_REC(rb + %uu);\n", (unsigned)kRecPost + i);
@@ -476,7 +476,7 @@ std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
     o.w("in vec4 v_clr0;\nin vec4 v_clr1;\n");
     for (uint32_t i = 0; i < u.numTexGens; i++) o.w("in vec3 v_tex%u;\n", i);
     o.w("in float v_viewz;\nin float v_gxz;\nout vec4 o_color;\n");
-    o.w("vec2 projUv(vec3 t) { return (t.z != 0.0) ? t.xy / t.z : t.xy; }\n");
+    o.w("vec2 projUv(vec3 t) { return (abs(t.z) > 1.0e-6) ? t.xy / t.z : t.xy; }\n");
     o.w("int idot(ivec3 a, ivec3 b) { ivec3 t = a * b; return t.x + t.y + t.z; }\n");
     if (u.cutaway) {
         o.w("in vec3 v_eye;\n");
@@ -680,7 +680,8 @@ std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
         if (fogOrtho) {
             o.w("    float ze = fogParams.x * zc / 16777216.0;\n");
         } else {
-            o.w("    float ze = (fogParams.x * 16777216.0) / (fogParams.z - floor(zc / exp2(fogParams.w)));\n");
+            o.w("    float fdenom = fogParams.z - floor(zc / exp2(fogParams.w));\n");
+            o.w("    float ze = (abs(fdenom) > 1.0e-6) ? (fogParams.x * 16777216.0) / fdenom : ((fogParams.x > 0.0) ? fogParams.y + 1.0 : 0.0);\n");
         }
         o.w("    float fz = clamp(ze - fogParams.y, 0.0, 1.0);\n");
         switch (fogType) {
