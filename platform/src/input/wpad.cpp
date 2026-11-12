@@ -76,6 +76,11 @@ extern "C" void port_input_use_tilt(float neutralPitchDeg) {
     sTiltUsedAt.store(port_host_time_ns());
 }
 
+extern "C" int port_input_is_tilt_active(void) {
+    int64_t usedAt = sTiltUsedAt.load();
+    return (usedAt != 0 && (port_host_time_ns() - usedAt) < 500000000) ? 1 : 0;
+}
+
 // Gravity as the remote's accelerometer reads it, in g.  KPAD's axes: x left,
 // y out of the button face, z where the remote points; held level, (0, -1, 0)
 // (KPADReset).  The game turns these into its own (WPadAcceleration::update:

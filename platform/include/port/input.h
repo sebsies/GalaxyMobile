@@ -32,6 +32,9 @@ void port_input_set(int chan, const PortPadState* state);
 // Rumble requested by the game (0/1) for a channel; read by the input layer.
 int port_input_rumble(int chan);
 
+// Returns 1 while the game is actively reading tilt/gyro controls, 0 otherwise.
+int port_input_is_tilt_active(void);
+
 #ifdef __cplusplus
 }
 #endif

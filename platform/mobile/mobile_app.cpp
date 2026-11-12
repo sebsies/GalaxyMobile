@@ -8,6 +8,7 @@
 #include <android/keycodes.h>
 #include <android/log.h>
 #include <android/native_window.h>
+#include <android/sensor.h>
 #include <android_native_app_glue.h>
 #include <dirent.h>
 #include <math.h>
@@ -80,6 +81,27 @@ struct MobileApp {
     int stickPointerId = -1;
     float stickOriginX = 0.0f;
     float stickOriginY = 0.0f;
+
+    // Tilt / gyro sensor state (only enabled in gyro-required Galaxies)
+    ASensorManager* sensorManager = nullptr;
+    const ASensor* tiltSensor = nullptr;
+    ASensorEventQueue* sensorQueue = nullptr;
+    bool tiltSensorUsingRawAccel = false;
+    bool tiltSensorEnabled = false;
+    int displayRotation = 1;  // Surface.ROTATION_90 default for landscape
+    bool hasGravity = false;
+    float filtDownX = 0.0f;
+    float filtDownY = 0.0f;
+    float filtDownZ = 0.0f;
+    bool neutralCalibrated = false;
+    int calSamples = 0;
+    float calSumY = 0.0f;
+    float calSumZ = 0.0f;
+    float neutralCos = 1.0f;
+    float neutralSin = 0.0f;
+    float outDownX = 0.0f;
+    float outDownY = -1.0f;
+    float outDownZ = 0.0f;
 };
 
 MobileApp gMobile;
@@ -356,6 +378,243 @@ void destroySurface(MobileApp& a) {
     a.windowReady = false;
 }
 
+int queryDisplayRotation(android_app* app) {
+    if (!app || !app->activity || !app->activity->vm || !app->activity->clazz) {
+        return 1;
+    }
+    JNIEnv* env = nullptr;
+    bool attached = false;
+    if (app->activity->vm->GetEnv((void**)&env, JNI_VERSION_1_6) == JNI_EDETACHED) {
+        if (app->activity->vm->AttachCurrentThread(&env, nullptr) != JNI_OK || !env) {
+            return 1;
+        }
+        attached = true;
+    }
+    int rot = 1;
+    if (env) {
+        jclass actCls = env->GetObjectClass(app->activity->clazz);
+        if (actCls) {
+            jmethodID getWm = env->GetMethodID(actCls, "getWindowManager", "()Landroid/view/WindowManager;");
+            if (getWm) {
+                jobject wm = env->CallObjectMethod(app->activity->clazz, getWm);
+                if (wm) {
+                    jclass wmCls = env->GetObjectClass(wm);
+                    jmethodID getDisp = wmCls ? env->GetMethodID(wmCls, "getDefaultDisplay", "()Landroid/view/Display;") : nullptr;
+                    if (getDisp) {
+                        jobject disp = env->CallObjectMethod(wm, getDisp);
+                        if (disp) {
+                            jclass dispCls = env->GetObjectClass(disp);
+                            jmethodID getRot = dispCls ? env->GetMethodID(dispCls, "getRotation", "()I") : nullptr;
+                            if (getRot) {
+                                rot = (int)env->CallIntMethod(disp, getRot);
+                            }
+                            if (dispCls) env->DeleteLocalRef(dispCls);
+                            env->DeleteLocalRef(disp);
+                        }
+                    }
+                    if (wmCls) env->DeleteLocalRef(wmCls);
+                    env->DeleteLocalRef(wm);
+                }
+            }
+            env->DeleteLocalRef(actCls);
+        }
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+    }
+    if (attached) {
+        app->activity->vm->DetachCurrentThread();
+    }
+    return (rot >= 0 && rot <= 3) ? rot : 1;
+}
+
+void initTiltSensor(MobileApp& a) {
+    if (a.sensorManager || !a.android || !a.android->looper) {
+        return;
+    }
+    const char* pkg = mobile_ui::get().isPlusEdition() ? "com.galaxy.mobile.plus" : "com.galaxy.mobile";
+    a.sensorManager = ASensorManager_getInstanceForPackage(pkg);
+    if (!a.sensorManager) {
+        return;
+    }
+    a.tiltSensor = ASensorManager_getDefaultSensor(a.sensorManager, ASENSOR_TYPE_GRAVITY);
+    a.tiltSensorUsingRawAccel = false;
+    if (!a.tiltSensor) {
+        a.tiltSensor = ASensorManager_getDefaultSensor(a.sensorManager, ASENSOR_TYPE_ACCELEROMETER);
+        a.tiltSensorUsingRawAccel = true;
+    }
+    if (!a.tiltSensor) {
+        LOGI("Tilt sensor: no gravity or accelerometer sensor available");
+        return;
+    }
+    a.sensorQueue = ASensorManager_createEventQueue(a.sensorManager, a.android->looper, LOOPER_ID_USER, nullptr, nullptr);
+    if (!a.sensorQueue) {
+        a.tiltSensor = nullptr;
+        LOGE("Tilt sensor: failed to create ASensorEventQueue");
+    } else {
+        LOGI("Tilt sensor initialized (%s)", a.tiltSensorUsingRawAccel ? "accelerometer" : "fused gravity");
+    }
+}
+
+void setTiltSensorEnabled(MobileApp& a, bool enable) {
+    if (enable) {
+        initTiltSensor(a);
+        if (!a.sensorQueue || !a.tiltSensor || a.tiltSensorEnabled) {
+            return;
+        }
+        a.displayRotation = queryDisplayRotation(a.android);
+        if (ASensorEventQueue_enableSensor(a.sensorQueue, a.tiltSensor) == 0) {
+            ASensorEventQueue_setEventRate(a.sensorQueue, a.tiltSensor, 16666);  // ~60 Hz
+            a.tiltSensorEnabled = true;
+            a.hasGravity = false;
+            a.neutralCalibrated = false;
+            a.calSamples = 0;
+            a.calSumY = 0.0f;
+            a.calSumZ = 0.0f;
+            a.neutralCos = 1.0f;
+            a.neutralSin = 0.0f;
+            a.outDownX = 0.0f;
+            a.outDownY = -1.0f;
+            a.outDownZ = 0.0f;
+            LOGI("Tilt sensor enabled (rotation=%d)", a.displayRotation);
+        }
+    } else if (a.tiltSensorEnabled) {
+        if (a.sensorQueue && a.tiltSensor) {
+            ASensorEventQueue_disableSensor(a.sensorQueue, a.tiltSensor);
+        }
+        a.tiltSensorEnabled = false;
+        a.hasGravity = false;
+        a.neutralCalibrated = false;
+        LOGI("Tilt sensor disabled");
+    }
+}
+
+void destroyTiltSensor(MobileApp& a) {
+    setTiltSensorEnabled(a, false);
+    if (a.sensorManager && a.sensorQueue) {
+        ASensorManager_destroyEventQueue(a.sensorManager, a.sensorQueue);
+    }
+    a.sensorQueue = nullptr;
+    a.tiltSensor = nullptr;
+    a.sensorManager = nullptr;
+}
+
+void updateTiltSensor(MobileApp& a) {
+    bool active = (port_input_is_tilt_active() != 0);
+    if (active != a.tiltSensorEnabled) {
+        setTiltSensorEnabled(a, active);
+    }
+    if (!active || !a.tiltSensorEnabled || !a.sensorQueue) {
+        a.pad.tilted = 0;
+        a.pad.downX = 0.0f;
+        a.pad.downY = -1.0f;
+        a.pad.downZ = 0.0f;
+        return;
+    }
+
+    ASensorEvent events[16];
+    ssize_t count = 0;
+    const float alpha = a.tiltSensorUsingRawAccel ? 0.22f : 0.45f;
+    while ((count = ASensorEventQueue_getEvents(a.sensorQueue, events, 16)) > 0) {
+        for (ssize_t i = 0; i < count; i++) {
+            // Android sensors measure upward reaction force (-gravity); negate for world down.
+            float dx = -events[i].vector.x;
+            float dy = -events[i].vector.y;
+            float dz = -events[i].vector.z;
+            float mag = sqrtf(dx * dx + dy * dy + dz * dz);
+            if (mag < 0.5f) {
+                continue;
+            }
+            dx /= mag;
+            dy /= mag;
+            dz /= mag;
+            if (!a.hasGravity) {
+                a.filtDownX = dx;
+                a.filtDownY = dy;
+                a.filtDownZ = dz;
+                a.hasGravity = true;
+            } else {
+                a.filtDownX += alpha * (dx - a.filtDownX);
+                a.filtDownY += alpha * (dy - a.filtDownY);
+                a.filtDownZ += alpha * (dz - a.filtDownZ);
+                float fmag = sqrtf(a.filtDownX * a.filtDownX + a.filtDownY * a.filtDownY + a.filtDownZ * a.filtDownZ);
+                if (fmag > 0.001f) {
+                    a.filtDownX /= fmag;
+                    a.filtDownY /= fmag;
+                    a.filtDownZ /= fmag;
+                }
+            }
+        }
+    }
+
+    if (!a.hasGravity) {
+        a.pad.tilted = 0;
+        a.pad.downX = 0.0f;
+        a.pad.downY = -1.0f;
+        a.pad.downZ = 0.0f;
+        return;
+    }
+
+    // Remap device gravity vector to screen coordinates (Right, Up, Out toward face).
+    float downR = 0.0f, downU = 0.0f, downO = a.filtDownZ;
+    switch (a.displayRotation) {
+    case 0:  // ROTATION_0
+        downR = a.filtDownX;
+        downU = a.filtDownY;
+        break;
+    case 2:  // ROTATION_180
+        downR = -a.filtDownX;
+        downU = -a.filtDownY;
+        break;
+    case 3:  // ROTATION_270 (reverse landscape)
+        downR = a.filtDownY;
+        downU = -a.filtDownX;
+        break;
+    case 1:  // ROTATION_90 (standard landscape)
+    default:
+        downR = -a.filtDownY;
+        downU = a.filtDownX;
+        break;
+    }
+
+    // Map screen (Right, Out, Up) to PortPadState controller down (right, up, forward).
+    float cx = downR;
+    float cy = downO;
+    float cz = downU;
+
+    // Capture the user's comfortable holding pitch on entry to the gyro Galaxy so
+    // their resting hand angle becomes neutral (0, -1, 0) without affecting roll steering.
+    if (!a.neutralCalibrated) {
+        a.calSumY += cy;
+        a.calSumZ += cz;
+        a.calSamples++;
+        if (a.calSamples >= 3) {
+            float avgY = a.calSumY / (float)a.calSamples;
+            float avgZ = a.calSumZ / (float)a.calSamples;
+            float yzLen = sqrtf(avgY * avgY + avgZ * avgZ);
+            if (yzLen > 0.25f && avgY <= 0.1f) {
+                avgY /= yzLen;
+                avgZ /= yzLen;
+                a.neutralCos = -avgY;
+                a.neutralSin = avgZ;
+            } else {
+                a.neutralCos = 1.0f;
+                a.neutralSin = 0.0f;
+            }
+            a.neutralCalibrated = true;
+        }
+    }
+
+    a.outDownX = cx;
+    a.outDownY = cy * a.neutralCos - cz * a.neutralSin;
+    a.outDownZ = cz * a.neutralCos + cy * a.neutralSin;
+
+    a.pad.tilted = 1;
+    a.pad.downX = a.outDownX;
+    a.pad.downY = a.outDownY;
+    a.pad.downZ = a.outDownZ;
+}
+
 void syncMergedPad(MobileApp& a) {
     a.pad.connected = 1;
     if (fabsf(a.gamepadStickX) > fabsf(a.touchPad.stickX) ||
@@ -606,6 +865,9 @@ void onAppCmd(android_app* app, int32_t cmd) {
     case APP_CMD_WINDOW_RESIZED:
     case APP_CMD_CONFIG_CHANGED:
         LOGI("APP_CMD_WINDOW_RESIZED / CONFIG_CHANGED");
+        if (a->tiltSensorEnabled) {
+            a->displayRotation = queryDisplayRotation(a->android);
+        }
         if (a->surface != EGL_NO_SURFACE) {
             destroySurface(*a);
             createSurface(*a);
@@ -614,6 +876,9 @@ void onAppCmd(android_app* app, int32_t cmd) {
     case APP_CMD_RESUME:
         LOGI("APP_CMD_RESUME");
         port_set_paused(0);
+        if (a->tiltSensorEnabled) {
+            a->displayRotation = queryDisplayRotation(a->android);
+        }
         port_set_camera_cutout(mobile_ui::get().settings().showCameraCutout ? 1 : 0);
         if (!a->gameBooted && a->dataRoot.empty()) {
             std::string ext = (a->android && a->android->activity && a->android->activity->externalDataPath) ? a->android->activity->externalDataPath : "/sdcard/Android/data/com.galaxy.mobile/files";
@@ -622,10 +887,12 @@ void onAppCmd(android_app* app, int32_t cmd) {
         break;
     case APP_CMD_PAUSE:
         LOGI("APP_CMD_PAUSE");
+        setTiltSensorEnabled(*a, false);
         port_set_paused(1);
         break;
     case APP_CMD_DESTROY:
         LOGI("APP_CMD_DESTROY");
+        destroyTiltSensor(*a);
         destroySurface(*a);
         break;
     default:
@@ -808,8 +1075,9 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
         }
         a.gamepadCameraPulsedButtons = pulsed;
 
-        // Merge touch and gamepad inputs
+        // Merge touch, gamepad, and tilt/gyro inputs
         syncMergedPad(a);
+        updateTiltSensor(a);
         a.pad.accX = 0.0f;
         a.pad.accY = 0.0f;
         port_input_set(0, &a.pad);
