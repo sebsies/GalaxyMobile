@@ -499,23 +499,17 @@ void destroyTiltSensor(MobileApp& a) {
     a.sensorManager = nullptr;
 }
 
-void updateTiltSensor(MobileApp& a) {
-    bool active = (port_input_is_tilt_active() != 0);
-    if (active != a.tiltSensorEnabled) {
-        setTiltSensorEnabled(a, active);
-    }
-    if (!active || !a.tiltSensorEnabled || !a.sensorQueue) {
-        a.pad.tilted = 0;
-        a.pad.downX = 0.0f;
-        a.pad.downY = -1.0f;
-        a.pad.downZ = 0.0f;
+void drainTiltSensorEvents(MobileApp& a) {
+    if (!a.sensorQueue) {
         return;
     }
-
     ASensorEvent events[16];
     ssize_t count = 0;
     const float alpha = a.tiltSensorUsingRawAccel ? 0.22f : 0.45f;
     while ((count = ASensorEventQueue_getEvents(a.sensorQueue, events, 16)) > 0) {
+        if (!a.tiltSensorEnabled) {
+            continue;
+        }
         for (ssize_t i = 0; i < count; i++) {
             // Android sensors measure upward reaction force (-gravity); negate for world down.
             float dx = -events[i].vector.x;
@@ -546,8 +540,15 @@ void updateTiltSensor(MobileApp& a) {
             }
         }
     }
+}
 
-    if (!a.hasGravity) {
+void updateTiltSensor(MobileApp& a) {
+    bool active = (port_input_is_tilt_active() != 0);
+    if (active != a.tiltSensorEnabled) {
+        setTiltSensorEnabled(a, active);
+    }
+    drainTiltSensorEvents(a);
+    if (!active || !a.tiltSensorEnabled || !a.sensorQueue || !a.hasGravity) {
         a.pad.tilted = 0;
         a.pad.downX = 0.0f;
         a.pad.downY = -1.0f;
@@ -860,6 +861,7 @@ void onAppCmd(android_app* app, int32_t cmd) {
         break;
     case APP_CMD_TERM_WINDOW:
         LOGI("APP_CMD_TERM_WINDOW");
+        setTiltSensorEnabled(*a, false);
         destroySurface(*a);
         break;
     case APP_CMD_WINDOW_RESIZED:
@@ -982,13 +984,20 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
 
     bool running = true;
     while (running && !app->destroyRequested) {
+        int ident;
         int events;
+        int sensorDrains = 0;
         android_poll_source* source = nullptr;
         int timeout = (a.windowReady) ? 0 : 50;
 
-        while (ALooper_pollOnce(timeout, nullptr, &events, (void**)&source) >= 0) {
+        while ((ident = ALooper_pollOnce(timeout, nullptr, &events, (void**)&source)) >= 0) {
             if (source) {
                 source->process(app, source);
+            } else if (ident == LOOPER_ID_USER) {
+                drainTiltSensorEvents(a);
+                if (++sensorDrains >= 8) {
+                    break;
+                }
             }
             if (app->destroyRequested) {
                 running = false;
