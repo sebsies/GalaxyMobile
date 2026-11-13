@@ -37,13 +37,23 @@ u32 BinaryDataChunkHolder::makeFileBinary(u8* pData, u32 a2) {
 }
 
 bool BinaryDataChunkHolder::loadFromFileBinary(const u8* pData, u32 dataSize) {
-    s32 offset = 0;
-
-    if (dataSize < calcBinarySize(pData)) {
+    if (pData == nullptr || dataSize < 4) {
         return false;
     }
 
-    offset += 4;
+    u32 offset = 4;
+    for (s32 idx = 0; idx < pData[1]; idx++) {
+        if (offset + sizeof(BinaryDataChunkHolderChunkData) > dataSize) {
+            return false;
+        }
+        const BinaryDataChunkHolderChunkData* chunkData = reinterpret_cast< const BinaryDataChunkHolderChunkData* >(&pData[offset]);
+        if (chunkData->mChunkSize < chunkData->getDataOffset() || chunkData->mChunkSize > dataSize - offset) {
+            return false;
+        }
+        offset += chunkData->mChunkSize;
+    }
+
+    offset = 4;
     bool hashError = false;
     bool deserializeError = 0;
 

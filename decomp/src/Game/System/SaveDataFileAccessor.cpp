@@ -21,18 +21,23 @@ void SaveDataFileAccessor::makeUserFileInfo(SaveDataUserFileInfo* pUserFileInfo,
     SaveDataFileHeader* pHeader = getHeader();
     SaveDataFileInfo* pInfo = getFileInfo(0);
 
+    if (pHeader->mFileSize > 0x10000 || pHeader->mUserFileInfoNum > 24) {
+        return;
+    }
+
     for (u32 i = 0; i < pHeader->mUserFileInfoNum; i++) {
         if (!MR::isEqualString(pInfo[i].mName, pName)) {
             continue;
         }
 
-        if (i == pHeader->mUserFileInfoNum - 1) {
-            pUserFileInfo->mDataSize = pHeader->mFileSize - pInfo[i].mOffset;
-        } else {
-            pUserFileInfo->mDataSize = pInfo[i + 1].mOffset - pInfo[i].mOffset;
+        u32 startOffset = pInfo[i].mOffset;
+        u32 endOffset = (i == pHeader->mUserFileInfoNum - 1) ? pHeader->mFileSize : pInfo[i + 1].mOffset;
+        if (startOffset > pHeader->mFileSize || endOffset < startOffset || endOffset > pHeader->mFileSize) {
+            continue;
         }
 
-        pUserFileInfo->mData = reinterpret_cast< u8* >(getHeader()) + pInfo[i].mOffset;
+        pUserFileInfo->mDataSize = endOffset - startOffset;
+        pUserFileInfo->mData = reinterpret_cast< u8* >(getHeader()) + startOffset;
 
         if (strstr(pInfo[i].mName, "mario") != nullptr || strstr(pInfo[i].mName, "luigi") != nullptr) {
             pUserFileInfo->mKind = 0;

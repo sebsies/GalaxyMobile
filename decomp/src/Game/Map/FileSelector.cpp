@@ -763,7 +763,7 @@ FileSelectIconID::EFellowID FileSelector::getUserFileFellowID(s32 id) const {
     if (mUserFile[id - 1].getIconId(&iconId)) {
         FileSelectIconID::EFellowID fellowId = FileSelectIconID::Mario;
 
-        if (iconId <= 5) {
+        if (iconId >= 1 && iconId <= 5) {
             fellowId = static_cast< FileSelectIconID::EFellowID >(iconId - 1);
         }
 

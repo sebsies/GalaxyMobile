@@ -5,10 +5,12 @@
 #include "Game/System/SaveDataFileAccessor.hpp"
 #include "Game/System/SysConfigFile.hpp"
 #include "Game/System/UserFile.hpp"
+#include "Game/Util/HashUtil.hpp"
 #include "Game/Util/MemoryUtil.hpp"
 #include "Game/Util/NerveUtil.hpp"
 #include <JSystem/JKernel/JKRExpHeap.hpp>
 #include <cstdio>
+#include <cstring>
 
 namespace {
     struct SaveFileSpec {
@@ -20,6 +22,284 @@ namespace {
     const char cBannerFileName[] = "banner.bin";
     const SaveFileSpec cSaveFileSpecTable[] = {{"mario", 0xF80}, {"luigi", 0xF80}, {"config", 0x60}};
     const SaveFileSpec cSaveFileSpecSystem = {"sysconf", 0x80};
+
+    inline u16 readBE16(const u8* p) {
+        return static_cast< u16 >((static_cast< u16 >(p[0]) << 8) | static_cast< u16 >(p[1]));
+    }
+
+    inline u32 readBE32(const u8* p) {
+        return (static_cast< u32 >(p[0]) << 24) | (static_cast< u32 >(p[1]) << 16) |
+               (static_cast< u32 >(p[2]) << 8) | static_cast< u32 >(p[3]);
+    }
+
+    inline u64 readBE64(const u8* p) {
+        return (static_cast< u64 >(readBE32(p)) << 32) | static_cast< u64 >(readBE32(p + 4));
+    }
+
+    inline void writeLE16(u8* p, u16 v) {
+        p[0] = static_cast< u8 >(v & 0xFF);
+        p[1] = static_cast< u8 >((v >> 8) & 0xFF);
+    }
+
+    inline void writeLE32(u8* p, u32 v) {
+        p[0] = static_cast< u8 >(v & 0xFF);
+        p[1] = static_cast< u8 >((v >> 8) & 0xFF);
+        p[2] = static_cast< u8 >((v >> 16) & 0xFF);
+        p[3] = static_cast< u8 >((v >> 24) & 0xFF);
+    }
+
+    inline void writeLE64(u8* p, u64 v) {
+        writeLE32(p, static_cast< u32 >(v & 0xFFFFFFFFu));
+        writeLE32(p + 4, static_cast< u32 >((v >> 32) & 0xFFFFFFFFu));
+    }
+
+    inline u16 swapBE16InPlace(u8* p) {
+        u16 v = readBE16(p);
+        writeLE16(p, v);
+        return v;
+    }
+
+    void swapU16ArrayInPlace(u8* pBuf, u32 byteSize) {
+        for (u32 off = 0; off + 2 <= byteSize; off += 2) {
+            swapBE16InPlace(pBuf + off);
+        }
+    }
+
+    bool convertBEContentAccessorHeader(u8* pBuf, u32 maxSize, u16* pOutAttrNum, u16* pOutDataSize,
+                                        u32* pOutHeaderSize, const u8** pOutAttrTable) {
+        if (maxSize < 4) {
+            return false;
+        }
+        u16 attrNum = swapBE16InPlace(pBuf);
+        u16 dataSize = swapBE16InPlace(pBuf + 2);
+        u32 headerSize = 4u + static_cast< u32 >(attrNum) * 4u;
+        if (headerSize > maxSize) {
+            return false;
+        }
+        for (u32 i = 0; i < attrNum; i++) {
+            u8* entry = pBuf + 4u + i * 4u;
+            swapBE16InPlace(entry);      // u16 mHash
+            swapBE16InPlace(entry + 2);  // u16 mOffset
+        }
+        *pOutAttrNum = attrNum;
+        *pOutDataSize = dataSize;
+        *pOutHeaderSize = headerSize;
+        *pOutAttrTable = pBuf + 4u;
+        return true;
+    }
+
+    bool findContentAttrOffset(const u8* pAttrTable, u16 attrNum, const char* pAttrName, u16* pOutOffset) {
+        u16 targetHash = static_cast< u16 >(MR::getHashCode(pAttrName));
+        for (u16 i = 0; i < attrNum; i++) {
+            const u8* entry = pAttrTable + static_cast< u32 >(i) * 4u;
+            u16 hash;
+            u16 offset;
+            std::memcpy(&hash, entry, sizeof(u16));
+            std::memcpy(&offset, entry + 2, sizeof(u16));
+            if (hash == targetHash) {
+                *pOutOffset = offset;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void convertBEGalaxyChunkPayload(u8* pPayload, u32 payloadSize) {
+        if (payloadSize < 6) {
+            return;
+        }
+        u16 galaxyNum = swapBE16InPlace(pPayload);
+        u16 attrNum = 0;
+        u16 dataSize = 0;
+        u32 headerSize = 0;
+        const u8* pAttrTable = nullptr;
+        if (!convertBEContentAccessorHeader(pPayload + 2, payloadSize - 2, &attrNum, &dataSize, &headerSize, &pAttrTable)) {
+            return;
+        }
+        if (dataSize == 0) {
+            return;
+        }
+        u16 nameOff = 0;
+        bool hasName = findContentAttrOffset(pAttrTable, attrNum, "mGalaxyName", &nameOff);
+        u16 coinOff = 0;
+        bool hasCoin = findContentAttrOffset(pAttrTable, attrNum, "mMaxCoinNum", &coinOff);
+
+        u32 recordsStart = 2u + headerSize;
+        for (u32 i = 0; i < galaxyNum; i++) {
+            u32 recOff = recordsStart + i * static_cast< u32 >(dataSize);
+            if (recOff + dataSize > payloadSize) {
+                break;
+            }
+            if (hasName && static_cast< u32 >(nameOff) + 2u <= dataSize) {
+                swapBE16InPlace(pPayload + recOff + nameOff);
+            }
+            if (hasCoin && static_cast< u32 >(coinOff) + 16u <= dataSize) {
+                swapU16ArrayInPlace(pPayload + recOff + coinOff, 16u);
+            }
+        }
+    }
+
+    void convertBEPlayerStatusPayload(u8* pPayload, u32 payloadSize) {
+        if (payloadSize < 7) {
+            return;
+        }
+        // [0] u8 mStoryProgress, [1..4] u32 mStockedStarPiece, [5..6] u16 mPlayerLeftSupply
+        writeLE32(pPayload + 1, readBE32(pPayload + 1));
+        writeLE16(pPayload + 5, readBE16(pPayload + 5));
+    }
+
+    void convertBESpinDriverPathPayload(u8* pPayload, u32 payloadSize) {
+        if (payloadSize < 1) {
+            return;
+        }
+        u8 numGalaxies = pPayload[0];
+        u32 pos = 1;
+        for (u8 i = 0; i < numGalaxies; i++) {
+            if (pos + 6 > payloadSize) {
+                break;
+            }
+            swapBE16InPlace(pPayload + pos);  // u16 galaxyHash
+            u16 blockSize = swapBE16InPlace(pPayload + pos + 2);
+            if (blockSize < 6 || pos + blockSize > payloadSize) {
+                break;
+            }
+            u8 numScenarios = pPayload[pos + 4];
+            u32 spos = pos + 6;
+            for (u8 j = 0; j < numScenarios; j++) {
+                if (spos + 2 > pos + blockSize) {
+                    break;
+                }
+                u16 scenarioBlockSize = swapBE16InPlace(pPayload + spos);
+                if (scenarioBlockSize < 2 || spos + scenarioBlockSize > pos + blockSize) {
+                    break;
+                }
+                spos += scenarioBlockSize;
+            }
+            pos += blockSize;
+        }
+    }
+
+    void convertBESysConfigPayload(u8* pPayload, u32 payloadSize) {
+        u16 attrNum = 0;
+        u16 dataSize = 0;
+        u32 headerSize = 0;
+        const u8* pAttrTable = nullptr;
+        if (!convertBEContentAccessorHeader(pPayload, payloadSize, &attrNum, &dataSize, &headerSize, &pAttrTable)) {
+            return;
+        }
+        if (headerSize + dataSize > payloadSize) {
+            return;
+        }
+        u8* pData = pPayload + headerSize;
+        u16 off = 0;
+        if (findContentAttrOffset(pAttrTable, attrNum, "mTimeAnnounced", &off) && static_cast< u32 >(off) + 8u <= dataSize) {
+            writeLE64(pData + off, readBE64(pData + off));
+        }
+        if (findContentAttrOffset(pAttrTable, attrNum, "mTimeSent", &off) && static_cast< u32 >(off) + 8u <= dataSize) {
+            writeLE64(pData + off, readBE64(pData + off));
+        }
+        if (findContentAttrOffset(pAttrTable, attrNum, "mSentBytes", &off) && static_cast< u32 >(off) + 4u <= dataSize) {
+            writeLE32(pData + off, readBE32(pData + off));
+        }
+    }
+
+    void convertBEChunkPayload(u32 sig, u8* pPayload, u32 payloadSize) {
+        switch (sig) {
+        case 'GALA':
+            convertBEGalaxyChunkPayload(pPayload, payloadSize);
+            break;
+        case 'FLG1':
+        case 'VLE1':
+        case 'PCE1':
+            swapU16ArrayInPlace(pPayload, payloadSize);
+            break;
+        case 'PLAY':
+            convertBEPlayerStatusPayload(pPayload, payloadSize);
+            break;
+        case 'SPN1':
+            convertBESpinDriverPathPayload(pPayload, payloadSize);
+            break;
+        case 'MISC':
+            if (payloadSize >= 9) {
+                writeLE64(pPayload + 1, readBE64(pPayload + 1));
+            }
+            break;
+        case 'SYSC':
+            convertBESysConfigPayload(pPayload, payloadSize);
+            break;
+        default:
+            // 'CONF', 'MII ' contain only 1-byte fields and opaque byte arrays.
+            break;
+        }
+    }
+
+    void convertBESubfileChunks(u8* pSub, u32 subSize) {
+        if (subSize < 4 || pSub[0] != 1 || pSub[1] == 0) {
+            return;
+        }
+        u8 numChunks = pSub[1];
+        u32 off = 4;
+        for (u8 idx = 0; idx < numChunks; idx++) {
+            if (off + 12 > subSize) {
+                break;
+            }
+            u32 sig = readBE32(pSub + off);
+            u32 hash = readBE32(pSub + off + 4);
+            u32 chunkSize = readBE32(pSub + off + 8);
+            if (chunkSize < 12 || off + chunkSize > subSize) {
+                break;
+            }
+            writeLE32(pSub + off, sig);
+            writeLE32(pSub + off + 4, hash);
+            writeLE32(pSub + off + 8, chunkSize);
+            convertBEChunkPayload(sig, pSub + off + 12, chunkSize - 12);
+            off += chunkSize;
+        }
+    }
+
+    bool isValidSaveHeaderFields(u32 version, u32 fileSize, u32 infoNum, u32 validBytes) {
+        if (version != 2 || infoNum == 0 || infoNum >= 24) {
+            return false;
+        }
+        u32 minHeaderSize = static_cast< u32 >(sizeof(SaveDataFileHeader)) + infoNum * static_cast< u32 >(sizeof(SaveDataFileInfo));
+        if (fileSize < minHeaderSize || fileSize > validBytes || fileSize > 0x10000) {
+            return false;
+        }
+        return true;
+    }
+
+    bool convertGameDataBufferBEtoLE(u8* pBuffer, u32 validBytes) {
+        u32 checkSum = readBE32(pBuffer + 0);
+        u32 version = readBE32(pBuffer + 4);
+        u32 infoNum = readBE32(pBuffer + 8);
+        u32 fileSize = readBE32(pBuffer + 12);
+        if (!isValidSaveHeaderFields(version, fileSize, infoNum, validBytes)) {
+            return false;
+        }
+
+        writeLE32(pBuffer + 0, checkSum);
+        writeLE32(pBuffer + 4, version);
+        writeLE32(pBuffer + 8, infoNum);
+        writeLE32(pBuffer + 12, fileSize);
+
+        u32 minDataStart = static_cast< u32 >(sizeof(SaveDataFileHeader)) + infoNum * static_cast< u32 >(sizeof(SaveDataFileInfo));
+        for (u32 i = 0; i < infoNum; i++) {
+            u8* pEntry = pBuffer + sizeof(SaveDataFileHeader) + i * sizeof(SaveDataFileInfo);
+            u32 offset = readBE32(pEntry + 12);
+            writeLE32(pEntry + 12, offset);
+        }
+
+        const SaveDataFile* pFile = reinterpret_cast< const SaveDataFile* >(pBuffer);
+        for (u32 i = 0; i < infoNum; i++) {
+            u32 start = pFile->mInfo[i].mOffset;
+            u32 end = (i == infoNum - 1) ? fileSize : pFile->mInfo[i + 1].mOffset;
+            if (start < minDataStart || start > fileSize || end < start || end > fileSize) {
+                continue;
+            }
+            convertBESubfileChunks(pBuffer + start, end - start);
+        }
+        return true;
+    }
 };  // namespace
 
 namespace {
@@ -64,31 +344,53 @@ void SaveDataHandler::requestLoadSaveData() {
 }
 
 bool SaveDataHandler::requestVerifyAfterLoadGameDataFile() {
-    if (!isCorrectFileHeader(_14)) {
+    if (_C < sizeof(SaveDataFileHeader)) {
         return false;
     }
 
     SaveDataFileHeader* pFileHeader = reinterpret_cast< SaveDataFileHeader* >(_14);
 
-    if (_C < pFileHeader->mFileSize) {
+    if (isCorrectFileHeader(_14)) {
+        if (!isValidSaveHeaderFields(pFileHeader->mVersion, pFileHeader->mFileSize, pFileHeader->mUserFileInfoNum, _C)) {
+            return false;
+        }
+
+        u32 checkSumLE = MR::calcCheckSum(_14 + sizeof(u32), pFileHeader->mFileSize - sizeof(u32));
+        if (pFileHeader->mCheckSum != checkSumLE) {
+#if defined(TARGET_PC)
+            copySaveDataEachFile(_18, _14);
+            return true;
+#else
+            return false;
+#endif
+        }
+
+        copySaveDataEachFile(_18, _14);
+        return true;
+    }
+
+    // Handle Big-Endian (Wii / Dolphin) GameData.bin saves by verifying and converting in-place to Little-Endian.
+    u32 beCheckSum = readBE32(_14 + 0);
+    u32 beVersion = readBE32(_14 + 4);
+    u32 beInfoNum = readBE32(_14 + 8);
+    u32 beFileSize = readBE32(_14 + 12);
+
+    if (!isValidSaveHeaderFields(beVersion, beFileSize, beInfoNum, _C)) {
         return false;
     }
 
-    u32 checkSumLE = MR::calcCheckSum(_14 + sizeof(u32), pFileHeader->mFileSize - sizeof(u32));
-    u32 checkSumBE = MR::calcCheckSumBE(_14 + sizeof(u32), pFileHeader->mFileSize - sizeof(u32));
-
-    if (pFileHeader->mCheckSum != checkSumLE && pFileHeader->mCheckSum != checkSumBE) {
-#if defined(TARGET_PC)
-        // Recover user data instead of deleting the save file
-        copySaveDataEachFile(_18, _14);
-        return true;
-#else
+    u32 checkSumBE = MR::calcCheckSumBE(_14 + sizeof(u32), beFileSize - sizeof(u32));
+    if (beCheckSum != checkSumBE) {
+#if !defined(TARGET_PC)
         return false;
 #endif
     }
 
-    copySaveDataEachFile(_18, _14);
+    if (!convertGameDataBufferBEtoLE(_14, _C)) {
+        return false;
+    }
 
+    copySaveDataEachFile(_18, _14);
     return true;
 }
 
@@ -333,11 +635,11 @@ bool SaveDataHandler::isCorrectFileHeader(const u8* pBuffer) {
         return false;
     }
 
-    if (pFileHeader->mFileSize >= 0x10000) {
+    if (pFileHeader->mFileSize > 0x10000) {
         return false;
     }
 
-    return pFileHeader->mUserFileInfoNum < 24;
+    return pFileHeader->mUserFileInfoNum > 0 && pFileHeader->mUserFileInfoNum < 24;
 }
 
 void SaveDataHandler::copySaveDataEachFile(u8* pFileDst, const u8* pFileSrc) {

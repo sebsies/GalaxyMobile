@@ -80,7 +80,11 @@ void OSTicksToCalendarTime(OSTime ticks, OSCalendarTime* td) {
     }
     time_t t = (time_t)(secs + 946684800);
     struct tm tmv;
-    gmtime_r(&t, &tmv);
+    if (gmtime_r(&t, &tmv) == nullptr) {
+        memset(&tmv, 0, sizeof(tmv));
+        tmv.tm_mday = 1;
+        tmv.tm_year = 100;
+    }
     td->sec = tmv.tm_sec;
     td->min = tmv.tm_min;
     td->hour = tmv.tm_hour;
