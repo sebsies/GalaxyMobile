@@ -44,7 +44,7 @@
             </gradient>
         </aapt:attr>
     </path>
-    <path android:pathData="M31.20,31.45 Q31.60 33.00 33.15,33.40 Q31.60 33.80 31.20,35.35 Q30.80 33.80 29.25,33.40 Q30.80 33.00 31.20,31.45 Z" android:fillColor="#FFFFFF" android:fillAlpha="0.62" />
-    <path android:pathData="M75.20,29.70 Q75.51 30.89 76.70,31.20 Q75.51 31.51 75.20,32.70 Q74.89 31.51 73.70,31.20 Q74.89 30.89 75.20,29.70 Z" android:fillColor="#E0F2FE" android:fillAlpha="0.52" />
-    <path android:pathData="M74.20,71.25 Q74.46 72.24 75.45,72.50 Q74.46 72.76 74.20,73.75 Q73.94 72.76 72.95,72.50 Q73.94 72.24 74.20,71.25 Z" android:fillColor="#FFFFFF" android:fillAlpha="0.45" />
+    <path android:pathData="M31.20,32.45 Q31.60 34.00 33.15,34.40 Q31.60 34.80 31.20,36.35 Q30.80 34.80 29.25,34.40 Q30.80 34.00 31.20,32.45 Z" android:fillColor="#FFFFFF" android:fillAlpha="0.62" />
+    <path android:pathData="M75.20,30.70 Q75.51 31.89 76.70,32.20 Q75.51 32.51 75.20,33.70 Q74.89 32.51 73.70,32.20 Q74.89 31.89 75.20,30.70 Z" android:fillColor="#E0F2FE" android:fillAlpha="0.52" />
+    <path android:pathData="M74.20,72.75 Q74.46 73.74 75.45,74.00 Q74.46 74.26 74.20,75.25 Q73.94 74.26 72.95,74.00 Q73.94 73.74 74.20,72.75 Z" android:fillColor="#FFFFFF" android:fillAlpha="0.45" />
 </vector>
