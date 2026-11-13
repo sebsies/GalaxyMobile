@@ -848,6 +848,10 @@ struct Recorder final : Backend {
         }
         if (toXfb) {
             frame->xfbCopies++;
+            // Close the frame right at the display copy instead of waiting for
+            // an asynchronous VI IRQ, which can fire after the next frame starts
+            // drawing and split that frame across two recorded frames.
+            endFrame();
             return;
         }
         u32 addr = (bp[0x4B] & 0xFFFFFF) << 5;
@@ -1036,8 +1040,8 @@ struct Recorder final : Backend {
         img.version++;
     }
 
-    // Called when the game presents a frame (VI flip).  A frame is complete
-    // once it contains the EFB->XFB display copy.
+    // Finalizes and publishes a completed frame (triggered immediately on the
+    // EFB->XFB display copy, or as a fallback if commands exceed the size cap).
     void endFrame() {
         if (frame->xfbCopies == 0 && frame->cmds.size() < (16u << 20)) {
             return;
