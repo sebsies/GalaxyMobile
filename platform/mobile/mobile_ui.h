@@ -25,6 +25,7 @@ struct Settings {
     bool dpadOnRight = false;
     float dpadOffsetX = 0.0f;
     float dpadOffsetY = 0.0f;
+    bool rightStickPointer = true;
 
     // Graphics Preset: 0=Low (720p), 1=Medium (900p), 2=High (1080p normal, default), 3=Ultra (Native + Shading/Reflections)
     int graphicsPreset = 2;
@@ -62,6 +63,7 @@ public:
     bool isSettingsOpen() const { return mSettingsOpen || mDrawerAnim > 0.01f; }
     void closeSettings();
     void openSettings();
+    void setPointer(float x, float y);
     Settings& settings() { return mSettings; }
     void setPlusEdition(bool plus) { mPlusEdition = plus; }
     bool isPlusEdition() const { return mPlusEdition; }
