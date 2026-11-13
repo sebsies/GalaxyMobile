@@ -2,14 +2,12 @@ package com.galaxy.installer;
 
 import android.app.Activity;
 import android.content.Intent;
-import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
-import android.provider.OpenableColumns;
 import android.provider.Settings;
 import android.text.method.ScrollingMovementMethod;
 import android.util.Log;
@@ -252,48 +250,22 @@ public class InstallerActivity extends Activity {
         Uri uri = data.getData();
         if (uri == null) return;
 
-        String resolvedPath = resolvePathFromUri(uri);
-        if (resolvedPath != null && !resolvedPath.isEmpty()) {
-            selectSource(resolvedPath, "Selected: " + new File(resolvedPath).getName());
-        } else {
-            selectSource(uri.toString(), "Selected: " + uri.getLastPathSegment());
-        }
-    }
-
-    private String resolvePathFromUri(Uri uri) {
-        if ("file".equalsIgnoreCase(uri.getScheme())) {
-            return uri.getPath();
-        }
-
-        // Try to resolve standard storage tree/document path
-        String path = uri.getPath();
-        if (path != null && path.contains(":")) {
-            String[] parts = path.split(":");
-            if (parts.length > 1) {
-                String subPath = parts[1];
-                File direct = new File(Environment.getExternalStorageDirectory(), subPath);
-                if (direct.exists()) return direct.getAbsolutePath();
-                File downloadDirect = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), subPath);
-                if (downloadDirect.exists()) return downloadDirect.getAbsolutePath();
-                return "/sdcard/" + subPath;
-            }
-        }
-
-        // Try getting display name and matching in Download folder
-        try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
-            if (cursor != null && cursor.moveToFirst()) {
-                int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
-                if (nameIndex != -1) {
-                    String displayName = cursor.getString(nameIndex);
-                    File dl = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), displayName);
-                    if (dl.exists()) {
-                        return dl.getAbsolutePath();
-                    }
-                }
+        try {
+            if ((data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0) {
+                getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
             }
         } catch (Exception ignored) {}
 
-        return uri.getPath();
+        String resolvedPath = CookerEngine.resolveSourceFromUri(this, uri);
+        String displayName = CookerEngine.getDisplayName(this, uri);
+        if (resolvedPath != null && !resolvedPath.isEmpty()) {
+            String labelName = (displayName != null && !displayName.isEmpty())
+                ? displayName
+                : new File(resolvedPath).getName();
+            selectSource(resolvedPath, "Selected: " + labelName);
+        } else {
+            selectSource(uri.toString(), "Selected: " + (displayName != null ? displayName : uri.getLastPathSegment()));
+        }
     }
 
     private void startCookingProcess() {
@@ -332,6 +304,7 @@ public class InstallerActivity extends Activity {
 
         new Thread(() -> {
             File tempExtractionDir = null;
+            File uriImportDir = null;
             try {
                 // Step 1: Ensure Python runtime and cooker scripts are unpacked
                 CookerEngine.prepareAssets(InstallerActivity.this, new CookerEngine.CookerCallback() {
@@ -343,14 +316,33 @@ public class InstallerActivity extends Activity {
                 String pythonHome = new File(getFilesDir(), "pythonhome").getAbsolutePath();
                 String scriptsDir = new File(getFilesDir(), "scripts").getAbsolutePath();
 
-                String cookInputPath = sourcePath;
-                File sourceFile = new File(sourcePath);
+                uriImportDir = new File(getFilesDir(), "uri_import");
+                File sourceFile = CookerEngine.resolveOrImportSource(
+                    InstallerActivity.this,
+                    sourcePath,
+                    uriImportDir,
+                    new CookerEngine.CookerCallback() {
+                        @Override public void onLog(String line) { appendLog(line); }
+                        @Override public void onProgress(int percent, String message) {
+                            mHandler.post(() -> {
+                                if (percent >= 0) {
+                                    progressBar.setIndeterminate(false);
+                                    progressBar.setProgress(percent);
+                                }
+                                if (message != null) txtProgressStatus.setText(message);
+                            });
+                        }
+                        @Override public void onFinished(boolean success, String message) {}
+                    }
+                );
+                String resolvedSourcePath = sourceFile.getAbsolutePath();
+                String cookInputPath = resolvedSourcePath;
 
                 // Step 2: Handle Wii Disc Image (.rvz / .wbfs / .iso / .wia / .ciso) extraction
-                String lower = sourcePath.toLowerCase();
+                String lower = resolvedSourcePath.toLowerCase();
                 boolean isDisc = sourceFile.isFile() && (
                     lower.endsWith(".rvz") || lower.endsWith(".wbfs") || lower.endsWith(".iso") ||
-                    lower.endsWith(".wia") || lower.endsWith(".ciso") || CookerEngine.isWiiDisc(sourcePath)
+                    lower.endsWith(".wia") || lower.endsWith(".ciso") || CookerEngine.isWiiDisc(resolvedSourcePath)
                 );
 
                 if (isDisc) {
@@ -360,7 +352,7 @@ public class InstallerActivity extends Activity {
 
                     tempExtractionDir = new File(getFilesDir(), "extracted_cache");
                     File extractMarker = new File(tempExtractionDir, ".extract_complete");
-                    String expectedCacheTag = sourcePath + "|" + sourceFile.length() + "|" + withMovies;
+                    String expectedCacheTag = resolvedSourcePath + "|" + sourceFile.length() + "|" + withMovies;
                     File fstCheck = new File(tempExtractionDir, "sys/fst.bin");
                     if (!fstCheck.exists()) {
                         fstCheck = new File(tempExtractionDir, "DATA/sys/fst.bin");
@@ -380,7 +372,7 @@ public class InstallerActivity extends Activity {
 
                         extractSuccess = CookerEngine.extractWithNodtool(
                             InstallerActivity.this,
-                            sourcePath,
+                            resolvedSourcePath,
                             tempExtractionDir.getAbsolutePath(),
                             withMovies,
                             new CookerEngine.CookerCallback() {
@@ -404,7 +396,7 @@ public class InstallerActivity extends Activity {
                         if (!extractSuccess && (lower.endsWith(".wbfs") || lower.endsWith(".iso"))) {
                             appendLog("[Fallback] Retrying with secondary native C++ decryptor...");
                             int extractRet = CookerEngine.extractDisc(
-                                sourcePath,
+                                resolvedSourcePath,
                                 tempExtractionDir.getAbsolutePath(),
                                 withMovies,
                                 new CookerEngine.CookerCallback() {
@@ -505,10 +497,12 @@ public class InstallerActivity extends Activity {
                 if (ret != 0) {
                     mHandler.post(() -> onCookingCompleted(false, "Cooker returned error code: " + ret));
                 } else {
-                    // Clean up temporary cache on success to free device storage
-                    if (tempExtractionDir != null && tempExtractionDir.exists()) {
+                    // Clean up temporary caches on success to free device storage
+                    if ((tempExtractionDir != null && tempExtractionDir.exists())
+                            || (uriImportDir != null && uriImportDir.exists())) {
                         appendLog("[Clean] Freeing temporary cache storage...");
-                        CookerEngine.deleteRecursive(tempExtractionDir);
+                        if (tempExtractionDir != null) CookerEngine.deleteRecursive(tempExtractionDir);
+                        if (uriImportDir != null) CookerEngine.deleteRecursive(uriImportDir);
                     }
                     mHandler.post(() -> onCookingCompleted(true, "All game assets cooked successfully!"));
                 }
