@@ -88,6 +88,9 @@ void LogoScene::draw() const {
     MR::fillScreen(fillColor);
     MR::clearZBuffer();
     MR::drawInitFor2DModel();
+#ifdef TARGET_PC
+    port_gx_marker(PORT_GX_MARK_HUD_BEGIN);
+#endif
 
     bool isCensorship = isNerve(GET_NERVE_ANON(LogoSceneCensorshipFadein)) || isNerve(GET_NERVE_ANON(LogoSceneCensorshipDisplay)) ||
                         isNerve(GET_NERVE_ANON(LogoSceneCensorshipFadeout));
@@ -104,6 +107,9 @@ void LogoScene::draw() const {
     CategoryList::execute(MR::DrawType_EffectDrawFor2DModel);
     CategoryList::execute(MR::DrawType_CometScreenFilter);
     CategoryList::execute(MR::DrawType_WipeLayout);
+#ifdef TARGET_PC
+    port_gx_marker(PORT_GX_MARK_HUD_END);
+#endif
 }
 
 bool LogoScene::isDisplayStrapRemineder() const {

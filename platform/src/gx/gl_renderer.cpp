@@ -1954,6 +1954,7 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
     // Per-eye block.
     EyeBlock eb;
     memset(&eb, 0, sizeof(eb));
+    eb.vrFlags[1] = port_is_hd_ui_enabled() ? 1 : 0;
     // A VR eye, as opposed to a flat replay or one of its stereo pair.
     bool vrEye = eye && !eye->flatStereo;
     if (vrEye) {

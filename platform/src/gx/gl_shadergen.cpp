@@ -41,6 +41,116 @@ const char* kFragmentUniformBlocks = R"(
 layout(std430, binding = 2) readonly buffer StateBuf { vec4 st[]; };
 )";
 
+const char* kUiUpscaleHelpers = R"(
+float uiEdgeVal(vec4 c) {
+    return (0.299 * c.r + 0.587 * c.g + 0.114 * c.b) * c.a + 0.5 * c.a;
+}
+
+void uiTapGrad(vec2 d, vec2 dirN, float scaleN, float scaleT, inout float wSum, inout vec4 acc, vec4 col) {
+    vec2 dirT = vec2(-dirN.y, dirN.x);
+    float dn = dot(d, dirN) * scaleN;
+    float dt = dot(d, dirT) * scaleT;
+    float d2 = min(dn * dn + dt * dt, 4.0);
+    float wA = 0.4 * d2 - 1.0;
+    float wB = 0.25 * d2 - 1.0;
+    float w = (1.5625 * wA * wA - 0.5625) * (wB * wB);
+    acc += col * w;
+    wSum += w;
+}
+
+vec4 sampleUiTex(sampler2D t, vec2 uv, float bias) {
+    vec2 tsz = vec2(textureSize(t, 0));
+    vec2 invTsz = 1.0 / max(tsz, vec2(1.0));
+    vec2 uvPx = uv * tsz;
+    vec2 dx = dFdx(uvPx);
+    vec2 dy = dFdy(uvPx);
+    vec4 baseSample = texture(t, uv, bias);
+    float texelsPerPx = max(length(dx), length(dy));
+    if (vrFlags.y == 0 || tsz.x < 8.0 || tsz.y < 8.0 || texelsPerPx >= 0.85 || texelsPerPx < 0.04) {
+        return baseSample;
+    }
+    vec2 fp = uvPx - 0.5;
+    vec2 base = floor(fp);
+    vec2 f = fp - base;
+    vec2 p0 = (base + 0.5) * invTsz;
+
+    vec4 b = textureLod(t, p0 + vec2(0.0, -1.0) * invTsz, 0.0);
+    vec4 c = textureLod(t, p0 + vec2(1.0, -1.0) * invTsz, 0.0);
+    vec4 e = textureLod(t, p0 + vec2(-1.0, 0.0) * invTsz, 0.0);
+    vec4 tcF = textureLod(t, p0, 0.0);
+    vec4 g = textureLod(t, p0 + vec2(1.0, 0.0) * invTsz, 0.0);
+    vec4 h = textureLod(t, p0 + vec2(2.0, 0.0) * invTsz, 0.0);
+    vec4 iv = textureLod(t, p0 + vec2(-1.0, 1.0) * invTsz, 0.0);
+    vec4 j = textureLod(t, p0 + vec2(0.0, 1.0) * invTsz, 0.0);
+    vec4 k = textureLod(t, p0 + vec2(1.0, 1.0) * invTsz, 0.0);
+    vec4 l = textureLod(t, p0 + vec2(2.0, 1.0) * invTsz, 0.0);
+    vec4 n = textureLod(t, p0 + vec2(0.0, 2.0) * invTsz, 0.0);
+    vec4 o = textureLod(t, p0 + vec2(1.0, 2.0) * invTsz, 0.0);
+
+    float lb = uiEdgeVal(b), lc = uiEdgeVal(c);
+    float le = uiEdgeVal(e), lf = uiEdgeVal(tcF), lg = uiEdgeVal(g), lh = uiEdgeVal(h);
+    float li = uiEdgeVal(iv), lj = uiEdgeVal(j), lk = uiEdgeVal(k), ll = uiEdgeVal(l);
+    float ln = uiEdgeVal(n), lo = uiEdgeVal(o);
+
+    vec2 g00 = vec2(lg - le, lj - lb);
+    vec2 g10 = vec2(lh - lf, lk - lc);
+    vec2 g01 = vec2(lk - li, ln - lf);
+    vec2 g11 = vec2(ll - lj, lo - lg);
+    vec2 dA = vec2(lg - lf, lj - lf);
+    vec2 dB = vec2(lk - lj, lk - lg);
+    vec2 dC = vec2(lf - le, lf - lb);
+    vec2 dD = vec2(lh - lg, lg - lc);
+    vec2 dE = vec2(lj - li, ln - lj);
+
+    float jxx = dA.x * dA.x + dB.x * dB.x + dC.x * dC.x + dD.x * dD.x + dE.x * dE.x + g00.x * g00.x + g10.x * g10.x + g01.x * g01.x + g11.x * g11.x;
+    float jyy = dA.y * dA.y + dB.y * dB.y + dC.y * dC.y + dD.y * dD.y + dE.y * dE.y + g00.y * g00.y + g10.y * g10.y + g01.y * g01.y + g11.y * g11.y;
+    float jxy = dA.x * dA.y + dB.x * dB.y + dC.x * dC.y + dD.x * dD.y + dE.x * dE.y + g00.x * g00.y + g10.x * g10.y + g01.x * g01.y + g11.x * g11.y;
+    float tr = jxx + jyy;
+    float diff = jxx - jyy;
+    float disc = sqrt(diff * diff + 4.0 * jxy * jxy);
+    float lam1 = 0.5 * (tr + disc);
+    float lam2 = 0.5 * (tr - disc);
+    vec2 ev = (jxx >= jyy) ? vec2(lam1 - jyy, jxy) : vec2(jxy, lam1 - jxx);
+    float evLen2 = dot(ev, ev);
+    vec2 dirN = (evLen2 > 1.0e-6) ? ev * inversesqrt(evLen2) : vec2(1.0, 0.0);
+    float coherence = (lam1 > 1.0e-4) ? clamp((lam1 - lam2) / (lam1 + lam2 + 1.0e-4), 0.0, 1.0) : 0.0;
+    float aniso = coherence * clamp(sqrt(lam1) * 0.9, 0.0, 1.0);
+    float diag = 1.0 / max(max(abs(dirN.x), abs(dirN.y)), 1.0e-4);
+    float scaleT = 1.0 / (1.0 + aniso * (0.9 * (diag - 1.0) + 0.25));
+    float scaleN = 1.0 + 0.30 * aniso;
+
+    float wSum = 0.0;
+    vec4 acc = vec4(0.0);
+    uiTapGrad(vec2(0.0, -1.0) - f, dirN, scaleN, scaleT, wSum, acc, b);
+    uiTapGrad(vec2(1.0, -1.0) - f, dirN, scaleN, scaleT, wSum, acc, c);
+    uiTapGrad(vec2(-1.0, 0.0) - f, dirN, scaleN, scaleT, wSum, acc, e);
+    uiTapGrad(vec2(0.0, 0.0) - f, dirN, scaleN, scaleT, wSum, acc, tcF);
+    uiTapGrad(vec2(1.0, 0.0) - f, dirN, scaleN, scaleT, wSum, acc, g);
+    uiTapGrad(vec2(2.0, 0.0) - f, dirN, scaleN, scaleT, wSum, acc, h);
+    uiTapGrad(vec2(-1.0, 1.0) - f, dirN, scaleN, scaleT, wSum, acc, iv);
+    uiTapGrad(vec2(0.0, 1.0) - f, dirN, scaleN, scaleT, wSum, acc, j);
+    uiTapGrad(vec2(1.0, 1.0) - f, dirN, scaleN, scaleT, wSum, acc, k);
+    uiTapGrad(vec2(2.0, 1.0) - f, dirN, scaleN, scaleT, wSum, acc, l);
+    uiTapGrad(vec2(0.0, 2.0) - f, dirN, scaleN, scaleT, wSum, acc, n);
+    uiTapGrad(vec2(1.0, 2.0) - f, dirN, scaleN, scaleT, wSum, acc, o);
+
+    vec4 min4 = min(min(tcF, g), min(j, k));
+    vec4 max4 = max(max(tcF, g), max(j, k));
+    vec4 easu = clamp(acc / max(wSum, 1.0e-4), min4, max4);
+
+    vec4 span = max4 - min4;
+    float mag = clamp(1.0 / texelsPerPx, 1.0, 3.5);
+    float gain = 1.0 + clamp((mag - 1.05) * 0.72, 0.0, 1.65);
+    vec4 mid = 0.5 * (min4 + max4);
+    vec4 halfSpan = max(0.5 * span, vec4(1.0e-4));
+    vec4 tn = clamp((easu - mid) / halfSpan, vec4(-1.0), vec4(1.0));
+    vec4 tSharp = (gain * tn) / (vec4(1.0) + (gain - 1.0) * abs(tn));
+    vec4 sharpened = mid + halfSpan * tSharp;
+    vec4 edgeMask = smoothstep(vec4(0.06), vec4(0.22), span);
+    return mix(easu, sharpened, edgeMask);
+}
+)";
+
 }  // namespace
 
 ShaderUid makeShaderUid(const uint32_t* bp, const uint32_t* xf, uint32_t vtxFlags, bool hud) {
@@ -478,6 +588,9 @@ std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
     o.w("in float v_viewz;\nin float v_gxz;\nout vec4 o_color;\n");
     o.w("vec2 projUv(vec3 t) { return (abs(t.z) > 1.0e-6) ? t.xy / t.z : t.xy; }\n");
     o.w("int idot(ivec3 a, ivec3 b) { ivec3 t = a * b; return t.x + t.y + t.z; }\n");
+    if (u.hud) {
+        o.s += kUiUpscaleHelpers;
+    }
     if (u.cutaway) {
         o.w("in vec3 v_eye;\n");
         o.w("const float kBayer[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);\n");
@@ -559,7 +672,8 @@ std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
             }
         }
         if (en) {
-            o.w("  tex = ivec4(round(texture(s_tex%u, %s, texSize[%u].x)%s * 255.0));\n", map, uv.c_str(), map, swapString(u, tswap).c_str());
+            o.w("  tex = ivec4(round(%s(s_tex%u, %s, texSize[%u].x)%s * 255.0));\n", u.hud ? "sampleUiTex" : "texture", map, uv.c_str(), map,
+                swapString(u, tswap).c_str());
             if (u.zTex) {
                 o.w("  ztex = tex;\n");
             }

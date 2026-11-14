@@ -1384,7 +1384,6 @@ int port_is_flight_everywhere(void) {
 }
 
 int port_is_hd_ui_enabled(void) {
-    if (!mobile_ui::UIOverlay::get().isPlusEdition()) return 0;
     return mobile_ui::UIOverlay::get().settings().hdUiTextures ? 1 : 0;
 }
 

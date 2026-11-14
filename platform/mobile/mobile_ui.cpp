@@ -2732,7 +2732,7 @@ void UIOverlay::render(int screenW, int screenH) {
 
                     float r1Y = y + 34.0f * uiScale;
                     drawText("HD UI & HUD (3D All-Stars)", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
-                    drawText("Crisp native 1080p text, icons, buttons & health meter", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                    drawText("Crisp high-res upscaled fonts, icons, buttons & HUD", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
                     drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimHdUi);
                 });
 
@@ -3039,7 +3039,7 @@ void UIOverlay::render(int screenW, int screenH) {
                         } else {
                             drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Bundled APK Ready (v0.7.6)", rgba(0.35f, 0.28f, 0.10f, 0.90f), rgba(1.0f, 0.85f, 0.40f, 1.0f), rgba(0.984f, 0.749f, 0.141f, 1.0f));
                         }
-                        drawText("Includes Graphics Presets, HD UI, Cheats & Galaxy Warp.", cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+                        drawText("Includes Graphics Presets, Haptics, Cheats & Galaxy Warp.", cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
 
                         float btnY = y + 84.0f * uiScale;
                         Color pBtnBg = plusInstalled ? rgba(0.14f, 0.48f, 0.26f, 0.95f) : rgba(0.38f, 0.20f, 0.68f, 0.95f);

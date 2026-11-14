@@ -35,7 +35,7 @@ struct Settings {
     // Graphics Preset: 0=Low (720p), 1=Medium (900p), 2=High (1080p normal, default), 3=Ultra (Native + Shading/Reflections)
     int graphicsPreset = 2;
 
-    // HD UI & HUD Textures (Super Mario 3D All-Stars high-res assets, ON by default in Plus)
+    // HD UI & HUD Upscaler (high-res crisp UI, icons & fonts, ON by default)
     bool hdUiTextures = true;
 
     // Advanced Mods (all OFF by default, user preferences saved and restored across sessions)

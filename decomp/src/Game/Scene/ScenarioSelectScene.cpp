@@ -145,9 +145,15 @@ void ScenarioSelectScene::draw() const {
         _24->frameInit();
         OSUnlockMutex(&MR::MutexHolder< 0 >::sMutex);
         MR::Effect::drawEffect3D(mEffectSystem, mCameraContext->getViewMtx());
+#ifdef TARGET_PC
+        port_gx_marker(PORT_GX_MARK_HUD_BEGIN);
+#endif
         mScenarioLayout->draw();
         MR::Effect::drawEffect2D(mEffectSystem);
         mCinemaFrame->draw();
+#ifdef TARGET_PC
+        port_gx_marker(PORT_GX_MARK_HUD_END);
+#endif
     }
 }
 
