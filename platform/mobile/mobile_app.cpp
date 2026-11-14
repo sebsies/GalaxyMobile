@@ -79,6 +79,8 @@ struct MobileApp {
     bool gamepadZIsTrigger = false;
     bool gamepadSawCenterZ = false;
     int64_t lastPointerTickNs = 0;
+    int fpsFrameCount = 0;
+    int64_t fpsWindowStartNs = 0;
     bool touchActive = false;
     float touchX = 0.0f, touchY = 0.0f;
 
@@ -1224,6 +1226,22 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
 
             // Present game image to viewport (blitted or Ultra post-processing shader)
             presentGameImage(a);
+
+            // Track rolling game frame rate every 0.5s
+            int64_t nowFpsNs = port_host_time_ns();
+            if (a.fpsWindowStartNs == 0 || (nowFpsNs - a.fpsWindowStartNs) > 2000000000ll) {
+                a.fpsWindowStartNs = nowFpsNs;
+                a.fpsFrameCount = 1;
+            } else {
+                a.fpsFrameCount++;
+                int64_t elapsedFpsNs = nowFpsNs - a.fpsWindowStartNs;
+                if (elapsedFpsNs >= 500000000ll) {
+                    float measuredFps = (float)a.fpsFrameCount / ((float)elapsedFpsNs * 1e-9f);
+                    mobile_ui::get().setFps(measuredFps);
+                    a.fpsWindowStartNs = nowFpsNs;
+                    a.fpsFrameCount = 0;
+                }
+            }
 
             // Ensure viewport is full window for mobile UI overlay
             glViewport(0, 0, a.screenWidth, a.screenHeight);

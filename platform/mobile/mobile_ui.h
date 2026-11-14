@@ -26,6 +26,10 @@ struct Settings {
     float dpadOffsetX = 0.0f;
     float dpadOffsetY = 0.0f;
     bool rightStickPointer = true;
+    bool showFpsCounter = false;
+    float fpsOffsetX = 0.0f;
+    float fpsOffsetY = 0.0f;
+    float fpsScale = 1.0f;
 
     // Graphics Preset: 0=Low (720p), 1=Medium (900p), 2=High (1080p normal, default), 3=Ultra (Native + Shading/Reflections)
     int graphicsPreset = 2;
@@ -64,6 +68,7 @@ public:
     void closeSettings();
     void openSettings();
     void setPointer(float x, float y);
+    void setFps(float fps);
     Settings& settings() { return mSettings; }
     void setPlusEdition(bool plus) { mPlusEdition = plus; }
     bool isPlusEdition() const { return mPlusEdition; }
@@ -87,6 +92,10 @@ private:
     float mInitialStickOfsX = 0.0f, mInitialStickOfsY = 0.0f;
     float mInitialBtnOfsX = 0.0f, mInitialBtnOfsY = 0.0f;
     float mInitialDpadOfsX = 0.0f, mInitialDpadOfsY = 0.0f;
+    float mInitialFpsOfsX = 0.0f, mInitialFpsOfsY = 0.0f;
+    float mInitialFpsScale = 1.0f;
+    float mFpsBasePillW = 90.0f;
+    void computeFpsRect(int screenW, int screenH, float& outX, float& outY, float& outW, float& outH, float& outBaseW) const;
 
     // Settings Navigation & Scrolling
     int mSettingsTab = 0;              // 0 = Controls, 1 = Display, 2 = System/Advanced
@@ -116,6 +125,7 @@ private:
     float mSwAnimInfinitePowerup = 0.0f;
     float mSwAnimHaptics = 0.0f;
     float mSwAnimFlightEverywhere = 0.0f;
+    float mSwAnimFpsCounter = 0.0f;
 
     // Netplay State (Local Wi-Fi & Online)
     bool mNetIsHosting = false;
@@ -158,6 +168,10 @@ private:
     // Persistent in-game Star Pointer state (normalized -1..1, default to screen center 0, 0)
     float mPointerX = 0.0f;
     float mPointerY = 0.0f;
+
+    // Performance overlay state
+    float mCurrentFps = 0.0f;
+    int mDisplayedFps = -1;
 
     // GL resources
     unsigned int mProg = 0;

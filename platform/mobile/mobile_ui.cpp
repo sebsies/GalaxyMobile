@@ -319,6 +319,10 @@ void Settings::load(const std::string& path) {
             else if (!strcmp(key, "dpad_offset_x")) dpadOffsetX = val;
             else if (!strcmp(key, "dpad_offset_y")) dpadOffsetY = val;
             else if (!strcmp(key, "right_stick_pointer")) rightStickPointer = (val > 0.5f);
+            else if (!strcmp(key, "show_fps_counter")) showFpsCounter = (val > 0.5f);
+            else if (!strcmp(key, "fps_offset_x")) fpsOffsetX = val;
+            else if (!strcmp(key, "fps_offset_y")) fpsOffsetY = val;
+            else if (!strcmp(key, "fps_scale")) fpsScale = std::max(0.60f, std::min(2.20f, val));
             else if (!strcmp(key, "mod_skip_cutscenes")) modSkipCutscenes = (val > 0.5f);
             else if (!strcmp(key, "mod_infinite_health")) modInfiniteHealth = (val > 0.5f);
             else if (!strcmp(key, "mod_infinite_powerup")) modInfinitePowerup = (val > 0.5f);
@@ -353,6 +357,10 @@ void Settings::save(const std::string& path) const {
     fprintf(f, "dpad_offset_x=%.1f\n", dpadOffsetX);
     fprintf(f, "dpad_offset_y=%.1f\n", dpadOffsetY);
     fprintf(f, "right_stick_pointer=%d\n", rightStickPointer ? 1 : 0);
+    fprintf(f, "show_fps_counter=%d\n", showFpsCounter ? 1 : 0);
+    fprintf(f, "fps_offset_x=%.1f\n", fpsOffsetX);
+    fprintf(f, "fps_offset_y=%.1f\n", fpsOffsetY);
+    fprintf(f, "fps_scale=%.2f\n", fpsScale);
     fprintf(f, "mod_skip_cutscenes=%d\n", modSkipCutscenes ? 1 : 0);
     fprintf(f, "mod_infinite_health=%d\n", modInfiniteHealth ? 1 : 0);
     fprintf(f, "mod_infinite_powerup=%d\n", modInfinitePowerup ? 1 : 0);
@@ -384,6 +392,7 @@ UIOverlay::UIOverlay() {
     mSwAnimInfinitePowerup = 0.0f;
     mSwAnimHaptics = 0.0f;
     mSwAnimFlightEverywhere = 0.0f;
+    mSwAnimFpsCounter = 0.0f;
 }
 
 UIOverlay& UIOverlay::get() {
@@ -416,6 +425,7 @@ void UIOverlay::setSavePath(const std::string& path) {
     mSwAnimInfinitePowerup = mSettings.modInfinitePowerup ? 1.0f : 0.0f;
     mSwAnimHaptics = mSettings.modAdvancedHaptics ? 1.0f : 0.0f;
     mSwAnimFlightEverywhere = mSettings.modFlightEverywhere ? 1.0f : 0.0f;
+    mSwAnimFpsCounter = mSettings.showFpsCounter ? 1.0f : 0.0f;
 }
 
 bool UIOverlay::needsRedraw() {
@@ -445,7 +455,8 @@ bool UIOverlay::needsRedraw() {
         switchActive(mSwAnimInfiniteHp, mSettings.modInfiniteHealth) ||
         switchActive(mSwAnimInfinitePowerup, mSettings.modInfinitePowerup) ||
         switchActive(mSwAnimHaptics, mSettings.modAdvancedHaptics) ||
-        switchActive(mSwAnimFlightEverywhere, mSettings.modFlightEverywhere)) {
+        switchActive(mSwAnimFlightEverywhere, mSettings.modFlightEverywhere) ||
+        switchActive(mSwAnimFpsCounter, mSettings.showFpsCounter)) {
         return true;
     }
     bool d = mDirty;
@@ -470,6 +481,47 @@ void UIOverlay::openSettings() {
 void UIOverlay::setPointer(float x, float y) {
     mPointerX = std::max(-1.0f, std::min(1.0f, x));
     mPointerY = std::max(-1.0f, std::min(1.0f, y));
+}
+
+void UIOverlay::setFps(float fps) {
+    mCurrentFps = std::max(0.0f, fps);
+    int rounded = (int)lroundf(mCurrentFps);
+    if (rounded != mDisplayedFps) {
+        mDisplayedFps = rounded;
+        if (mSettings.showFpsCounter) {
+            mDirty = true;
+        }
+    }
+}
+
+void UIOverlay::computeFpsRect(int screenW, int screenH, float& outX, float& outY, float& outW, float& outH, float& outBaseW) const {
+    float w = (float)screenW;
+    float h = (float)screenH;
+    float uiScale = h / 650.0f;
+    float fpsScale = std::max(0.60f, std::min(2.20f, mSettings.fpsScale));
+    float fs = uiScale * fpsScale;
+
+    const ui_font::Face& face = ui_font::kFaces[0];
+    float refW = 0.0f;
+    for (const char* p = "888 FPS"; *p; p++) {
+        char ch = *p;
+        if (ch >= 32 && ch < 127) {
+            refW += (face.glyphs[ch - 32].advance * 0.25f) * (0.34f * uiScale);
+        }
+    }
+    outBaseW = std::max(84.0f * uiScale, refW + 33.0f * uiScale);
+    outW = outBaseW * fpsScale;
+    outH = 28.0f * fs;
+
+    float cutoutInset = mSettings.showCameraCutout ? 0.0f : (42.0f * uiScale);
+    float baseX = 70.0f * uiScale + cutoutInset;
+    float baseY = 26.0f * uiScale;
+    float minX = 6.0f * uiScale;
+    float minY = 6.0f * uiScale;
+    float maxX = std::max(minX, w - outW - 6.0f * uiScale);
+    float maxY = std::max(minY, h - outH - 6.0f * uiScale);
+    outX = std::max(minX, std::min(maxX, baseX + mSettings.fpsOffsetX));
+    outY = std::max(minY, std::min(maxY, baseY + mSettings.fpsOffsetY));
 }
 
 bool UIOverlay::init() {
@@ -625,45 +677,77 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                 mSettings.buttonOffsetY = 0.0f;
                 mSettings.dpadOffsetX = 0.0f;
                 mSettings.dpadOffsetY = 0.0f;
+                mSettings.fpsOffsetX = 0.0f;
+                mSettings.fpsOffsetY = 0.0f;
+                mSettings.fpsScale = 1.0f;
                 if (!mSavePath.empty()) mSettings.save(mSavePath);
                 mDirty = true;
                 return true;
             }
 
+            if (mSettings.showFpsCounter) {
+                float fpsX, fpsY, fpsW, fpsH, fpsBaseW;
+                computeFpsRect(screenW, screenH, fpsX, fpsY, fpsW, fpsH, fpsBaseW);
+                float handleX = fpsX + fpsW + 2.0f * uiScale;
+                float handleY = fpsY + fpsH + 2.0f * uiScale;
+                float dHandle2 = (px - handleX) * (px - handleX) + (py - handleY) * (py - handleY);
+                if (dHandle2 <= (28.0f * uiScale) * (28.0f * uiScale)) {
+                    mDraggingCluster = 5; // FPS resize handle
+                    mDragStartX = px;
+                    mDragStartY = py;
+                    mInitialFpsScale = mSettings.fpsScale;
+                    mFpsBasePillW = fpsBaseW;
+                    mDirty = true;
+                    return true;
+                }
+                if (px >= fpsX - 14.0f * uiScale && px <= fpsX + fpsW + 14.0f * uiScale &&
+                    py >= fpsY - 14.0f * uiScale && py <= fpsY + fpsH + 14.0f * uiScale) {
+                    float cutoutInset = mSettings.showCameraCutout ? 0.0f : (42.0f * uiScale);
+                    float baseX = 70.0f * uiScale + cutoutInset;
+                    float baseY = 26.0f * uiScale;
+                    mDraggingCluster = 4; // FPS position
+                    mDragStartX = px;
+                    mDragStartY = py;
+                    mInitialFpsOfsX = fpsX - baseX;
+                    mInitialFpsOfsY = fpsY - baseY;
+                    mDirty = true;
+                    return true;
+                }
+            }
+
             // Start dragging stick cluster, button cluster, or D-Pad cluster
-            float cutoutInset = mSettings.showCameraCutout ? 0.0f : (42.0f * uiScale);
-            float baseDpadX = mSettings.dpadOnRight ? (w - 380.0f * scale - cutoutInset) : (140.0f * scale + cutoutInset);
-            float baseDpadY = mSettings.dpadOnRight ? (h - 220.0f * scale) : (h - 390.0f * scale);
-            float curDpadX = baseDpadX + mSettings.dpadOffsetX;
-            float curDpadY = baseDpadY + mSettings.dpadOffsetY;
+            if (mSettings.showControls) {
+                float cutoutInset = mSettings.showCameraCutout ? 0.0f : (42.0f * uiScale);
+                float baseDpadX = mSettings.dpadOnRight ? (w - 380.0f * scale - cutoutInset) : (140.0f * scale + cutoutInset);
+                float baseDpadY = mSettings.dpadOnRight ? (h - 220.0f * scale) : (h - 390.0f * scale);
+                float curDpadX = baseDpadX + mSettings.dpadOffsetX;
+                float curDpadY = baseDpadY + mSettings.dpadOffsetY;
 
-            float curStickX = 175.0f * scale + cutoutInset + mSettings.stickOffsetX;
-            float curStickY = h - 175.0f * scale + mSettings.stickOffsetY;
+                float curStickX = 175.0f * scale + cutoutInset + mSettings.stickOffsetX;
+                float curStickY = h - 175.0f * scale + mSettings.stickOffsetY;
 
-            float curBtnX = w - 160.0f * scale - cutoutInset + mSettings.buttonOffsetX - 60.0f * scale;
-            float curBtnY = h - 160.0f * scale + mSettings.buttonOffsetY - 60.0f * scale;
+                float dDpad2 = (px - curDpadX) * (px - curDpadX) + (py - curDpadY) * (py - curDpadY);
+                float dStick2 = (px - curStickX) * (px - curStickX) + (py - curStickY) * (py - curStickY);
 
-            float dDpad2 = (px - curDpadX) * (px - curDpadX) + (py - curDpadY) * (py - curDpadY);
-            float dStick2 = (px - curStickX) * (px - curStickX) + (py - curStickY) * (py - curStickY);
-
-            if (mSettings.showDpad && dDpad2 <= (95.0f * scale) * (95.0f * scale)) {
-                mDraggingCluster = 3; // D-Pad
-                mDragStartX = px;
-                mDragStartY = py;
-                mInitialDpadOfsX = mSettings.dpadOffsetX;
-                mInitialDpadOfsY = mSettings.dpadOffsetY;
-            } else if (dStick2 <= (140.0f * scale) * (140.0f * scale) || px < w * 0.40f) {
-                mDraggingCluster = 1; // stick
-                mDragStartX = px;
-                mDragStartY = py;
-                mInitialStickOfsX = mSettings.stickOffsetX;
-                mInitialStickOfsY = mSettings.stickOffsetY;
-            } else {
-                mDraggingCluster = 2; // button cluster
-                mDragStartX = px;
-                mDragStartY = py;
-                mInitialBtnOfsX = mSettings.buttonOffsetX;
-                mInitialBtnOfsY = mSettings.buttonOffsetY;
+                if (mSettings.showDpad && dDpad2 <= (95.0f * scale) * (95.0f * scale)) {
+                    mDraggingCluster = 3; // D-Pad
+                    mDragStartX = px;
+                    mDragStartY = py;
+                    mInitialDpadOfsX = mSettings.dpadOffsetX;
+                    mInitialDpadOfsY = mSettings.dpadOffsetY;
+                } else if (dStick2 <= (140.0f * scale) * (140.0f * scale) || px < w * 0.40f) {
+                    mDraggingCluster = 1; // stick
+                    mDragStartX = px;
+                    mDragStartY = py;
+                    mInitialStickOfsX = mSettings.stickOffsetX;
+                    mInitialStickOfsY = mSettings.stickOffsetY;
+                } else {
+                    mDraggingCluster = 2; // button cluster
+                    mDragStartX = px;
+                    mDragStartY = py;
+                    mInitialBtnOfsX = mSettings.buttonOffsetX;
+                    mInitialBtnOfsY = mSettings.buttonOffsetY;
+                }
             }
             mDirty = true;
             return true;
@@ -679,6 +763,23 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
             } else if (mDraggingCluster == 3) {
                 mSettings.dpadOffsetX = mInitialDpadOfsX + (px - mDragStartX);
                 mSettings.dpadOffsetY = mInitialDpadOfsY + (py - mDragStartY);
+            } else if (mDraggingCluster == 4) {
+                float cutoutInset = mSettings.showCameraCutout ? 0.0f : (42.0f * uiScale);
+                float baseX = 70.0f * uiScale + cutoutInset;
+                float baseY = 26.0f * uiScale;
+                float fpsX, fpsY, fpsW, fpsH, fpsBaseW;
+                computeFpsRect(screenW, screenH, fpsX, fpsY, fpsW, fpsH, fpsBaseW);
+                float minX = 6.0f * uiScale;
+                float minY = 6.0f * uiScale;
+                float maxX = std::max(minX, w - fpsW - 6.0f * uiScale);
+                float maxY = std::max(minY, h - fpsH - 6.0f * uiScale);
+                mSettings.fpsOffsetX = std::max(minX - baseX, std::min(maxX - baseX, mInitialFpsOfsX + (px - mDragStartX)));
+                mSettings.fpsOffsetY = std::max(minY - baseY, std::min(maxY - baseY, mInitialFpsOfsY + (py - mDragStartY)));
+            } else if (mDraggingCluster == 5) {
+                float dx = px - mDragStartX;
+                float dy = py - mDragStartY;
+                float newScale = mInitialFpsScale + (dx + dy * 0.5f) / std::max(40.0f, mFpsBasePillW);
+                mSettings.fpsScale = std::max(0.60f, std::min(2.20f, newScale));
             }
             mDirty = true;
             return true;
@@ -711,7 +812,7 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
         } else if (mSettingsTab == 0) {
             totalContentH = 578.0f * uiScale;
         } else if (mSettingsTab == 1) {
-            totalContentH = 432.0f * uiScale;
+            totalContentH = 644.0f * uiScale;
         } else if (mSettingsTab == 2) {
             totalContentH = mPlusEdition ? (1176.0f * uiScale) : (826.0f * uiScale);
         } else {
@@ -932,6 +1033,42 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                         // Row 4: HD UI & HUD Textures Switch (Card 3: 358..412)
                         else if (contentRelY >= 358.0f * uiScale && contentRelY <= 412.0f * uiScale) {
                             mSettings.hdUiTextures = !mSettings.hdUiTextures;
+                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                        }
+                        // Row 5: Show FPS Counter Switch (Card 4: 462..510)
+                        else if (contentRelY >= 462.0f * uiScale && contentRelY <= 510.0f * uiScale) {
+                            mSettings.showFpsCounter = !mSettings.showFpsCounter;
+                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                        }
+                        // Row 6: FPS Counter Size Stepper (Card 4: 512..570)
+                        else if (contentRelY >= 512.0f * uiScale && contentRelY <= 570.0f * uiScale) {
+                            float segW = contentW / 3.0f;
+                            int idx = (int)((px - (drawerX + padX)) / segW);
+                            if (idx <= 0) {
+                                mSettings.fpsScale = std::max(0.60f, mSettings.fpsScale - 0.10f);
+                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            } else if (idx >= 2) {
+                                mSettings.fpsScale = std::min(2.20f, mSettings.fpsScale + 0.10f);
+                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            } else {
+                                mSettings.fpsScale = 1.00f;
+                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                            }
+                        }
+                        // Row 7: Move & Resize / Reset FPS (Card 4: 574..630)
+                        else if (contentRelY >= 574.0f * uiScale && contentRelY <= 630.0f * uiScale) {
+                            float splitX = drawerX + padX + contentW * 0.52f;
+                            if (px < splitX) {
+                                mSettings.showFpsCounter = true;
+                                mSwAnimFpsCounter = 1.0f;
+                                mSettingsOpen = false;
+                                mEditLayoutMode = true;
+                                if (!mSavePath.empty()) mSettings.save(mSavePath);
+                            } else {
+                                mSettings.fpsOffsetX = 0.0f;
+                                mSettings.fpsOffsetY = 0.0f;
+                                mSettings.fpsScale = 1.0f;
+                            }
                             mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                         }
                     } else if (mSettingsTab == 3) {
@@ -1628,6 +1765,7 @@ void UIOverlay::render(int screenW, int screenH) {
     updateSwAnim(mSwAnimInfinitePowerup, mSettings.modInfinitePowerup);
     updateSwAnim(mSwAnimHaptics, mSettings.modAdvancedHaptics);
     updateSwAnim(mSwAnimFlightEverywhere, mSettings.modFlightEverywhere);
+    updateSwAnim(mSwAnimFpsCounter, mSettings.showFpsCounter);
 
     // Fluid Tab Indicator Animation
     float padX = 22.0f * uiScale;
@@ -2013,6 +2151,44 @@ void UIOverlay::render(int screenW, int screenH) {
         }
     }
 
+    auto drawFpsPill = [&]() {
+        float fpsX, fpsY, fpsW, fpsH, fpsBaseW;
+        computeFpsRect(screenW, screenH, fpsX, fpsY, fpsW, fpsH, fpsBaseW);
+        (void)fpsBaseW;
+        float fpsScale = std::max(0.60f, std::min(2.20f, mSettings.fpsScale));
+        float fs = uiScale * fpsScale;
+
+        char fpsTxt[32];
+        if (mDisplayedFps >= 0) {
+            snprintf(fpsTxt, sizeof(fpsTxt), "%d FPS", mDisplayedFps);
+        } else {
+            snprintf(fpsTxt, sizeof(fpsTxt), "-- FPS");
+        }
+
+        Color dotCol = rgba(0.45f, 0.65f, 0.85f, 0.90f);
+        if (mDisplayedFps >= 55) {
+            dotCol = rgba(0.290f, 0.871f, 0.502f, 1.0f); // Emerald green
+        } else if (mDisplayedFps >= 35) {
+            dotCol = rgba(0.984f, 0.749f, 0.141f, 1.0f); // Amber
+        } else if (mDisplayedFps >= 0) {
+            dotCol = rgba(0.960f, 0.360f, 0.360f, 1.0f); // Coral red
+        }
+
+        float pillR = fpsH * 0.5f;
+        drawRoundRect(fpsX, fpsY, fpsX + fpsW, fpsY + fpsH, pillR, rgba(0.32f, 0.42f, 0.58f, 0.58f));
+        float inset = 1.2f * uiScale;
+        drawRoundRect(fpsX + inset, fpsY + inset, fpsX + fpsW - inset, fpsY + fpsH - inset, std::max(1.0f, pillR - inset), rgba(0.06f, 0.08f, 0.12f, 0.84f));
+        drawCircle(fpsX + 12.0f * fs, fpsY + fpsH * 0.5f, 4.0f * fs, dotCol);
+        drawText(fpsTxt, fpsX + 22.0f * fs, fpsY + 19.2f * fs, 0.34f * fs, rgba(0.96f, 0.97f, 1.0f, 0.98f), 0);
+    };
+
+    // -------------------------------------------------------------
+    // Performance Overlay (FPS Counter)
+    // -------------------------------------------------------------
+    if (mSettings.showFpsCounter && !mEditLayoutMode) {
+        drawFpsPill();
+    }
+
     // -------------------------------------------------------------
     // Material 3 Settings Tab Dock (Pinned to Top-Left Edge ⚙)
     // -------------------------------------------------------------
@@ -2039,7 +2215,7 @@ void UIOverlay::render(int screenW, int screenH) {
 
         // M3 Top bar card
         drawRoundRect(w * 0.5f - 240.0f, 30.0f, w * 0.5f + 240.0f, 95.0f, 20.0f, rgba(0.12f, 0.14f, 0.18f, 0.96f));
-        drawText("DRAG TO REPOSITION CONTROLS", w * 0.5f, 55.0f, 0.46f, rgba(0.90f, 0.92f, 0.96f, 1.0f), 1);
+        drawText("DRAG TO MOVE • CORNER TO RESIZE FPS", w * 0.5f, 55.0f, 0.40f, rgba(0.90f, 0.92f, 0.96f, 1.0f), 1);
 
         // Save button (M3 Primary Pill)
         float saveBtnX = w * 0.5f - 110.0f;
@@ -2051,26 +2227,56 @@ void UIOverlay::render(int screenW, int screenH) {
         drawRoundRect(rstBtnX, 65.0f, rstBtnX + 100.0f, 90.0f, 12.0f, rgba(0.35f, 0.18f, 0.20f, 0.95f));
         drawText("RESET", rstBtnX + 50.0f, 83.0f, 0.42f, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
 
-        // Stick cluster bounding outline
-        float defaultStickX = 175.0f * scale + mSettings.stickOffsetX;
-        float defaultStickY = h - 175.0f * scale + mSettings.stickOffsetY;
-        drawRing(defaultStickX, defaultStickY, 120.0f * scale, 0.96f, rgba(0.40f, 0.65f, 0.98f, 0.85f));
-        drawText("JOYSTICK", defaultStickX, defaultStickY - 130.0f * scale, 0.45f, rgba(0.40f, 0.65f, 0.98f, 0.95f), 1);
+        if (mSettings.showControls) {
+            // Stick cluster bounding outline
+            float defaultStickX = 175.0f * scale + mSettings.stickOffsetX;
+            float defaultStickY = h - 175.0f * scale + mSettings.stickOffsetY;
+            drawRing(defaultStickX, defaultStickY, 120.0f * scale, 0.96f, rgba(0.40f, 0.65f, 0.98f, 0.85f));
+            drawText("JOYSTICK", defaultStickX, defaultStickY - 130.0f * scale, 0.45f, rgba(0.40f, 0.65f, 0.98f, 0.95f), 1);
 
-        // Button cluster bounding outline
-        float btnBaseX = w - 160.0f * scale + mSettings.buttonOffsetX;
-        float btnBaseY = h - 160.0f * scale + mSettings.buttonOffsetY;
-        drawRing(btnBaseX - 60.0f * scale, btnBaseY - 60.0f * scale, 160.0f * scale, 0.96f, rgba(0.40f, 0.65f, 0.98f, 0.85f));
-        drawText("BUTTONS", btnBaseX - 60.0f * scale, btnBaseY - 230.0f * scale, 0.45f, rgba(0.40f, 0.65f, 0.98f, 0.95f), 1);
+            // Button cluster bounding outline
+            float btnBaseX = w - 160.0f * scale + mSettings.buttonOffsetX;
+            float btnBaseY = h - 160.0f * scale + mSettings.buttonOffsetY;
+            drawRing(btnBaseX - 60.0f * scale, btnBaseY - 60.0f * scale, 160.0f * scale, 0.96f, rgba(0.40f, 0.65f, 0.98f, 0.85f));
+            drawText("BUTTONS", btnBaseX - 60.0f * scale, btnBaseY - 230.0f * scale, 0.45f, rgba(0.40f, 0.65f, 0.98f, 0.95f), 1);
 
-        // Camera D-Pad bounding outline
-        if (mSettings.showDpad) {
-            float baseDpadX = mSettings.dpadOnRight ? (w - 380.0f * scale) : (140.0f * scale);
-            float baseDpadY = mSettings.dpadOnRight ? (h - 220.0f * scale) : (h - 390.0f * scale);
-            float curDpadX = baseDpadX + mSettings.dpadOffsetX;
-            float curDpadY = baseDpadY + mSettings.dpadOffsetY;
-            drawRing(curDpadX, curDpadY, 78.0f * scale, 0.96f, rgba(0.40f, 0.65f, 0.98f, 0.85f));
-            drawText("CAMERA D-PAD", curDpadX, curDpadY - 88.0f * scale, 0.42f, rgba(0.40f, 0.65f, 0.98f, 0.95f), 1);
+            // Camera D-Pad bounding outline
+            if (mSettings.showDpad) {
+                float baseDpadX = mSettings.dpadOnRight ? (w - 380.0f * scale) : (140.0f * scale);
+                float baseDpadY = mSettings.dpadOnRight ? (h - 220.0f * scale) : (h - 390.0f * scale);
+                float curDpadX = baseDpadX + mSettings.dpadOffsetX;
+                float curDpadY = baseDpadY + mSettings.dpadOffsetY;
+                drawRing(curDpadX, curDpadY, 78.0f * scale, 0.96f, rgba(0.40f, 0.65f, 0.98f, 0.85f));
+                drawText("CAMERA D-PAD", curDpadX, curDpadY - 88.0f * scale, 0.42f, rgba(0.40f, 0.65f, 0.98f, 0.95f), 1);
+            }
+        }
+
+        if (mSettings.showFpsCounter) {
+            drawFpsPill();
+            float fpsX, fpsY, fpsW, fpsH, fpsBaseW;
+            computeFpsRect(screenW, screenH, fpsX, fpsY, fpsW, fpsH, fpsBaseW);
+            (void)fpsBaseW;
+
+            float pad = 4.0f * uiScale;
+            Color boxCol = rgba(0.220f, 0.741f, 0.969f, 0.95f);
+            float x0 = fpsX - pad, y0 = fpsY - pad, x1 = fpsX + fpsW + pad, y1 = fpsY + fpsH + pad;
+            float stroke = 2.0f * uiScale;
+            drawLine(x0, y0, x1, y0, stroke, boxCol);
+            drawLine(x1, y0, x1, y1, stroke, boxCol);
+            drawLine(x1, y1, x0, y1, stroke, boxCol);
+            drawLine(x0, y1, x0, y0, stroke, boxCol);
+
+            // Bottom-right circular resize handle
+            float hx = fpsX + fpsW + 2.0f * uiScale;
+            float hy = fpsY + fpsH + 2.0f * uiScale;
+            drawCircle(hx, hy, 11.0f * uiScale, boxCol);
+            drawCircle(hx, hy, 5.0f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f));
+
+            char fpsTag[32];
+            int pct = (int)lroundf(mSettings.fpsScale * 100.0f);
+            snprintf(fpsTag, sizeof(fpsTag), "FPS (%d%%)", pct);
+            float labelY = (fpsY > 36.0f * uiScale) ? (y0 - 8.0f * uiScale) : (y1 + 20.0f * uiScale);
+            drawText(fpsTag, fpsX + fpsW * 0.5f, labelY, 0.34f * uiScale, boxCol, 1);
         }
     }
 
@@ -2102,7 +2308,7 @@ void UIOverlay::render(int screenW, int screenH) {
         } else if (mSettingsTab == 0) {
             totalContentH = 578.0f * uiScale;
         } else if (mSettingsTab == 1) {
-            totalContentH = 432.0f * uiScale;
+            totalContentH = 644.0f * uiScale;
         } else if (mSettingsTab == 2) {
             totalContentH = mPlusEdition ? (1176.0f * uiScale) : (826.0f * uiScale);
         } else {
@@ -2466,6 +2672,44 @@ void UIOverlay::render(int screenW, int screenH) {
                     drawText("HD UI & HUD (3D All-Stars)", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
                     drawText("Crisp native 1080p text, icons, buttons & health meter", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
                     drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimHdUi);
+                });
+
+                // Card 4: Performance Overlay (FPS Counter)
+                renderCardBlock(430.0f * uiScale, 206.0f * uiScale, [&](float y) {
+                    drawCard(cX0, y, cX1, y + 206.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+
+                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
+                    drawText("PERFORMANCE OVERLAY (FPS)", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+
+                    // Row 1: Show FPS Counter Switch
+                    float r1Y = y + 34.0f * uiScale;
+                    drawText("Show FPS Counter", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
+                    drawText("Display movable & resizable frame rate badge", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                    drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimFpsCounter);
+
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 80.0f * uiScale, cX1 - 14.0f * uiScale, y + 81.0f * uiScale, 0.5f, cDivider);
+
+                    // Row 2: FPS Counter Size Stepper
+                    float r2Y = y + 84.0f * uiScale;
+                    drawText("Counter Size", cX0 + 14.0f * uiScale, r2Y + 14.0f * uiScale, 0.34f * uiScale, cTextPrimary, 0);
+                    char sizePct[24];
+                    snprintf(sizePct, sizeof(sizePct), "%d%%", (int)lroundf(mSettings.fpsScale * 100.0f));
+                    const char* fpsSizeOpts[3] = {"- Smaller", sizePct, "+ Larger"};
+                    drawSegmentedGroup(cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, contentW - 28.0f * uiScale, 30.0f * uiScale, fpsSizeOpts, 3, 1);
+
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 142.0f * uiScale, cX1 - 14.0f * uiScale, y + 143.0f * uiScale, 0.5f, cDivider);
+
+                    // Row 3: Move & Resize / Reset
+                    float r3Y = y + 146.0f * uiScale;
+                    float b1X0 = cX0 + 14.0f * uiScale;
+                    float b1X1 = cX0 + 14.0f * uiScale + (contentW - 36.0f * uiScale) * 0.58f;
+                    float b2X0 = b1X1 + 8.0f * uiScale;
+                    float b2X1 = cX1 - 14.0f * uiScale;
+                    drawRoundRect(b1X0, r3Y + 6.0f * uiScale, b1X1, r3Y + 40.0f * uiScale, 16.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 0.95f));
+                    drawText("Move & Resize", (b1X0 + b1X1) * 0.5f, r3Y + 28.0f * uiScale, 0.34f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+
+                    drawRoundRect(b2X0, r3Y + 6.0f * uiScale, b2X1, r3Y + 40.0f * uiScale, 16.0f * uiScale, rgba(0.35f, 0.15f, 0.18f, 0.95f));
+                    drawText("Reset", (b2X0 + b2X1) * 0.5f, r3Y + 28.0f * uiScale, 0.34f * uiScale, rgba(1.0f, 0.72f, 0.72f, 1.0f), 1);
                 });
             } else if (mSettingsTab == 2) {
                 static const char* kLangNames[7] = {
