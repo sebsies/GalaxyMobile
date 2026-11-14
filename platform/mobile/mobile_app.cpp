@@ -686,10 +686,12 @@ void updateRightStickPointer(MobileApp& a, int64_t nowNs) {
     float dirY = ry / mag;
 
     // Normalized [-1, 1] pointer space is 16:9, so scale vertical speed for uniform visual motion.
-    constexpr float kSpeedX = 2.50f;
-    constexpr float kSpeedY = 2.50f * (16.0f / 9.0f);
-    a.touchPad.pointerX = std::max(-1.0f, std::min(1.0f, a.touchPad.pointerX + dirX * curved * kSpeedX * dt));
-    a.touchPad.pointerY = std::max(-1.0f, std::min(1.0f, a.touchPad.pointerY + dirY * curved * kSpeedY * dt));
+    float sens = std::max(0.5f, std::min(3.0f, mobile_ui::get().settings().rightStickSensitivity));
+    constexpr float kBaseSpeedX = 3.40f;
+    float speedX = kBaseSpeedX * sens;
+    float speedY = kBaseSpeedX * (16.0f / 9.0f) * sens;
+    a.touchPad.pointerX = std::max(-1.0f, std::min(1.0f, a.touchPad.pointerX + dirX * curved * speedX * dt));
+    a.touchPad.pointerY = std::max(-1.0f, std::min(1.0f, a.touchPad.pointerY + dirY * curved * speedY * dt));
     a.touchPad.pointerValid = 1;
     a.touchPad.pointerDist = 2.0f;
     mobile_ui::get().setPointer(a.touchPad.pointerX, a.touchPad.pointerY);

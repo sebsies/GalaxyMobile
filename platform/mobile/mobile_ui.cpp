@@ -319,6 +319,7 @@ void Settings::load(const std::string& path) {
             else if (!strcmp(key, "dpad_offset_x")) dpadOffsetX = val;
             else if (!strcmp(key, "dpad_offset_y")) dpadOffsetY = val;
             else if (!strcmp(key, "right_stick_pointer")) rightStickPointer = (val > 0.5f);
+            else if (!strcmp(key, "right_stick_sensitivity")) rightStickSensitivity = std::max(0.50f, std::min(3.00f, val));
             else if (!strcmp(key, "show_fps_counter")) showFpsCounter = (val > 0.5f);
             else if (!strcmp(key, "fps_offset_x")) fpsOffsetX = val;
             else if (!strcmp(key, "fps_offset_y")) fpsOffsetY = val;
@@ -357,6 +358,7 @@ void Settings::save(const std::string& path) const {
     fprintf(f, "dpad_offset_x=%.1f\n", dpadOffsetX);
     fprintf(f, "dpad_offset_y=%.1f\n", dpadOffsetY);
     fprintf(f, "right_stick_pointer=%d\n", rightStickPointer ? 1 : 0);
+    fprintf(f, "right_stick_sensitivity=%.2f\n", rightStickSensitivity);
     fprintf(f, "show_fps_counter=%d\n", showFpsCounter ? 1 : 0);
     fprintf(f, "fps_offset_x=%.1f\n", fpsOffsetX);
     fprintf(f, "fps_offset_y=%.1f\n", fpsOffsetY);
@@ -810,7 +812,7 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
             }
             totalContentH = matchingCount * (78.0f * uiScale) + 16.0f * uiScale;
         } else if (mSettingsTab == 0) {
-            totalContentH = 578.0f * uiScale;
+            totalContentH = 666.0f * uiScale;
         } else if (mSettingsTab == 1) {
             totalContentH = 644.0f * uiScale;
         } else if (mSettingsTab == 2) {
@@ -819,6 +821,21 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
             totalContentH = 780.0f * uiScale;
         }
         float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
+
+        auto applySensitivitySlider = [&](float x) {
+            float trackX0 = drawerX + padX + 24.0f * uiScale;
+            float trackX1 = drawerX + drawerW - padX - 24.0f * uiScale;
+            float t = std::max(0.0f, std::min(1.0f, (x - trackX0) / std::max(1.0f, trackX1 - trackX0)));
+            float rawSens = 0.50f + t * 2.50f;
+            float newSens = std::max(0.50f, std::min(3.00f, roundf(rawSens * 20.0f) * 0.05f));
+            if (fabsf(newSens - mSettings.rightStickSensitivity) > 0.001f) {
+                if ((int)lroundf(newSens * 10.0f) != (int)lroundf(mSettings.rightStickSensitivity * 10.0f)) {
+                    mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                }
+                mSettings.rightStickSensitivity = newSens;
+            }
+            mDirty = true;
+        };
 
         // 1. Move Gesture for Smooth Scrolling
         if (action == AMOTION_EVENT_ACTION_MOVE) {
@@ -853,6 +870,10 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                             }
                             mDirty = true;
+                            return true;
+                        }
+                        if (mDraggingSensitivitySlider) {
+                            applySensitivitySlider(px);
                             return true;
                         }
                         float deltaY = py - mDrawerTouchStartY;
@@ -1307,12 +1328,13 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                     }
 
                     if (!mSavePath.empty()) mSettings.save(mSavePath);
-                } else if (mDraggingLanguageSlider) {
+                } else if (mDraggingLanguageSlider || mDraggingSensitivitySlider) {
                     if (!mSavePath.empty()) mSettings.save(mSavePath);
                 }
                 mDrawerScrollPointerId = -1;
                 mDrawerIsScrolling = false;
                 mDraggingLanguageSlider = false;
+                mDraggingSensitivitySlider = false;
                 mDirty = true;
                 return true;
             }
@@ -1438,7 +1460,14 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                     mDrawerScrollStartOffset = mDrawerScrollY;
                     mDrawerIsScrolling = false;
                     mDraggingLanguageSlider = false;
-                    if (mSettingsTab == 2) {
+                    mDraggingSensitivitySlider = false;
+                    if (mSettingsTab == 0) {
+                        float contentRelY = py - contentTop + mDrawerScrollY;
+                        if (contentRelY >= 578.0f * uiScale && contentRelY <= 650.0f * uiScale) {
+                            mDraggingSensitivitySlider = true;
+                            applySensitivitySlider(px);
+                        }
+                    } else if (mSettingsTab == 2) {
                         float contentRelY = py - contentTop + mDrawerScrollY;
                         float langMinY = mPlusEdition ? (746.0f * uiScale) : (398.0f * uiScale);
                         float langMaxY = mPlusEdition ? (810.0f * uiScale) : (462.0f * uiScale);
@@ -2306,7 +2335,7 @@ void UIOverlay::render(int screenW, int screenH) {
             }
             totalContentH = matchingCount * (78.0f * uiScale) + 16.0f * uiScale;
         } else if (mSettingsTab == 0) {
-            totalContentH = 578.0f * uiScale;
+            totalContentH = 666.0f * uiScale;
         } else if (mSettingsTab == 1) {
             totalContentH = 644.0f * uiScale;
         } else if (mSettingsTab == 2) {
@@ -2575,8 +2604,8 @@ void UIOverlay::render(int screenW, int screenH) {
                 });
 
                 // Card 3: Gamepad / Controller
-                renderCardBlock(472.0f * uiScale, 96.0f * uiScale, [&](float y) {
-                    drawCard(cX0, y, cX1, y + 96.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+                renderCardBlock(472.0f * uiScale, 184.0f * uiScale, [&](float y) {
+                    drawCard(cX0, y, cX1, y + 184.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
 
                     // Card Header
                     drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
@@ -2587,6 +2616,39 @@ void UIOverlay::render(int screenW, int screenH) {
                     drawText("Right Joystick Mode", cX0 + 14.0f * uiScale, r1Y + 14.0f * uiScale, 0.34f * uiScale, cTextPrimary, 0);
                     const char* rStickOpts[2] = {"Star Pointer", "Camera"};
                     drawSegmentedGroup(cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, contentW - 28.0f * uiScale, 30.0f * uiScale, rStickOpts, 2, mSettings.rightStickPointer ? 0 : 1);
+
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 88.0f * uiScale, cX1 - 14.0f * uiScale, y + 89.0f * uiScale, 0.5f, cDivider);
+
+                    // Row 2: Right Joystick Sensitivity Slider
+                    float r2Y = y + 92.0f * uiScale;
+                    drawText("Pointer Sensitivity", cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, 0.34f * uiScale, cTextPrimary, 0);
+                    float curSens = std::max(0.50f, std::min(3.00f, mSettings.rightStickSensitivity));
+                    char sensTxt[32];
+                    snprintf(sensTxt, sizeof(sensTxt), "%.2fx (%d%%)", curSens, (int)lroundf(curSens * 100.0f));
+                    drawText(sensTxt, cX1 - 14.0f * uiScale, r2Y + 18.0f * uiScale, 0.33f * uiScale, rgba(0.40f, 0.85f, 1.0f, 1.0f), 2);
+
+                    float trackX0 = cX0 + 24.0f * uiScale;
+                    float trackX1 = cX1 - 24.0f * uiScale;
+                    float trackY = r2Y + 46.0f * uiScale;
+                    float frac = (curSens - 0.50f) / 2.50f;
+                    float knobX = trackX0 + frac * (trackX1 - trackX0);
+
+                    drawRoundRect(trackX0, trackY - 3.5f * uiScale, trackX1, trackY + 3.5f * uiScale, 3.5f * uiScale, rgba(0.18f, 0.20f, 0.25f, 0.95f));
+                    if (knobX > trackX0 + 1.0f) {
+                        drawRoundRect(trackX0, trackY - 3.5f * uiScale, knobX, trackY + 3.5f * uiScale, 3.5f * uiScale, rgba(0.043f, 0.380f, 0.880f, 1.0f));
+                    }
+
+                    static const char* kSensTicks[6] = {"0.5x", "1.0x", "1.5x", "2.0x", "2.5x", "3.0x"};
+                    for (int s = 0; s < 6; s++) {
+                        float stepFrac = (float)s / 5.0f;
+                        float stepX = trackX0 + stepFrac * (trackX1 - trackX0);
+                        Color dotCol = (stepFrac <= frac + 0.01f) ? rgba(0.75f, 0.90f, 1.0f, 0.95f) : rgba(0.45f, 0.50f, 0.58f, 0.80f);
+                        drawCircle(stepX, trackY, 3.0f * uiScale, dotCol);
+                        drawText(kSensTicks[s], stepX, r2Y + 74.0f * uiScale, 0.25f * uiScale, cTextSecondary, 1);
+                    }
+
+                    drawCircle(knobX, trackY, 11.0f * uiScale, rgba(0.220f, 0.741f, 0.969f, 0.98f));
+                    drawCircle(knobX, trackY, 6.0f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f));
                 });
             } else if (mSettingsTab == 1) {
                 // =========================================================

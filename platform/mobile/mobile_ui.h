@@ -26,6 +26,7 @@ struct Settings {
     float dpadOffsetX = 0.0f;
     float dpadOffsetY = 0.0f;
     bool rightStickPointer = true;
+    float rightStickSensitivity = 1.0f;
     bool showFpsCounter = false;
     float fpsOffsetX = 0.0f;
     float fpsOffsetY = 0.0f;
@@ -119,6 +120,7 @@ private:
     float mSwAnimFullscreen = 0.0f;
     float mSwAnimCameraCutout = 1.0f;
     bool mDraggingLanguageSlider = false;
+    bool mDraggingSensitivitySlider = false;
     float mSwAnimHdUi = 1.0f;
     float mSwAnimSkipCutscenes = 0.0f;
     float mSwAnimInfiniteHp = 0.0f;
