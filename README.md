@@ -1,5 +1,5 @@
 [![Get it on Orion Store](https://raw.githubusercontent.com/RookieEnough/Orion-Store/refs/heads/main/assets/orion-badge.png)](https://rookieenough.github.io/Orion-Data/redirect.html?id=galaxymobile)
-> **Disclaimer: This project was coded entirely by Gemini 3.8 Flash on Google Antigravity.**
+> **Disclaimer: This project was mostly coded by Gemini 3.8 Flash, Claude Opus 5.5, and Gemini 4 Hydrogen on Google Antigravity.**
 > All mobile-specific adaptations, Android phone/tablet platform layer, on-screen touch overlay, Modenr UI slide-out settings drawer, native Hor+ ultrawide aspect ratio engine modifications, audio DSP pacing, cutscene movie player pipeline, and mobile packaging toolchain were implemented by **Gemini 3.8 Flash** on **Google Antigravity**.
 > This project is completely based off the [GalaxyQuest](https://github.com/bigmak94/GalaxyQuest) source code by bigmak94 and the [Petari Super Mario Galaxy decompilation project](https://github.com/SMGCommunity/Petari).
 
@@ -275,7 +275,7 @@ To compile the Android APKs yourself:
 
 ## Credits & Acknowledgements
 
-- **Gemini 3.8 Flash on Google Antigravity**: Autonomous architecture, coding, debugging, touch UI implementation, native Hor+ ultrawide rendering pipeline, and build system engineering.
+- **Gemini 3.8 Flash, Claude Opus 5.5, and Gemini 4 Hydrogen on Google Antigravity**: Autonomous architecture, coding, debugging, touch UI implementation, native Hor+ ultrawide rendering pipeline, and build system engineering.
 - **[bigmak94 / GalaxyQuest](https://github.com/bigmak94/GalaxyQuest)**: The original standalone VR/port project that pioneered custom platform layers for Super Mario Galaxy.
 - **[Petari Decompilation Project](https://github.com/SMGCommunity/Petari)**: The incredible community reverse-engineering and C++ decompilation of Super Mario Galaxy.
 - **Nintendo**: Super Mario Galaxy is © Nintendo. This project is a non-commercial open-source research and preservation effort.
