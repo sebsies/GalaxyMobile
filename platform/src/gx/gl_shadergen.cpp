@@ -96,15 +96,16 @@ vec4 sampleUiTex(sampler2D t, vec2 uv, float bias) {
     vec2 g10 = vec2(lh - lf, lk - lc);
     vec2 g01 = vec2(lk - li, ln - lf);
     vec2 g11 = vec2(ll - lj, lo - lg);
-    vec2 dA = vec2(lg - lf, lj - lf);
-    vec2 dB = vec2(lk - lj, lk - lg);
-    vec2 dC = vec2(lf - le, lf - lb);
-    vec2 dD = vec2(lh - lg, lg - lc);
-    vec2 dE = vec2(lj - li, ln - lj);
+    float w00 = (1.0 - f.x) * (1.0 - f.y);
+    float w10 = f.x * (1.0 - f.y);
+    float w01 = (1.0 - f.x) * f.y;
+    float w11 = f.x * f.y;
+    vec2 dH0 = vec2(lg - lf, 0.5 * ((lj - lb) + (lk - lc)));
+    vec2 dH1 = vec2(lk - lj, 0.5 * ((ln - lf) + (lo - lg)));
 
-    float jxx = dA.x * dA.x + dB.x * dB.x + dC.x * dC.x + dD.x * dD.x + dE.x * dE.x + g00.x * g00.x + g10.x * g10.x + g01.x * g01.x + g11.x * g11.x;
-    float jyy = dA.y * dA.y + dB.y * dB.y + dC.y * dC.y + dD.y * dD.y + dE.y * dE.y + g00.y * g00.y + g10.y * g10.y + g01.y * g01.y + g11.y * g11.y;
-    float jxy = dA.x * dA.y + dB.x * dB.y + dC.x * dC.y + dD.x * dD.y + dE.x * dE.y + g00.x * g00.y + g10.x * g10.y + g01.x * g01.y + g11.x * g11.y;
+    float jxx = w00 * g00.x * g00.x + w10 * g10.x * g10.x + w01 * g01.x * g01.x + w11 * g11.x * g11.x + 0.35 * (dH0.x * dH0.x + dH1.x * dH1.x);
+    float jyy = w00 * g00.y * g00.y + w10 * g10.y * g10.y + w01 * g01.y * g01.y + w11 * g11.y * g11.y + 0.35 * (dH0.y * dH0.y + dH1.y * dH1.y);
+    float jxy = w00 * g00.x * g00.y + w10 * g10.x * g10.y + w01 * g01.x * g01.y + w11 * g11.x * g11.y + 0.35 * (dH0.x * dH0.y + dH1.x * dH1.y);
     float tr = jxx + jyy;
     float diff = jxx - jyy;
     float disc = sqrt(diff * diff + 4.0 * jxy * jxy);
@@ -114,10 +115,10 @@ vec4 sampleUiTex(sampler2D t, vec2 uv, float bias) {
     float evLen2 = dot(ev, ev);
     vec2 dirN = (evLen2 > 1.0e-6) ? ev * inversesqrt(evLen2) : vec2(1.0, 0.0);
     float coherence = (lam1 > 1.0e-4) ? clamp((lam1 - lam2) / (lam1 + lam2 + 1.0e-4), 0.0, 1.0) : 0.0;
-    float aniso = coherence * clamp(sqrt(lam1) * 0.9, 0.0, 1.0);
+    float aniso = coherence * clamp(sqrt(lam1) * 0.8, 0.0, 1.0);
     float diag = 1.0 / max(max(abs(dirN.x), abs(dirN.y)), 1.0e-4);
-    float scaleT = 1.0 / (1.0 + aniso * (0.9 * (diag - 1.0) + 0.25));
-    float scaleN = 1.0 + 0.30 * aniso;
+    float scaleT = 1.0 / (1.0 + aniso * 0.75 * (diag - 1.0));
+    float scaleN = 1.0;
 
     float wSum = 0.0;
     vec4 acc = vec4(0.0);
@@ -140,13 +141,13 @@ vec4 sampleUiTex(sampler2D t, vec2 uv, float bias) {
 
     vec4 span = max4 - min4;
     float mag = clamp(1.0 / texelsPerPx, 1.0, 3.5);
-    float gain = 1.0 + clamp((mag - 1.05) * 0.72, 0.0, 1.65);
+    float gain = 1.0 + clamp((mag - 1.05) * 0.22, 0.0, 0.45);
     vec4 mid = 0.5 * (min4 + max4);
     vec4 halfSpan = max(0.5 * span, vec4(1.0e-4));
     vec4 tn = clamp((easu - mid) / halfSpan, vec4(-1.0), vec4(1.0));
     vec4 tSharp = (gain * tn) / (vec4(1.0) + (gain - 1.0) * abs(tn));
     vec4 sharpened = mid + halfSpan * tSharp;
-    vec4 edgeMask = smoothstep(vec4(0.06), vec4(0.22), span);
+    vec4 edgeMask = smoothstep(vec4(0.18), vec4(0.45), span);
     return mix(easu, sharpened, edgeMask);
 }
 )";
