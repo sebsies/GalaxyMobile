@@ -1,5 +1,5 @@
 [![Get it on Orion Store](https://raw.githubusercontent.com/RookieEnough/Orion-Store/refs/heads/main/assets/orion-badge.png)](https://rookieenough.github.io/Orion-Data/redirect.html?id=galaxymobile)
-> **Disclaimer: This project was coded entirely by Gemini 3.8 Flash on Google Antigravity.**
+> **Disclaimer: This project was mostly coded by Gemini 3.8 Flash, Claude Opus 5.5, and Gemini 4 Hydrogen on Google Antigravity.**
 > All mobile-specific adaptations, Android phone/tablet platform layer, on-screen touch overlay, Modenr UI slide-out settings drawer, native Hor+ ultrawide aspect ratio engine modifications, audio DSP pacing, cutscene movie player pipeline, and mobile packaging toolchain were implemented by **Gemini 3.8 Flash** on **Google Antigravity**.
 > This project is completely based off the [GalaxyQuest](https://github.com/bigmak94/GalaxyQuest) source code by bigmak94 and the [Petari Super Mario Galaxy decompilation project](https://github.com/SMGCommunity/Petari).
 
