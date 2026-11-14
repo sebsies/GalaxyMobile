@@ -275,7 +275,7 @@ To compile the Android APKs yourself:
 
 ## Credits & Acknowledgements
 
-- **Gemini 3.8 Flash on Google Antigravity**: Autonomous architecture, coding, debugging, touch UI implementation, native Hor+ ultrawide rendering pipeline, and build system engineering.
+- **Gemini 3.8 Flash, Claude Opus 5.5, and Gemini 4 Hydrogen on Google Antigravity**: Autonomous architecture, coding, debugging, touch UI implementation, native Hor+ ultrawide rendering pipeline, and build system engineering.
 - **[bigmak94 / GalaxyQuest](https://github.com/bigmak94/GalaxyQuest)**: The original standalone VR/port project that pioneered custom platform layers for Super Mario Galaxy.
 - **[Petari Decompilation Project](https://github.com/SMGCommunity/Petari)**: The incredible community reverse-engineering and C++ decompilation of Super Mario Galaxy.
 - **Nintendo**: Super Mario Galaxy is © Nintendo. This project is a non-commercial open-source research and preservation effort.
