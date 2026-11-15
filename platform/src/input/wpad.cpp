@@ -70,6 +70,7 @@ extern "C" int port_input_camera_inverted(void) { return sCameraInverted.load();
 
 static std::atomic<int64_t> sTiltUsedAt{0};
 static std::atomic<float> sTiltNeutralPitch{0.0f};
+static std::atomic<int> sJoystickTilt{0};
 
 extern "C" void port_input_use_tilt(float neutralPitchDeg) {
     sTiltNeutralPitch.store(neutralPitchDeg);
@@ -83,6 +84,14 @@ extern "C" int port_input_is_tilt_active(void) {
 
 extern "C" float port_input_tilt_neutral_pitch(void) {
     return sTiltNeutralPitch.load();
+}
+
+extern "C" void port_input_set_joystick_tilt(int active) {
+    sJoystickTilt.store(active ? 1 : 0);
+}
+
+extern "C" int port_input_is_joystick_tilt(void) {
+    return (sJoystickTilt.load() != 0 && port_input_is_tilt_active() != 0) ? 1 : 0;
 }
 
 // Gravity as the remote's accelerometer reads it, in g.  KPAD's axes: x left,

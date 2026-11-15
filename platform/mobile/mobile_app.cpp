@@ -554,6 +554,7 @@ void updateTiltSensor(MobileApp& a) {
     bool active = (port_input_is_tilt_active() != 0);
     bool useGyro = mobile_ui::get().settings().gyroTilt;
     bool needHardwareSensor = active && useGyro;
+    port_input_set_joystick_tilt((active && !useGyro) ? 1 : 0);
     if (needHardwareSensor != a.tiltSensorEnabled) {
         setTiltSensorEnabled(a, needHardwareSensor);
     }

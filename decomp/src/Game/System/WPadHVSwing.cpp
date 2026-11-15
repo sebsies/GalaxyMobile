@@ -107,17 +107,35 @@ void WPadHVSwing::updateCentrifugal() {
 }
 
 void WPadHVSwing::update() {
-    updateSwing();
-    updateCentrifugal();
+#ifdef TARGET_PC
+    // Suppress accelerometer-based swing detection while synthetic joystick tilt
+    // drives the accelerometer vector so steering left/right never causes accidental
+    // jumps; button-based Spin/ZR still triggers swing below.
+    if (port_input_is_joystick_tilt()) {
+        mIsSwing = false;
+        mIsTriggerSwing = false;
+        mIsSwingLatched = false;
+        mSwingLatchedFrames = 0;
+        mSwingBelowThresholdFrames = 0;
+        mSwingDetected = false;
+        mSwingTriggered = false;
+        mSwingHoldFrames = 0;
+        mSwingCooldownFrames = 0;
+    } else
+#endif
+    {
+        updateSwing();
+        updateCentrifugal();
 
-    mIsTriggerSwing = false;
-    if (mSwingLatchedFrames == 1) {
-        mIsTriggerSwing = true;
-    } else if (mSwingHoldFrames >= 30) {
-        bool isOffPulseBoundary = (mSwingHoldFrames - 30) % 15 != 0;
-
-        if (!isOffPulseBoundary && mSwingCooldownFrames < 15) {
+        mIsTriggerSwing = false;
+        if (mSwingLatchedFrames == 1) {
             mIsTriggerSwing = true;
+        } else if (mSwingHoldFrames >= 30) {
+            bool isOffPulseBoundary = (mSwingHoldFrames - 30) % 15 != 0;
+
+            if (!isOffPulseBoundary && mSwingCooldownFrames < 15) {
+                mIsTriggerSwing = true;
+            }
         }
     }
 

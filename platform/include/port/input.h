@@ -38,6 +38,10 @@ int port_input_is_tilt_active(void);
 // Returns the neutral forward pitch angle (degrees) requested by the active tilt mode.
 float port_input_tilt_neutral_pitch(void);
 
+// Sets/queries whether virtual joystick tilt emulation is driving accelerometer data.
+void port_input_set_joystick_tilt(int active);
+int port_input_is_joystick_tilt(void);
+
 #ifdef __cplusplus
 }
 #endif
