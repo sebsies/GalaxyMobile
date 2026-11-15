@@ -81,6 +81,9 @@ struct MobileApp {
     int64_t lastPointerTickNs = 0;
     int fpsFrameCount = 0;
     int64_t fpsWindowStartNs = 0;
+    int64_t nextRenderFrameNs = 0;
+    int lastFpsLimit = 60;
+    int64_t lastCamTickNs = 0;
     bool touchActive = false;
     float touchX = 0.0f, touchY = 0.0f;
 
@@ -1123,50 +1126,58 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
             }
         }
 
-        // Camera Auto-Repeat Manager (Runs once per frame at 60 FPS)
-        uint32_t rawButtons = a.touchPad.buttons | a.gamepadKeyButtons | a.gamepadAxisButtons;
-        bool rightStickCam = !mobile_ui::get().settings().rightStickPointer;
-        bool wantCamLeft = (rawButtons & 0x0001u) != 0 || (rightStickCam && a.gamepadRightStickX < -0.35f);
-        bool wantCamRight = (rawButtons & 0x0002u) != 0 || (rightStickCam && a.gamepadRightStickX > 0.35f);
+        // Camera Auto-Repeat Manager (Fixed 60 Hz cadence regardless of FPS limiter)
+        int64_t nowLoopNs = port_host_time_ns();
+        if (a.lastCamTickNs == 0 || (nowLoopNs - a.lastCamTickNs) >= 16666667ll) {
+            if (a.lastCamTickNs == 0 || (nowLoopNs - a.lastCamTickNs) > 100000000ll) {
+                a.lastCamTickNs = nowLoopNs;
+            } else {
+                a.lastCamTickNs += 16666667ll;
+            }
+            uint32_t rawButtons = a.touchPad.buttons | a.gamepadKeyButtons | a.gamepadAxisButtons;
+            bool rightStickCam = !mobile_ui::get().settings().rightStickPointer;
+            bool wantCamLeft = (rawButtons & 0x0001u) != 0 || (rightStickCam && a.gamepadRightStickX < -0.35f);
+            bool wantCamRight = (rawButtons & 0x0002u) != 0 || (rightStickCam && a.gamepadRightStickX > 0.35f);
 
-        uint32_t pulsed = 0;
-        if (wantCamLeft) {
-            int interval = (fabsf(a.gamepadRightStickX) > 0.70f) ? 9 : 12;
-            if (a.camRepeatLeft == 0) {
-                pulsed |= 0x0001;
-            } else if (a.camRepeatLeft >= 14) {
-                int cycle = (a.camRepeatLeft - 14) % interval;
-                if (cycle != 0) {
+            uint32_t pulsed = 0;
+            if (wantCamLeft) {
+                int interval = (fabsf(a.gamepadRightStickX) > 0.70f) ? 9 : 12;
+                if (a.camRepeatLeft == 0) {
+                    pulsed |= 0x0001;
+                } else if (a.camRepeatLeft >= 14) {
+                    int cycle = (a.camRepeatLeft - 14) % interval;
+                    if (cycle != 0) {
+                        pulsed |= 0x0001;
+                    }
+                } else {
                     pulsed |= 0x0001;
                 }
+                a.camRepeatLeft++;
             } else {
-                pulsed |= 0x0001;
+                a.camRepeatLeft = 0;
             }
-            a.camRepeatLeft++;
-        } else {
-            a.camRepeatLeft = 0;
-        }
 
-        if (wantCamRight) {
-            int interval = (fabsf(a.gamepadRightStickX) > 0.70f) ? 9 : 12;
-            if (a.camRepeatRight == 0) {
-                pulsed |= 0x0002;
-            } else if (a.camRepeatRight >= 14) {
-                int cycle = (a.camRepeatRight - 14) % interval;
-                if (cycle != 0) {
+            if (wantCamRight) {
+                int interval = (fabsf(a.gamepadRightStickX) > 0.70f) ? 9 : 12;
+                if (a.camRepeatRight == 0) {
+                    pulsed |= 0x0002;
+                } else if (a.camRepeatRight >= 14) {
+                    int cycle = (a.camRepeatRight - 14) % interval;
+                    if (cycle != 0) {
+                        pulsed |= 0x0002;
+                    }
+                } else {
                     pulsed |= 0x0002;
                 }
+                a.camRepeatRight++;
             } else {
-                pulsed |= 0x0002;
+                a.camRepeatRight = 0;
             }
-            a.camRepeatRight++;
-        } else {
-            a.camRepeatRight = 0;
+            a.gamepadCameraPulsedButtons = pulsed;
         }
-        a.gamepadCameraPulsedButtons = pulsed;
 
         // Move Star Pointer smoothly from Right Joystick when enabled
-        updateRightStickPointer(a, port_host_time_ns());
+        updateRightStickPointer(a, nowLoopNs);
 
         // Merge touch, gamepad, and tilt/gyro inputs
         syncMergedPad(a);
@@ -1185,9 +1196,26 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
 
         // Presentation & Render Loop
         gpu::Renderer& r = gpu::renderer();
-        bool newFrame = r.update();
+        int fpsLimit = std::max(30, std::min(60, mobile_ui::get().settings().fpsLimit));
+        int64_t nowRenderNs = port_host_time_ns();
+        if (fpsLimit != a.lastFpsLimit) {
+            a.lastFpsLimit = fpsLimit;
+            a.nextRenderFrameNs = nowRenderNs;
+            a.fpsWindowStartNs = 0;
+            a.fpsFrameCount = 0;
+        }
+        int64_t targetPeriodNs = (fpsLimit < 60) ? (1000000000ll / fpsLimit) : 0;
+        bool frameDue = (fpsLimit >= 60) || !r.hasFrame() || (nowRenderNs >= a.nextRenderFrameNs);
+        bool newFrame = frameDue ? r.update() : false;
 
         if (newFrame) {
+            if (fpsLimit < 60) {
+                if (a.nextRenderFrameNs == 0 || (nowRenderNs - a.nextRenderFrameNs) > targetPeriodNs * 2) {
+                    a.nextRenderFrameNs = nowRenderNs + targetPeriodNs;
+                } else {
+                    a.nextRenderFrameNs += targetPeriodNs;
+                }
+            }
             gPresentedFrames.store(r.frameNumber());
 
             // Check if offscreen target dimensions need to change (e.g. toggled fullscreen or graphics preset)
@@ -1285,7 +1313,12 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
                 mobile_ui::get().render(a.screenWidth, a.screenHeight);
                 eglSwapBuffers(a.display, a.surface);
             } else {
-                usleep(1000);
+                if (fpsLimit < 60 && !frameDue && a.nextRenderFrameNs > nowRenderNs) {
+                    int64_t waitUs = std::min<int64_t>(2000, std::max<int64_t>(200, (a.nextRenderFrameNs - nowRenderNs) / 1000));
+                    usleep((useconds_t)waitUs);
+                } else {
+                    usleep(1000);
+                }
             }
         }
     }

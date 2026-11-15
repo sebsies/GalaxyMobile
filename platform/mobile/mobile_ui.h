@@ -31,6 +31,7 @@ struct Settings {
     float fpsOffsetX = 0.0f;
     float fpsOffsetY = 0.0f;
     float fpsScale = 1.0f;
+    int fpsLimit = 60;
 
     // Graphics Preset: 0=Low (720p), 1=Medium (900p), 2=High (1080p normal, default), 3=Ultra (Native), 4=SD (480p Wii Native)
     int graphicsPreset = 2;
@@ -121,6 +122,7 @@ private:
     float mSwAnimCameraCutout = 1.0f;
     bool mDraggingLanguageSlider = false;
     bool mDraggingSensitivitySlider = false;
+    bool mDraggingFpsLimitSlider = false;
     float mSwAnimHdUi = 1.0f;
     float mSwAnimSkipCutscenes = 0.0f;
     float mSwAnimInfiniteHp = 0.0f;

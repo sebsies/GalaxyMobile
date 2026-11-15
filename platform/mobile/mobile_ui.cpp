@@ -324,6 +324,7 @@ void Settings::load(const std::string& path) {
             else if (!strcmp(key, "fps_offset_x")) fpsOffsetX = val;
             else if (!strcmp(key, "fps_offset_y")) fpsOffsetY = val;
             else if (!strcmp(key, "fps_scale")) fpsScale = std::max(0.60f, std::min(2.20f, val));
+            else if (!strcmp(key, "fps_limit")) fpsLimit = std::max(30, std::min(60, (int)(val + 0.5f)));
             else if (!strcmp(key, "mod_skip_cutscenes")) modSkipCutscenes = (val > 0.5f);
             else if (!strcmp(key, "mod_infinite_health")) modInfiniteHealth = (val > 0.5f);
             else if (!strcmp(key, "mod_infinite_powerup")) modInfinitePowerup = (val > 0.5f);
@@ -363,6 +364,7 @@ void Settings::save(const std::string& path) const {
     fprintf(f, "fps_offset_x=%.1f\n", fpsOffsetX);
     fprintf(f, "fps_offset_y=%.1f\n", fpsOffsetY);
     fprintf(f, "fps_scale=%.2f\n", fpsScale);
+    fprintf(f, "fps_limit=%d\n", fpsLimit);
     fprintf(f, "mod_skip_cutscenes=%d\n", modSkipCutscenes ? 1 : 0);
     fprintf(f, "mod_infinite_health=%d\n", modInfiniteHealth ? 1 : 0);
     fprintf(f, "mod_infinite_powerup=%d\n", modInfinitePowerup ? 1 : 0);
@@ -814,7 +816,7 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
         } else if (mSettingsTab == 0) {
             totalContentH = 666.0f * uiScale;
         } else if (mSettingsTab == 1) {
-            totalContentH = 644.0f * uiScale;
+            totalContentH = 740.0f * uiScale;
         } else if (mSettingsTab == 2) {
             totalContentH = mPlusEdition ? (1176.0f * uiScale) : (826.0f * uiScale);
         } else {
@@ -833,6 +835,18 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                     mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                 }
                 mSettings.rightStickSensitivity = newSens;
+            }
+            mDirty = true;
+        };
+
+        auto applyFpsLimitSlider = [&](float x) {
+            float trackX0 = drawerX + padX + 24.0f * uiScale;
+            float trackX1 = drawerX + drawerW - padX - 24.0f * uiScale;
+            float t = std::max(0.0f, std::min(1.0f, (x - trackX0) / std::max(1.0f, trackX1 - trackX0)));
+            int newLimit = std::max(30, std::min(60, (int)lroundf(30.0f + t * 30.0f)));
+            if (newLimit != mSettings.fpsLimit) {
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                mSettings.fpsLimit = newLimit;
             }
             mDirty = true;
         };
@@ -874,6 +888,10 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                         }
                         if (mDraggingSensitivitySlider) {
                             applySensitivitySlider(px);
+                            return true;
+                        }
+                        if (mDraggingFpsLimitSlider) {
+                            applyFpsLimitSlider(px);
                             return true;
                         }
                         float deltaY = py - mDrawerTouchStartY;
@@ -1329,13 +1347,14 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                     }
 
                     if (!mSavePath.empty()) mSettings.save(mSavePath);
-                } else if (mDraggingLanguageSlider || mDraggingSensitivitySlider) {
+                } else if (mDraggingLanguageSlider || mDraggingSensitivitySlider || mDraggingFpsLimitSlider) {
                     if (!mSavePath.empty()) mSettings.save(mSavePath);
                 }
                 mDrawerScrollPointerId = -1;
                 mDrawerIsScrolling = false;
                 mDraggingLanguageSlider = false;
                 mDraggingSensitivitySlider = false;
+                mDraggingFpsLimitSlider = false;
                 mDirty = true;
                 return true;
             }
@@ -1462,11 +1481,18 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                     mDrawerIsScrolling = false;
                     mDraggingLanguageSlider = false;
                     mDraggingSensitivitySlider = false;
+                    mDraggingFpsLimitSlider = false;
                     if (mSettingsTab == 0) {
                         float contentRelY = py - contentTop + mDrawerScrollY;
                         if (contentRelY >= 578.0f * uiScale && contentRelY <= 650.0f * uiScale) {
                             mDraggingSensitivitySlider = true;
                             applySensitivitySlider(px);
+                        }
+                    } else if (mSettingsTab == 1) {
+                        float contentRelY = py - contentTop + mDrawerScrollY;
+                        if (contentRelY >= 634.0f * uiScale && contentRelY <= 732.0f * uiScale) {
+                            mDraggingFpsLimitSlider = true;
+                            applyFpsLimitSlider(px);
                         }
                     } else if (mSettingsTab == 2) {
                         float contentRelY = py - contentTop + mDrawerScrollY;
@@ -2338,7 +2364,7 @@ void UIOverlay::render(int screenW, int screenH) {
         } else if (mSettingsTab == 0) {
             totalContentH = 666.0f * uiScale;
         } else if (mSettingsTab == 1) {
-            totalContentH = 644.0f * uiScale;
+            totalContentH = 740.0f * uiScale;
         } else if (mSettingsTab == 2) {
             totalContentH = mPlusEdition ? (1176.0f * uiScale) : (826.0f * uiScale);
         } else {
@@ -2745,12 +2771,12 @@ void UIOverlay::render(int screenW, int screenH) {
                     drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimHdUi);
                 });
 
-                // Card 4: Performance Overlay (FPS Counter)
-                renderCardBlock(430.0f * uiScale, 206.0f * uiScale, [&](float y) {
-                    drawCard(cX0, y, cX1, y + 206.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+                // Card 4: Performance & FPS
+                renderCardBlock(430.0f * uiScale, 302.0f * uiScale, [&](float y) {
+                    drawCard(cX0, y, cX1, y + 302.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
 
                     drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                    drawText("PERFORMANCE OVERLAY (FPS)", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+                    drawText("PERFORMANCE & FPS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
 
                     // Row 1: Show FPS Counter Switch
                     float r1Y = y + 34.0f * uiScale;
@@ -2781,6 +2807,45 @@ void UIOverlay::render(int screenW, int screenH) {
 
                     drawRoundRect(b2X0, r3Y + 6.0f * uiScale, b2X1, r3Y + 40.0f * uiScale, 16.0f * uiScale, rgba(0.35f, 0.15f, 0.18f, 0.95f));
                     drawText("Reset", (b2X0 + b2X1) * 0.5f, r3Y + 28.0f * uiScale, 0.34f * uiScale, rgba(1.0f, 0.72f, 0.72f, 1.0f), 1);
+
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 204.0f * uiScale, cX1 - 14.0f * uiScale, y + 205.0f * uiScale, 0.5f, cDivider);
+
+                    // Row 4: FPS Limiter Slider (30..60 FPS)
+                    float r4Y = y + 208.0f * uiScale;
+                    drawText("FPS Limiter", cX0 + 14.0f * uiScale, r4Y + 18.0f * uiScale, 0.34f * uiScale, cTextPrimary, 0);
+                    int curLimit = std::max(30, std::min(60, mSettings.fpsLimit));
+                    char limitTxt[32];
+                    if (curLimit >= 60) {
+                        snprintf(limitTxt, sizeof(limitTxt), "60 FPS (Full)");
+                    } else if (curLimit == 30) {
+                        snprintf(limitTxt, sizeof(limitTxt), "30 FPS (Saver)");
+                    } else {
+                        snprintf(limitTxt, sizeof(limitTxt), "%d FPS", curLimit);
+                    }
+                    drawText(limitTxt, cX1 - 14.0f * uiScale, r4Y + 18.0f * uiScale, 0.33f * uiScale, rgba(0.40f, 0.85f, 1.0f, 1.0f), 2);
+
+                    float trackX0 = cX0 + 24.0f * uiScale;
+                    float trackX1 = cX1 - 24.0f * uiScale;
+                    float trackY = r4Y + 46.0f * uiScale;
+                    float frac = (float)(curLimit - 30) / 30.0f;
+                    float knobX = trackX0 + frac * (trackX1 - trackX0);
+
+                    drawRoundRect(trackX0, trackY - 3.5f * uiScale, trackX1, trackY + 3.5f * uiScale, 3.5f * uiScale, rgba(0.18f, 0.20f, 0.25f, 0.95f));
+                    if (knobX > trackX0 + 1.0f) {
+                        drawRoundRect(trackX0, trackY - 3.5f * uiScale, knobX, trackY + 3.5f * uiScale, 3.5f * uiScale, rgba(0.043f, 0.380f, 0.880f, 1.0f));
+                    }
+
+                    static const char* kFpsTicks[7] = {"30", "35", "40", "45", "50", "55", "60"};
+                    for (int s = 0; s < 7; s++) {
+                        float stepFrac = (float)s / 6.0f;
+                        float stepX = trackX0 + stepFrac * (trackX1 - trackX0);
+                        Color dotCol = (stepFrac <= frac + 0.01f) ? rgba(0.75f, 0.90f, 1.0f, 0.95f) : rgba(0.45f, 0.50f, 0.58f, 0.80f);
+                        drawCircle(stepX, trackY, 3.0f * uiScale, dotCol);
+                        drawText(kFpsTicks[s], stepX, r4Y + 74.0f * uiScale, 0.25f * uiScale, cTextSecondary, 1);
+                    }
+
+                    drawCircle(knobX, trackY, 11.0f * uiScale, rgba(0.220f, 0.741f, 0.969f, 0.98f));
+                    drawCircle(knobX, trackY, 6.0f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f));
                 });
             } else if (mSettingsTab == 2) {
                 static const char* kLangNames[7] = {
