@@ -28,6 +28,7 @@ struct Settings {
     float dpadOffsetY = 0.0f;
     bool rightStickPointer = true;
     float rightStickSensitivity = 1.0f;
+    bool gyroTilt = true;
     bool showFpsCounter = false;
     float fpsOffsetX = 0.0f;
     float fpsOffsetY = 0.0f;

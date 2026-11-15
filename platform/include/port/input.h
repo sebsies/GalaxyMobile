@@ -35,6 +35,9 @@ int port_input_rumble(int chan);
 // Returns 1 while the game is actively reading tilt/gyro controls, 0 otherwise.
 int port_input_is_tilt_active(void);
 
+// Returns the neutral forward pitch angle (degrees) requested by the active tilt mode.
+float port_input_tilt_neutral_pitch(void);
+
 #ifdef __cplusplus
 }
 #endif

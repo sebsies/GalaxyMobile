@@ -123,6 +123,7 @@ enum UiHitKind {
     HIT_LAYOUT_EDIT,
     HIT_LAYOUT_RESET,
     HIT_SEG_RIGHT_STICK_MODE,
+    HIT_SEG_TILT_MODE,
     HIT_SLIDER_SENSITIVITY,
     HIT_TOGGLE_FULLSCREEN,
     HIT_TOGGLE_CAMERA_CUTOUT,
@@ -408,6 +409,7 @@ void Settings::load(const std::string& path) {
             else if (!strcmp(key, "dpad_offset_y")) dpadOffsetY = val;
             else if (!strcmp(key, "right_stick_pointer")) rightStickPointer = (val > 0.5f);
             else if (!strcmp(key, "right_stick_sensitivity")) rightStickSensitivity = std::max(0.50f, std::min(3.00f, val));
+            else if (!strcmp(key, "gyro_tilt")) gyroTilt = (val > 0.5f);
             else if (!strcmp(key, "show_fps_counter")) showFpsCounter = (val > 0.5f);
             else if (!strcmp(key, "fps_offset_x")) fpsOffsetX = val;
             else if (!strcmp(key, "fps_offset_y")) fpsOffsetY = val;
@@ -448,6 +450,7 @@ void Settings::save(const std::string& path) const {
     fprintf(f, "dpad_offset_y=%.1f\n", dpadOffsetY);
     fprintf(f, "right_stick_pointer=%d\n", rightStickPointer ? 1 : 0);
     fprintf(f, "right_stick_sensitivity=%.2f\n", rightStickSensitivity);
+    fprintf(f, "gyro_tilt=%d\n", gyroTilt ? 1 : 0);
     fprintf(f, "show_fps_counter=%d\n", showFpsCounter ? 1 : 0);
     fprintf(f, "fps_offset_x=%.1f\n", fpsOffsetX);
     fprintf(f, "fps_offset_y=%.1f\n", fpsOffsetY);
@@ -1098,6 +1101,12 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                 break;
             case HIT_SEG_RIGHT_STICK_MODE:
                 mSettings.rightStickPointer = (hb.arg0 == 0);
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_SEG_TILT_MODE:
+                mSettings.gyroTilt = (hb.arg0 == 0);
                 port_play_ui_se(PORT_UI_SE_TICK);
                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                 saveNow = true;
@@ -2751,6 +2760,21 @@ void UIOverlay::render(int screenW, int screenH) {
                                   rgba(0.92f, 0.45f, 0.48f, 0.65f), rgba(0.42f, 0.14f, 0.18f, 0.95f),
                                   "Reset", rgba(1.0f, 0.78f, 0.78f, 1.0f), 0.33f);
                     pushDeckHit(b2X0, r3Y, b2X1, r3Y + 38.0f * uiScale, HIT_LAYOUT_RESET);
+                });
+
+                placeCard(1, 108.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
+                    drawSectionTitle(cX0, y, "MOTION & TILT GALAXIES", cHeader, false);
+                    float grpW = cw - 28.0f * uiScale;
+                    drawText("Star Ball & Manta Ray Steering", cX0 + 14.0f * uiScale, y + 44.0f * uiScale, 0.32f * uiScale, cTextPrimary, 0);
+                    const char* tiltOpts[2] = {"Gyro (Tilt)", "Joystick"};
+                    float segY0 = y + 52.0f * uiScale;
+                    drawSegmentedGroup(cX0 + 14.0f * uiScale, segY0, grpW, 30.0f * uiScale, tiltOpts, 2, mSettings.gyroTilt ? 0 : 1);
+                    for (int s = 0; s < 2; s++) {
+                        float sx0 = cX0 + 14.0f * uiScale + s * (grpW * 0.5f);
+                        pushDeckHit(sx0, segY0 - 4.0f * uiScale, sx0 + grpW * 0.5f, segY0 + 34.0f * uiScale, HIT_SEG_TILT_MODE, s);
+                    }
+                    drawText("Steer motion-only galaxies with phone tilt or main stick", cX0 + 14.0f * uiScale, y + 97.0f * uiScale, 0.23f * uiScale, cTextSecondary, 0);
                 });
 
                 placeCard(1, 118.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {

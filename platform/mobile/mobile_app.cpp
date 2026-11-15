@@ -552,11 +552,51 @@ void drainTiltSensorEvents(MobileApp& a) {
 
 void updateTiltSensor(MobileApp& a) {
     bool active = (port_input_is_tilt_active() != 0);
-    if (active != a.tiltSensorEnabled) {
-        setTiltSensorEnabled(a, active);
+    bool useGyro = mobile_ui::get().settings().gyroTilt;
+    bool needHardwareSensor = active && useGyro;
+    if (needHardwareSensor != a.tiltSensorEnabled) {
+        setTiltSensorEnabled(a, needHardwareSensor);
     }
-    drainTiltSensorEvents(a);
-    if (!active || !a.tiltSensorEnabled || !a.sensorQueue || !a.hasGravity) {
+    if (needHardwareSensor) {
+        drainTiltSensorEvents(a);
+    }
+
+    if (active && !useGyro) {
+        // Virtual analog joystick tilt emulation for Rolling Ball & Manta Ray Surfing.
+        float sx = a.pad.stickX;
+        float sy = a.pad.stickY;
+        float mag = sqrtf(sx * sx + sy * sy);
+        if (mag < 0.05f) {
+            sx = 0.0f;
+            sy = 0.0f;
+        } else {
+            sx = std::max(-1.0f, std::min(1.0f, sx));
+            sy = std::max(-1.0f, std::min(1.0f, sy));
+        }
+
+        float neutralPitch = port_input_tilt_neutral_pitch();
+        float rDeg = 0.0f;
+        float pDeg = 0.0f;
+        if (neutralPitch > 10.0f) {
+            // Star Ball / Tamakoro: compensate 5 deg game deadzone + linear 20 deg range.
+            if (sx != 0.0f) rDeg = (sx > 0.0f ? 1.0f : -1.0f) * 5.0f + sx * 20.0f;
+            if (sy != 0.0f) pDeg = -((sy > 0.0f ? 1.0f : -1.0f) * 5.0f + sy * 20.0f);
+        } else {
+            // Manta Ray Surfing / SurfRay: exceed 0.15x twist deadzone and reach >=0.65x turn check.
+            if (sx != 0.0f) rDeg = (sx > 0.0f ? 1.0f : -1.0f) * (9.0f + fabsf(sx) * 41.0f);
+            pDeg = -18.0f * sy;
+        }
+
+        float p = pDeg * (3.14159265f / 180.0f);
+        float r = rDeg * (3.14159265f / 180.0f);
+        a.pad.tilted = 1;
+        a.pad.downX = cosf(p) * sinf(r);
+        a.pad.downY = -cosf(p) * cosf(r);
+        a.pad.downZ = -sinf(p);
+        return;
+    }
+
+    if (!needHardwareSensor || !a.tiltSensorEnabled || !a.sensorQueue || !a.hasGravity) {
         a.pad.tilted = 0;
         a.pad.downX = 0.0f;
         a.pad.downY = -1.0f;
