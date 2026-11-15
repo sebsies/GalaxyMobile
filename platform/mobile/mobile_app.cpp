@@ -1748,6 +1748,83 @@ extern "C" void port_share_log(void) {
     }
 }
 
+namespace {
+void launchSaveTransfer(const char* mode) {
+    if (!gMobile.android || !gMobile.android->activity) return;
+    ANativeActivity* activity = gMobile.android->activity;
+    if (!activity->vm || !activity->clazz) return;
+    JNIEnv* env = nullptr;
+    bool attached = false;
+    if (activity->vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
+        if (activity->vm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+            attached = true;
+        }
+    }
+    if (!env) return;
+
+    jclass actClass = env->GetObjectClass(activity->clazz);
+    jmethodID getClassLoaderMethod = env->GetMethodID(actClass, "getClassLoader", "()Ljava/lang/ClassLoader;");
+    jobject classLoader = env->CallObjectMethod(activity->clazz, getClassLoaderMethod);
+
+    jclass clClass = env->FindClass("java/lang/ClassLoader");
+    jmethodID loadClassMethod = env->GetMethodID(clClass, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+    jstring clsName = env->NewStringUTF("com.galaxy.installer.AppInstaller");
+    jclass appInstallerClass = (jclass)env->CallObjectMethod(classLoader, loadClassMethod, clsName);
+
+    if (env->ExceptionCheck() || !appInstallerClass) {
+        LOGE("launchSaveTransfer: failed to load AppInstaller class");
+        env->ExceptionClear();
+    } else {
+        jmethodID openMethod = env->GetStaticMethodID(
+            appInstallerClass, "openSaveTransfer",
+            "(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;ZZI)V");
+        if (openMethod) {
+            jstring jMode = env->NewStringUTF(mode ? mode : "export");
+            jstring jSaveRoot = env->NewStringUTF(gMobile.saveRoot.c_str());
+            jboolean jBooted = gMobile.gameBooted ? JNI_TRUE : JNI_FALSE;
+            jboolean jIsPlus = mobile_ui::get().isPlusEdition() ? JNI_TRUE : JNI_FALSE;
+            jint jPid = (jint)getpid();
+            env->CallStaticVoidMethod(appInstallerClass, openMethod, activity->clazz,
+                                      jMode, jSaveRoot, jBooted, jIsPlus, jPid);
+            env->DeleteLocalRef(jMode);
+            env->DeleteLocalRef(jSaveRoot);
+        }
+        if (env->ExceptionCheck()) {
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+        }
+        env->DeleteLocalRef(appInstallerClass);
+    }
+
+    env->DeleteLocalRef(clsName);
+    env->DeleteLocalRef(clClass);
+    env->DeleteLocalRef(classLoader);
+    env->DeleteLocalRef(actClass);
+
+    if (attached) {
+        activity->vm->DetachCurrentThread();
+    }
+}
+}  // namespace
+
+extern "C" int port_has_save_data(void) {
+    if (gMobile.saveRoot.empty()) return 0;
+    const std::string base = gMobile.saveRoot + "/title/00010000/524d4750/data/GameData.bin";
+    struct stat st;
+    if (stat(base.c_str(), &st) == 0 && st.st_size >= 0x140) return 1;
+    const std::string bak = base + ".bak";
+    if (stat(bak.c_str(), &st) == 0 && st.st_size >= 0x140) return 1;
+    return 0;
+}
+
+extern "C" void port_export_save(void) {
+    launchSaveTransfer("export");
+}
+
+extern "C" void port_import_save(void) {
+    launchSaveTransfer("import");
+}
+
 static std::atomic<int> sShowCameraCutout{1};
 void port_set_camera_cutout(int show) {
     sShowCameraCutout.store(show ? 1 : 0, std::memory_order_relaxed);

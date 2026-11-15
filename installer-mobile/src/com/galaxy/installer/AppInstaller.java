@@ -174,6 +174,26 @@ public class AppInstaller {
         }).start();
     }
 
+    public static void openSaveTransfer(Activity activity, String mode, String saveRoot, boolean gameBooted, boolean isPlus, int mainPid) {
+        if (activity == null) return;
+        activity.runOnUiThread(() -> {
+            try {
+                Intent intent = new Intent(activity, SaveTransferActivity.class);
+                intent.putExtra(SaveTransferActivity.EXTRA_MODE, mode != null ? mode : SaveTransferActivity.MODE_EXPORT);
+                if (saveRoot != null) {
+                    intent.putExtra(SaveTransferActivity.EXTRA_SAVE_ROOT, saveRoot);
+                }
+                intent.putExtra(SaveTransferActivity.EXTRA_GAME_BOOTED, gameBooted);
+                intent.putExtra(SaveTransferActivity.EXTRA_IS_PLUS, isPlus);
+                intent.putExtra(SaveTransferActivity.EXTRA_MAIN_PID, mainPid);
+                activity.startActivity(intent);
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to launch SaveTransferActivity", e);
+                Toast.makeText(activity, "Failed to open save manager: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
     public static void shareLogFile(Activity activity) {
         if (activity == null) return;
         new Thread(() -> {

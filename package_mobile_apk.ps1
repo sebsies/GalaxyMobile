@@ -88,6 +88,7 @@ function Build-ApkFlavor {
     $javaFiles = @(
         "installer-mobile\src\com\galaxy\installer\CookerEngine.java",
         "installer-mobile\src\com\galaxy\installer\InstallerActivity.java",
+        "installer-mobile\src\com\galaxy\installer\SaveTransferActivity.java",
         "installer-mobile\src\com\galaxy\installer\GalaxyFileProvider.java",
         "installer-mobile\src\com\galaxy\installer\AppInstaller.java",
         "$rGenDir\com\galaxy\installer\R.java"

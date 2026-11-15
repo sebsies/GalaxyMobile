@@ -48,8 +48,16 @@ public class GalaxyFileProvider extends ContentProvider {
     @Override
     public String getType(Uri uri) {
         String name = uri.getLastPathSegment();
-        if (name != null && name.endsWith(".txt")) {
-            return "text/plain";
+        if (name != null) {
+            if (name.endsWith(".txt")) {
+                return "text/plain";
+            }
+            if (name.endsWith(".zip")) {
+                return "application/zip";
+            }
+            if (name.endsWith(".bin")) {
+                return "application/octet-stream";
+            }
         }
         return "application/vnd.android.package-archive";
     }

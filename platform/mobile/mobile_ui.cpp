@@ -146,6 +146,8 @@ enum UiHitKind {
     HIT_OPEN_INSTALLER,
     HIT_INSTALL_PLUS,
     HIT_SHARE_LOG,
+    HIT_EXPORT_SAVE,
+    HIT_IMPORT_SAVE,
     HIT_NET_DISCONNECT,
     HIT_SEG_NET_MODE,
     HIT_NET_HOST_TOGGLE,
@@ -1233,6 +1235,16 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                 break;
             case HIT_SHARE_LOG:
                 port_share_log();
+                port_play_ui_se(PORT_UI_SE_DECIDE);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_EXPORT_SAVE:
+                port_export_save();
+                port_play_ui_se(PORT_UI_SE_DECIDE);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_IMPORT_SAVE:
+                port_import_save();
                 port_play_ui_se(PORT_UI_SE_DECIDE);
                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                 break;
@@ -2549,6 +2561,31 @@ void UIOverlay::render(int screenW, int screenH) {
             };
 
             auto drawDonateAndLogCards = [&](int col) {
+                placeCard(col, 126.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
+                    drawSectionTitle(cX0, y, "SAVE DATA BACKUP & TRANSFER", cHeader, true);
+                    bool hasSave = (port_has_save_data() != 0);
+                    if (hasSave) {
+                        drawStatusChip(cX0 + 14.0f * uiScale, y + 34.0f * uiScale, "Save Active (GameData.bin)", sc(rgba(0.10f, 0.34f, 0.22f, 0.90f)), sc(rgba(0.55f, 0.96f, 0.65f, 1.0f)), sc(rgba(0.290f, 0.871f, 0.502f, 1.0f)));
+                    } else {
+                        drawStatusChip(cX0 + 14.0f * uiScale, y + 34.0f * uiScale, "No Save Found Yet", sc(rgba(0.36f, 0.28f, 0.10f, 0.90f)), sc(rgba(1.0f, 0.88f, 0.42f, 1.0f)), cGold);
+                    }
+                    drawText("Back up or transfer your Stars across devices (.zip / .bin)", cX0 + 14.0f * uiScale, y + 71.0f * uiScale, 0.24f * uiScale, cTextSecondary, 0);
+                    float gap = 10.0f * uiScale;
+                    float btnW = (cw - 28.0f * uiScale - gap) * 0.5f;
+                    float btnY = y + 81.0f * uiScale;
+                    float btnX0 = cX0 + 14.0f * uiScale;
+                    float btnX1 = btnX0 + btnW + gap;
+                    drawGlossyBtn(btnX0, btnY, btnX0 + btnW, btnY + 35.0f * uiScale, 13.0f * uiScale,
+                                  rgba(0.30f, 0.80f, 0.99f, 0.90f), rgba(0.06f, 0.38f, 0.86f, 0.98f),
+                                  "EXPORT SAVE", rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.29f);
+                    pushDeckHit(btnX0, btnY, btnX0 + btnW, btnY + 35.0f * uiScale, HIT_EXPORT_SAVE);
+                    drawGlossyBtn(btnX1, btnY, btnX1 + btnW, btnY + 35.0f * uiScale, 13.0f * uiScale,
+                                  rgba(1.0f, 0.86f, 0.30f, 0.92f), rgba(0.76f, 0.48f, 0.04f, 0.98f),
+                                  "IMPORT SAVE", rgba(1.0f, 0.99f, 0.90f, 1.0f), 0.29f);
+                    pushDeckHit(btnX1, btnY, btnX1 + btnW, btnY + 35.0f * uiScale, HIT_IMPORT_SAVE);
+                });
+
                 placeCard(col, 118.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
                     drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, sc(rgba(0.95f, 0.42f, 0.46f, 0.55f)));
                     drawSectionTitle(cX0, y, "SUPPORT & DONATIONS", sc(rgba(0.98f, 0.48f, 0.52f, 1.0f)), true);
@@ -3229,7 +3266,7 @@ void UIOverlay::render(int screenW, int screenH) {
                         if (plusInstalled) {
                             drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Installed on Device", sc(rgba(0.10f, 0.34f, 0.22f, 0.90f)), sc(rgba(0.55f, 0.96f, 0.65f, 1.0f)), sc(rgba(0.290f, 0.871f, 0.502f, 1.0f)));
                         } else {
-                            drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Bundled APK Ready (v0.7.7)", sc(rgba(0.36f, 0.28f, 0.10f, 0.90f)), sc(rgba(1.0f, 0.88f, 0.42f, 1.0f)), cGold);
+                            drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Bundled APK Ready (v0.7.8)", sc(rgba(0.36f, 0.28f, 0.10f, 0.90f)), sc(rgba(1.0f, 0.88f, 0.42f, 1.0f)), cGold);
                         }
                         drawText("Includes Cheats, Netplay Co-op, Power-Ups & Galaxy Warp.", cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
                         float btnY = y + 84.0f * uiScale;
@@ -3246,7 +3283,7 @@ void UIOverlay::render(int screenW, int screenH) {
 
                     placeCard(1, 88.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
                         drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBgAlt, cCardBorder);
-                        drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "GalaxyMobile v0.7.7", sc(rgba(0.10f, 0.28f, 0.46f, 0.92f)), sc(rgba(0.45f, 0.88f, 1.0f, 1.0f)), cHeader);
+                        drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "GalaxyMobile v0.7.8", sc(rgba(0.10f, 0.28f, 0.46f, 0.92f)), sc(rgba(0.45f, 0.88f, 1.0f, 1.0f)), cHeader);
                         drawText("Vanilla Edition • Native ARM64 • GLES3 / Vulkan", cX0 + 16.0f * uiScale, y + 54.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
                         drawText("Tuned for Android 11+ Snapdragon & Dimensity devices.", cX0 + 16.0f * uiScale, y + 72.0f * uiScale, 0.24f * uiScale, sc(rgba(0.60f, 0.72f, 0.90f, 0.85f)), 0);
                         (void)cw;
@@ -3259,7 +3296,7 @@ void UIOverlay::render(int screenW, int screenH) {
 
                     placeCard(0, 96.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
                         drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBgAlt, cCardBorderGold);
-                        drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "GalaxyMobile+ v0.7.7", sc(rgba(0.38f, 0.28f, 0.08f, 0.95f)), sc(rgba(1.0f, 0.90f, 0.42f, 1.0f)), cGold);
+                        drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "GalaxyMobile+ v0.7.8", sc(rgba(0.38f, 0.28f, 0.08f, 0.95f)), sc(rgba(1.0f, 0.90f, 0.42f, 1.0f)), cGold);
                         drawText("All-Star Edition • Native ARM64 • GLES3 / Vulkan", cX0 + 16.0f * uiScale, y + 54.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
                         drawText("Mods, Power-Ups, Warp & Netplay run live in-engine.", cX0 + 16.0f * uiScale, y + 72.0f * uiScale, 0.24f * uiScale, sc(rgba(0.60f, 0.72f, 0.90f, 0.85f)), 0);
                         (void)cw;
@@ -3322,14 +3359,14 @@ void UIOverlay::render(int screenW, int screenH) {
                           "Launch Warp", rgba(1.0f, 0.98f, 0.84f, 1.0f), 0.33f);
             pushFixedHit(lX0, 8.0f * uiScale, lX1, headerH - 8.0f * uiScale, HIT_WARP_LAUNCH);
         } else {
-            // Spinning Power Star emblem + Simple GalaxyMobile / GalaxyMobile+ Title + v0.7.7 underneath
+            // Spinning Power Star emblem + Simple GalaxyMobile / GalaxyMobile+ Title + v0.7.8 underneath
             float emblemX = 38.0f * uiScale;
             float emblemY = headerH * 0.5f;
             drawCircle(emblemX, emblemY, 17.0f * uiScale, rgba(1.0f, 0.84f, 0.24f, 0.16f * oa));
             drawStar(emblemX, emblemY, 15.0f * uiScale, cGold, sinf(animPhase * 1.2f) * 0.16f);
             const char* mainTitle = mPlusEdition ? "GalaxyMobile+" : "GalaxyMobile";
             drawText(mainTitle, emblemX + 26.0f * uiScale, headerH * 0.5f - 1.0f * uiScale, 0.50f * uiScale, cTextPrimary, 0);
-            drawText("v0.7.7", emblemX + 27.0f * uiScale, headerH * 0.5f + 17.0f * uiScale, 0.29f * uiScale, mPlusEdition ? cGold : cHeader, 0);
+            drawText("v0.7.8", emblemX + 27.0f * uiScale, headerH * 0.5f + 17.0f * uiScale, 0.29f * uiScale, mPlusEdition ? cGold : cHeader, 0);
 
             // Support Ko-fi pill button on top right
             float donateW = 92.0f * uiScale;
