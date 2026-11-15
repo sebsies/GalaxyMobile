@@ -327,7 +327,7 @@ void Settings::load(const std::string& path) {
             else if (!strcmp(key, "mod_skip_cutscenes")) modSkipCutscenes = (val > 0.5f);
             else if (!strcmp(key, "mod_infinite_health")) modInfiniteHealth = (val > 0.5f);
             else if (!strcmp(key, "mod_infinite_powerup")) modInfinitePowerup = (val > 0.5f);
-            else if (!strcmp(key, "graphics_preset")) graphicsPreset = std::max(0, std::min(3, (int)val));
+            else if (!strcmp(key, "graphics_preset")) graphicsPreset = std::max(0, std::min(4, (int)(val + 0.5f)));
             else if (!strcmp(key, "hd_ui_textures")) hdUiTextures = (val > 0.5f);
             else if (!strcmp(key, "mod_advanced_haptics")) modAdvancedHaptics = (val > 0.5f);
             else if (!strcmp(key, "mod_flight_everywhere")) modFlightEverywhere = (val > 0.5f);
@@ -1039,14 +1039,15 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                         }
                         // Row 3: Resolution Preset Selector (Card 2: 178..228)
                         else if (contentRelY >= 178.0f * uiScale && contentRelY <= 228.0f * uiScale) {
-                            float cardX0 = drawerX + padX;
-                            float cX0 = cardX0 + 8.0f * uiScale;
-                            float chipW = (contentW - 16.0f * uiScale - 9.0f * uiScale) / 4.0f;
-                            float relX = px - cX0;
+                            float grpX0 = drawerX + padX + 14.0f * uiScale;
+                            float grpW = contentW - 28.0f * uiScale;
+                            float segW = (grpW - 4.0f * uiScale) / 5.0f;
+                            float relX = px - (grpX0 + 2.0f * uiScale);
                             if (relX >= 0.0f) {
-                                int chip = (int)(relX / (chipW + 3.0f * uiScale));
-                                if (chip >= 0 && chip < 4) {
-                                    mSettings.graphicsPreset = chip;
+                                int chip = (int)(relX / segW);
+                                if (chip >= 0 && chip < 5) {
+                                    static const int kPresetBySegment[5] = { 4, 0, 1, 2, 3 };
+                                    mSettings.graphicsPreset = kPresetBySegment[chip];
                                     mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                                 }
                             }
@@ -2682,10 +2683,12 @@ void UIOverlay::render(int screenW, int screenH) {
                     drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
                     drawText("3D RENDER RESOLUTION PRESET", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
 
-                    // 4-way Preset Segmented Button
+                    // 5-way Preset Segmented Button
                     float r1Y = y + 34.0f * uiScale;
-                    static const char* kPresetNames[4] = { "720p HD", "900p HD+", "1080p FHD", "Native Ultra" };
-                    drawSegmentedGroup(cX0 + 14.0f * uiScale, r1Y, contentW - 28.0f * uiScale, 36.0f * uiScale, kPresetNames, 4, mSettings.graphicsPreset);
+                    static const char* kPresetNames[5] = { "480p", "720p", "900p", "1080p", "Ultra" };
+                    static const int kSegmentByPreset[5] = { 1, 2, 3, 4, 0 };
+                    int activeSeg = (mSettings.graphicsPreset >= 0 && mSettings.graphicsPreset < 5) ? kSegmentByPreset[mSettings.graphicsPreset] : 3;
+                    drawSegmentedGroup(cX0 + 14.0f * uiScale, r1Y, contentW - 28.0f * uiScale, 36.0f * uiScale, kPresetNames, 5, activeSeg);
 
                     // Live Status Box
                     float boxY = y + 78.0f * uiScale;
@@ -2698,7 +2701,13 @@ void UIOverlay::render(int screenW, int screenH) {
                     Color badgeTxt = rgba(0.40f, 0.85f, 1.0f, 1.0f);
                     Color badgeDot = rgba(0.220f, 0.741f, 0.969f, 1.0f);
 
-                    if (mSettings.graphicsPreset == 0) {
+                    if (mSettings.graphicsPreset == 4) {
+                        resChip = "480p SD • Wii Native";
+                        resSub = "Internal 854x480 render target. Maximum battery & speed.";
+                        badgeBg = rgba(0.16f, 0.24f, 0.34f, 0.90f);
+                        badgeTxt = rgba(0.68f, 0.86f, 1.0f, 1.0f);
+                        badgeDot = rgba(0.45f, 0.72f, 0.98f, 1.0f);
+                    } else if (mSettings.graphicsPreset == 0) {
                         resChip = "720p HD • Power Saver";
                         resSub = "Internal 1280x720 render target. Cooler battery operation.";
                         badgeBg = rgba(0.12f, 0.32f, 0.20f, 0.90f);
@@ -3039,7 +3048,7 @@ void UIOverlay::render(int screenW, int screenH) {
                         } else {
                             drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Bundled APK Ready (v0.7.6)", rgba(0.35f, 0.28f, 0.10f, 0.90f), rgba(1.0f, 0.85f, 0.40f, 1.0f), rgba(0.984f, 0.749f, 0.141f, 1.0f));
                         }
-                        drawText("Includes Graphics Presets, Haptics, Cheats & Galaxy Warp.", cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+                        drawText("Includes Advanced Haptics, Cheats & Galaxy Warp.", cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
 
                         float btnY = y + 84.0f * uiScale;
                         Color pBtnBg = plusInstalled ? rgba(0.14f, 0.48f, 0.26f, 0.95f) : rgba(0.38f, 0.20f, 0.68f, 0.95f);

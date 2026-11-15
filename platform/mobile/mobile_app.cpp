@@ -269,11 +269,9 @@ bool initEgl(MobileApp& a) {
 }
 
 int getDesiredTargetHeight(const MobileApp& a) {
-    if (!mobile_ui::UIOverlay::get().isPlusEdition()) {
-        return (a.screenHeight > 1080) ? std::min(a.screenHeight, 1440) : 1080;
-    }
     int preset = mobile_ui::UIOverlay::get().settings().graphicsPreset;
     switch (preset) {
+        case 4: return 480;                                                   // 480p SD: Wii Native
         case 0: return 720;                                                   // Low: 720p HD
         case 1: return 900;                                                   // Medium: 900p HD+
         case 3: return std::max(1080, a.screenHeight);                        // Ultra: Native (QHD+/1440p+)
@@ -359,7 +357,7 @@ bool createSurface(MobileApp& a) {
         float nativeAspect = (a.vpH > 0) ? ((float)a.vpW / (float)a.vpH) : ((float)a.screenWidth / (float)a.screenHeight);
         targetW = (int)lroundf(targetH * nativeAspect);
     } else {
-        targetW = (targetH * 16) / 9;
+        targetW = (targetH == 480) ? 854 : ((targetH * 16) / 9);
     }
     if (!a.targetReady || a.efbTarget.width != targetW || a.efbTarget.height != targetH) {
         if (a.targetReady) {
@@ -1200,7 +1198,7 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
                 float nativeAspect = (a.vpH > 0) ? ((float)a.vpW / (float)a.vpH) : ((float)a.screenWidth / (float)a.screenHeight);
                 desiredTargetW = (int)lroundf(desiredTargetH * nativeAspect);
             } else {
-                desiredTargetW = (desiredTargetH * 16) / 9;
+                desiredTargetW = (desiredTargetH == 480) ? 854 : ((desiredTargetH * 16) / 9);
             }
             if (a.targetReady && (a.efbTarget.width != desiredTargetW || a.efbTarget.height != desiredTargetH)) {
                 r.destroyTarget(a.efbTarget);

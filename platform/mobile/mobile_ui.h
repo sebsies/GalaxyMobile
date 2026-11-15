@@ -32,7 +32,7 @@ struct Settings {
     float fpsOffsetY = 0.0f;
     float fpsScale = 1.0f;
 
-    // Graphics Preset: 0=Low (720p), 1=Medium (900p), 2=High (1080p normal, default), 3=Ultra (Native + Shading/Reflections)
+    // Graphics Preset: 0=Low (720p), 1=Medium (900p), 2=High (1080p normal, default), 3=Ultra (Native), 4=SD (480p Wii Native)
     int graphicsPreset = 2;
 
     // HD UI & HUD Upscaler (high-res crisp UI, icons & fonts, ON by default)
