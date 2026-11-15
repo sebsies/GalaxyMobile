@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <algorithm>
 #include <string>
@@ -24,6 +25,12 @@
 namespace mobile_ui {
 
 namespace {
+
+int64_t monotonicNowNs() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+}
 
 // Galaxy Database for Galaxy & Scenario Warp Menu (Plus Edition)
 struct GalaxyDef {
@@ -548,8 +555,13 @@ bool UIOverlay::needsRedraw() {
 }
 
 void UIOverlay::closeSettings(bool playCloseSe) {
-    if (mSettingsOpen && playCloseSe) {
-        port_play_ui_se(PORT_UI_SE_CLOSE);
+    if (mSettingsOpen) {
+        if (playCloseSe) {
+            port_play_ui_se(PORT_UI_SE_CLOSE);
+        }
+        // Guard the top-right + (Pause) button briefly after exiting settings so
+        // Resume button taps or quick double-taps cannot accidentally trigger pause.
+        mPauseGuardUntilNs = monotonicNowNs() + 400000000LL; // 400 ms
     }
     mSettingsOpen = false;
     mWarpMenuOpen = false;
@@ -713,6 +725,30 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
     int32_t pointerIndex = (actionWithIndex & AMOTION_EVENT_ACTION_POINTER_INDEX_MASK) >> AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT;
     size_t pointerCount = AMotionEvent_getPointerCount(event);
 
+    auto resetLiveTouchState = [&]() {
+        mStickPointerId = -1;
+        mStickKnobX = mStickBaseX;
+        mStickKnobY = mStickBaseY;
+        pad.stickX = 0.0f;
+        pad.stickY = 0.0f;
+        pad.buttons = 0;
+        mBtnAPressed = mBtnBPressed = mBtnZPressed = mBtnSpinPressed = mBtnPlusPressed = false;
+        mBtnDpadLeft = mBtnDpadRight = mBtnDpadUp = mBtnDpadDown = false;
+    };
+
+    // A fresh primary touch down begins a new gesture, clearing prior modal-exit suppression.
+    if (action == AMOTION_EVENT_ACTION_DOWN) {
+        mSuppressTouchUntilUp = false;
+    }
+    if (mSuppressTouchUntilUp) {
+        if (action == AMOTION_EVENT_ACTION_UP || action == AMOTION_EVENT_ACTION_CANCEL) {
+            mSuppressTouchUntilUp = false;
+        }
+        resetLiveTouchState();
+        mDirty = true;
+        return true;
+    }
+
     // Responsive scaling based on screen height (clamped cleanly for narrower panels)
     float baseDpi = (float)screenH / 650.0f;
     float uiScale = std::min(baseDpi, (float)screenW / 1060.0f);
@@ -751,6 +787,8 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
             float saveBtnX = w * 0.5f - 110.0f, saveBtnY = 50.0f;
             if (px >= saveBtnX && px <= saveBtnX + 100.0f && py >= saveBtnY && py <= saveBtnY + 50.0f) {
                 mEditLayoutMode = false;
+                mSuppressTouchUntilUp = true;
+                resetLiveTouchState();
                 if (!mSavePath.empty()) mSettings.save(mSavePath);
                 mDirty = true;
                 return true;
@@ -911,11 +949,17 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
             mDirty = true;
         };
 
+        auto dismissSettings = [&](bool playCloseSe) {
+            closeSettings(playCloseSe);
+            mSuppressTouchUntilUp = (action != AMOTION_EVENT_ACTION_UP && action != AMOTION_EVENT_ACTION_CANCEL);
+            resetLiveTouchState();
+        };
+
         auto executeHit = [&](const UiHitbox& hb) {
             bool saveNow = false;
             switch (hb.kind) {
             case HIT_CLOSE:
-                closeSettings(true);
+                dismissSettings(true);
                 return;
             case HIT_DONATE:
                 port_open_url("https://ko-fi.com/sebsies");
@@ -968,7 +1012,7 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                 port_request_warp(kGalaxies[hb.arg0].stageName, clampedSc);
                 port_play_ui_se(PORT_UI_SE_WARP);
                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                closeSettings(false);
+                dismissSettings(false);
                 return;
             }
             case HIT_WARP_CARD:
@@ -986,7 +1030,7 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                 }
                 port_play_ui_se(PORT_UI_SE_WARP);
                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                closeSettings(false);
+                dismissSettings(false);
                 return;
             case HIT_TOGGLE_SHOW_CONTROLS:
                 mSettings.showControls = !mSettings.showControls;
@@ -1568,8 +1612,10 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                     hitButton = true;
                 }
                 if (inRadius(px, py, plusX, plusY, plusR)) {
-                    touchButtons |= 0x0010; // WPAD_BUTTON_PLUS
-                    mBtnPlusPressed = true;
+                    if (mDrawerAnim <= 0.02f && monotonicNowNs() >= mPauseGuardUntilNs) {
+                        touchButtons |= 0x0010; // WPAD_BUTTON_PLUS
+                        mBtnPlusPressed = true;
+                    }
                     hitButton = true;
                 }
                 if (mSettings.showDpad) {

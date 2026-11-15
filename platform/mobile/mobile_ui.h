@@ -87,6 +87,8 @@ private:
 
     // UI state
     bool mSettingsOpen = false;
+    bool mSuppressTouchUntilUp = false;
+    int64_t mPauseGuardUntilNs = 0;
     float mDrawerAnim = 0.0f; // 0.0 = closed offscreen, 1.0 = fully open
     int64_t mLastAnimTime = 0;
     bool mEditLayoutMode = false;
