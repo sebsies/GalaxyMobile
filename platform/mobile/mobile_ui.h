@@ -3,6 +3,7 @@
 #include <android/input.h>
 #include <stdint.h>
 #include <string>
+#include <vector>
 #include "port/input.h"
 #include "port/net.h"
 
@@ -67,7 +68,7 @@ public:
 
     bool needsRedraw();
     bool isSettingsOpen() const { return mSettingsOpen || mDrawerAnim > 0.01f; }
-    void closeSettings();
+    void closeSettings(bool playCloseSe = true);
     void openSettings();
     void setPointer(float x, float y);
     void setFps(float fps);
@@ -100,29 +101,33 @@ private:
     void computeFpsRect(int screenW, int screenH, float& outX, float& outY, float& outW, float& outH, float& outBaseW) const;
 
     // Settings Navigation & Scrolling
-    int mSettingsTab = 0;              // 0 = Controls, 1 = Display, 2 = System/Advanced
+    int mSettingsTab = 0;              // 0=Controls, 1=Display, 2=Mods/System, 3=Netplay, 4=System(Plus)
     float mDrawerScrollY = 0.0f;       // Current scroll offset (pixels)
     float mDrawerScrollTarget = 0.0f;
+    float mSettingsMaxScroll = 0.0f;
+    float mDeckTopY = 0.0f;
+    float mDeckBottomY = 0.0f;
+    float mDeckLeftX = 0.0f;
     bool mDrawerIsScrolling = false;
     int mDrawerScrollPointerId = -1;
     float mDrawerTouchStartY = 0.0f;
     float mDrawerTouchStartX = 0.0f;
     float mDrawerScrollStartOffset = 0.0f;
 
-    // Fluid M3 Tab Indicator Animation
-    float mTabIndicatorX = 0.0f;
-    float mTabIndicatorW = 0.0f;
-    float mTabTargetX = 0.0f;
-    float mTabTargetW = 0.0f;
+    // Fluid Observatory Tab Indicator Animation
+    float mTabIndicatorY = 0.0f;
+    float mTabIndicatorH = 0.0f;
+    float mTabTargetY = 0.0f;
+    float mTabTargetH = 0.0f;
 
-    // Fluid M3 Switch Knob Animations (0.0 = OFF, 1.0 = ON)
+    // Fluid Switch Knob Animations (0.0 = OFF, 1.0 = ON)
     float mSwAnimShowControls = 1.0f;
     float mSwAnimShowDpad = 1.0f;
     float mSwAnimFullscreen = 0.0f;
     float mSwAnimCameraCutout = 1.0f;
-    bool mDraggingLanguageSlider = false;
-    bool mDraggingSensitivitySlider = false;
-    bool mDraggingFpsLimitSlider = false;
+    int mActiveSliderKind = 0;
+    float mActiveSliderX0 = 0.0f;
+    float mActiveSliderX1 = 0.0f;
     float mSwAnimHdUi = 1.0f;
     float mSwAnimSkipCutscenes = 0.0f;
     float mSwAnimInfiniteHp = 0.0f;
@@ -142,6 +147,7 @@ private:
     int mWarpSelectedScenario = 1;
     float mWarpScrollY = 0.0f;
     float mWarpScrollTarget = 0.0f;
+    float mWarpMaxScroll = 0.0f;
     bool mWarpIsScrolling = false;
     int mWarpScrollPointerId = -1;
     float mWarpTouchStartY = 0.0f;
@@ -172,6 +178,17 @@ private:
     // Persistent in-game Star Pointer state (normalized -1..1, default to screen center 0, 0)
     float mPointerX = 0.0f;
     float mPointerY = 0.0f;
+
+    struct UiHitbox {
+        float x0, y0, x1, y1;
+        int kind;
+        int arg0;
+        int arg1;
+        float p0;
+        float p1;
+        bool fixed;
+    };
+    std::vector<UiHitbox> mSettingsHits;
 
     // Performance overlay state
     float mCurrentFps = 0.0f;

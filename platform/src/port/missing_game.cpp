@@ -72,4 +72,6 @@ __attribute__((weak)) void port_open_installer(void) {}
 __attribute__((weak)) void port_open_url(const char* url) { (void)url; }
 __attribute__((weak)) int port_is_plus_installed(void) { return 0; }
 __attribute__((weak)) void port_install_plus(void) {}
+__attribute__((weak)) void port_play_ui_se(int seType) { (void)seType; }
+__attribute__((weak)) int port_take_ui_se_request(void) { return 0; }
 }

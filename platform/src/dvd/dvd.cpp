@@ -218,6 +218,30 @@ extern "C" int port_take_language_change_request(int* outLangIndex) {
     return 0;
 }
 
+static std::mutex sUiSeMu;
+static int sUiSeBuf[16] = {};
+static int sUiSeHead = 0;
+static int sUiSeTail = 0;
+
+extern "C" void port_play_ui_se(int seType) {
+    if (seType <= 0) return;
+    std::lock_guard<std::mutex> lock(sUiSeMu);
+    int nextTail = (sUiSeTail + 1) & 15;
+    if (nextTail == sUiSeHead) {
+        sUiSeHead = (sUiSeHead + 1) & 15;
+    }
+    sUiSeBuf[sUiSeTail] = seType;
+    sUiSeTail = nextTail;
+}
+
+extern "C" int port_take_ui_se_request(void) {
+    std::lock_guard<std::mutex> lock(sUiSeMu);
+    if (sUiSeHead == sUiSeTail) return 0;
+    int req = sUiSeBuf[sUiSeHead];
+    sUiSeHead = (sUiSeHead + 1) & 15;
+    return req;
+}
+
 extern "C" int port_language_wanted(void) {
     for (int i = 0; i < sLanguageCount; i++) {
         if (strcmp(sLanguageWanted, sLanguages[i]->name) == 0) {

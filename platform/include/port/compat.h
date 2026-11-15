@@ -208,6 +208,17 @@ void port_set_player_character(int isLuigi);
 int port_get_player_character(void);
 void port_request_character_change(int isLuigi);
 int port_take_character_change_request(void);
+void port_play_ui_se(int seType);
+int port_take_ui_se_request(void);
+#define PORT_UI_SE_NONE 0
+#define PORT_UI_SE_OPEN 1
+#define PORT_UI_SE_CLOSE 2
+#define PORT_UI_SE_TAB 3
+#define PORT_UI_SE_TICK 4
+#define PORT_UI_SE_DECIDE 5
+#define PORT_UI_SE_CANCEL 6
+#define PORT_UI_SE_WINDOW_OPEN 7
+#define PORT_UI_SE_WARP 8
 int64_t port_host_time_ns(void);
 void port_host_sleep_ns(int64_t ns);
 // Delivers pending interrupts (a safe point; only from the thread holding the

@@ -3,7 +3,10 @@
 #include "Game/NameObj/NameObjRegister.hpp"
 #include "Game/Screen/HomeButtonLayout.hpp"
 #include "Game/Screen/SystemWipeHolder.hpp"
+#include "Game/AudioLib/AudSystem.hpp"
+#include "Game/AudioLib/AudWrap.hpp"
 #include "Game/System/AudSystemWrapper.hpp"
+#include "Game/Util/SoundUtil.hpp"
 #include "Game/System/DrawSyncManager.hpp"
 #include "Game/System/FileRipper.hpp"
 #include "Game/System/GameSequenceDirector.hpp"
@@ -246,6 +249,30 @@ void GameSystem::frameLoop() {
     MainLoopFramework::sManager->beginRender();
     draw();
     MainLoopFramework::sManager->endRender();
+#ifdef TARGET_PC
+    if (isSystemNormal(this) && AudWrap::getSystem() != nullptr && AudWrap::getSystemSeObject() != nullptr &&
+        AudWrap::getSoundNameConverter() != nullptr) {
+        for (int i = 0; i < 4; i++) {
+            int uiSe = port_take_ui_se_request();
+            if (uiSe <= 0) break;
+            const char* seName = nullptr;
+            switch (uiSe) {
+            case PORT_UI_SE_OPEN: seName = "SE_SY_PAUSE_ON"; break;
+            case PORT_UI_SE_CLOSE: seName = "SE_SY_PAUSE_OFF"; break;
+            case PORT_UI_SE_TAB: seName = "SE_SY_GALAMAP_PAGE_CHANGE"; break;
+            case PORT_UI_SE_TICK: seName = "SE_SY_BUTTON_CURSOR_ON"; break;
+            case PORT_UI_SE_DECIDE: seName = "SE_SY_GALAXY_DECIDE_OK"; break;
+            case PORT_UI_SE_CANCEL: seName = "SE_SY_GALAXY_DECIDE_CANCEL"; break;
+            case PORT_UI_SE_WINDOW_OPEN: seName = "SE_SY_GALAMAP_WINDOW_OPEN"; break;
+            case PORT_UI_SE_WARP: seName = "SE_SY_GALAMAP_DECIDE"; break;
+            default: break;
+            }
+            if (seName != nullptr) {
+                MR::startSystemSE(seName, -1, -1);
+            }
+        }
+    }
+#endif
     update();
     calcAnim();
     mObjHolder->captureIfAllowForScreenPreserver();

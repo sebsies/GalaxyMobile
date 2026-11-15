@@ -96,6 +96,57 @@ static const char* kCategoryNames[8] = {
     "All", "Terrace", "Fountain", "Kitchen", "Bedroom", "Engine", "Garden", "Special"
 };
 
+enum UiHitKind {
+    HIT_NONE = 0,
+    HIT_CLOSE,
+    HIT_DONATE,
+    HIT_TAB,
+    HIT_WARP_BACK,
+    HIT_WARP_CAT,
+    HIT_WARP_SCENARIO,
+    HIT_WARP_QUICK,
+    HIT_WARP_CARD,
+    HIT_WARP_LAUNCH,
+    HIT_TOGGLE_SHOW_CONTROLS,
+    HIT_TOGGLE_SHOW_DPAD,
+    HIT_SEG_DPAD_SIDE,
+    HIT_SEG_STICK_MODE,
+    HIT_SEG_OPACITY,
+    HIT_SEG_BTN_SIZE,
+    HIT_LAYOUT_EDIT,
+    HIT_LAYOUT_RESET,
+    HIT_SEG_RIGHT_STICK_MODE,
+    HIT_SLIDER_SENSITIVITY,
+    HIT_TOGGLE_FULLSCREEN,
+    HIT_TOGGLE_CAMERA_CUTOUT,
+    HIT_SEG_RESOLUTION,
+    HIT_TOGGLE_HD_UI,
+    HIT_TOGGLE_FPS_COUNTER,
+    HIT_STEP_FPS_SCALE,
+    HIT_FPS_EDIT,
+    HIT_FPS_RESET,
+    HIT_SLIDER_FPS_LIMIT,
+    HIT_TOGGLE_SKIP_CUTSCENES,
+    HIT_TOGGLE_INF_HP,
+    HIT_TOGGLE_INF_POWERUP,
+    HIT_TOGGLE_FLIGHT,
+    HIT_POWERUP_MORPH,
+    HIT_OPEN_WARP,
+    HIT_UNLOCK_SPIN,
+    HIT_SEG_CHARACTER,
+    HIT_TOGGLE_HAPTICS,
+    HIT_SLIDER_LANGUAGE,
+    HIT_OPEN_INSTALLER,
+    HIT_INSTALL_PLUS,
+    HIT_SHARE_LOG,
+    HIT_NET_DISCONNECT,
+    HIT_SEG_NET_MODE,
+    HIT_NET_HOST_TOGGLE,
+    HIT_NET_REFRESH,
+    HIT_NET_JOIN_HOST,
+    HIT_NET_DIRECT_CONNECT
+};
+
 // In-shader vertex for 2D batching
 struct UIVertex {
     float x, y;
@@ -260,6 +311,34 @@ void main() {
         float flashDot = smoothstep(0.05, 0.05 - fw, dFlash);
 
         alpha = max(fillBody * lensHole * (1.0 - flashDot), max(lensRing, lensDot));
+    } else if (mode > 7.5 && mode < 8.5) {
+        // Mode 8: 5-Point Super Mario Galaxy Power Star SDF
+        float ca = cos(param);
+        float sa = sin(param);
+        vec2 p = vec2(ca * vUv.x - sa * vUv.y, -(sa * vUv.x + ca * vUv.y));
+        const vec2 k1 = vec2(0.809016994375, -0.587785252292);
+        const vec2 k2 = vec2(-k1.x, k1.y);
+        p.x = abs(p.x);
+        p -= 2.0 * max(dot(k1, p), 0.0) * k1;
+        p -= 2.0 * max(dot(k2, p), 0.0) * k2;
+        p.x = abs(p.x);
+        p.y -= 0.84;
+        vec2 ba = 0.48 * vec2(-k1.y, k1.x) - vec2(0.0, 0.84);
+        float h = clamp(dot(p, ba) / dot(ba, ba), 0.0, 1.0);
+        float d = length(p - ba * h) * sign(p.y * ba.x - p.x * ba.y) - 0.04;
+        float fw = fwidth(d);
+        if (fw < 0.001) fw = 0.005;
+        alpha = smoothstep(0.0, -fw, d);
+    } else if (mode > 8.5 && mode < 9.5) {
+        // Mode 9: 4-Point Cosmic Sparkle / Luma Starburst
+        float ca = cos(param);
+        float sa = sin(param);
+        vec2 p = abs(vec2(ca * vUv.x - sa * vUv.y, sa * vUv.x + ca * vUv.y));
+        float crossD = min(p.x, p.y) + 0.16 * (p.x + p.y) - 0.18;
+        float d = max(crossD, length(p) - 0.90);
+        float fw = fwidth(d);
+        if (fw < 0.001) fw = 0.005;
+        alpha = smoothstep(0.0, -fw, d);
     } else {
         // Mode 0: Rounded rectangle with exact aspect ratio
         if (param > 0.0) {
@@ -382,10 +461,10 @@ void Settings::save(const std::string& path) const {
 UIOverlay::UIOverlay() {
     mPointerX = 0.0f; // Screen center
     mPointerY = 0.0f; // Screen center
-    mTabIndicatorX = 0.0f;
-    mTabIndicatorW = 0.0f;
-    mTabTargetX = 0.0f;
-    mTabTargetW = 0.0f;
+    mTabIndicatorY = 0.0f;
+    mTabIndicatorH = 0.0f;
+    mTabTargetY = 0.0f;
+    mTabTargetH = 0.0f;
     mSwAnimShowControls = 1.0f;
     mSwAnimShowDpad = 1.0f;
     mSwAnimFullscreen = 0.0f;
@@ -443,7 +522,7 @@ bool UIOverlay::needsRedraw() {
     if (mWarpMenuOpen && fabsf(mWarpScrollY - mWarpScrollTarget) > 0.5f) {
         return true;
     }
-    if (fabsf(mTabIndicatorX - mTabTargetX) > 0.5f || fabsf(mTabIndicatorW - mTabTargetW) > 0.5f) {
+    if (fabsf(mTabIndicatorY - mTabTargetY) > 0.5f || fabsf(mTabIndicatorH - mTabTargetH) > 0.5f) {
         return true;
     }
     auto switchActive = [](float cur, bool target) {
@@ -468,9 +547,13 @@ bool UIOverlay::needsRedraw() {
     return d;
 }
 
-void UIOverlay::closeSettings() {
+void UIOverlay::closeSettings(bool playCloseSe) {
+    if (mSettingsOpen && playCloseSe) {
+        port_play_ui_se(PORT_UI_SE_CLOSE);
+    }
     mSettingsOpen = false;
     mWarpMenuOpen = false;
+    mActiveSliderKind = 0;
     mDirty = true;
     if (!mSavePath.empty()) {
         mSettings.save(mSavePath);
@@ -478,6 +561,9 @@ void UIOverlay::closeSettings() {
 }
 
 void UIOverlay::openSettings() {
+    if (!mSettingsOpen) {
+        port_play_ui_se(PORT_UI_SE_OPEN);
+    }
     mSettingsOpen = true;
     mDirty = true;
 }
@@ -627,31 +713,27 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
     int32_t pointerIndex = (actionWithIndex & AMOTION_EVENT_ACTION_POINTER_INDEX_MASK) >> AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT;
     size_t pointerCount = AMotionEvent_getPointerCount(event);
 
-    // Responsive scaling based on screen height
+    // Responsive scaling based on screen height (clamped cleanly for narrower panels)
     float baseDpi = (float)screenH / 650.0f;
-    float uiScale = baseDpi;
+    float uiScale = std::min(baseDpi, (float)screenW / 1060.0f);
     float scale = baseDpi * mSettings.scale;
     float w = (float)screenW;
     float h = (float)screenH;
 
-    // Material 3 Settings Tab Dock (Top-Left Edge)
-    float tabW = 56.0f * uiScale;
-    float tabH = 48.0f * uiScale;
-    float tabY = 22.0f * uiScale;
+    // Settings Trigger Cogwheel (Top-Left Edge)
+    float tabW = 56.0f * baseDpi;
+    float tabH = 48.0f * baseDpi;
+    float tabY = 22.0f * baseDpi;
 
-    // Side Sheet Drawer Dimensions
-    float drawerW = std::min(w * 0.54f, 480.0f * uiScale);
-    float drawerX = (mDrawerAnim - 1.0f) * drawerW;
-
-    // Check Settings Tab tap (when drawer is closed or nearly closed)
+    // Check Settings Tab tap (when menu is closed)
     if (!mSettingsOpen && mDrawerAnim < 0.15f) {
         if (action == AMOTION_EVENT_ACTION_DOWN || action == AMOTION_EVENT_ACTION_POINTER_DOWN) {
             float px = AMotionEvent_getX(event, pointerIndex);
             float py = AMotionEvent_getY(event, pointerIndex);
-            if (px >= 0.0f && px <= tabW + 16.0f * uiScale && py >= tabY - 8.0f * uiScale && py <= tabY + tabH + 8.0f * uiScale) {
-                mSettingsOpen = true;
+            if (px >= 0.0f && px <= tabW + 16.0f * baseDpi && py >= tabY - 8.0f * baseDpi && py <= tabY + tabH + 8.0f * baseDpi) {
                 mBtnCfgPressed = true;
-                mDirty = true;
+                openSettings();
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                 return true;
             }
         }
@@ -796,72 +878,411 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
         return true;
     }
 
-    // Handle Material 3 Side Sheet Drawer Touches (Tabbed & Scrollable)
+    // Handle Full-Screen Observatory Settings Touches (Hitbox-driven)
     if (mSettingsOpen || mDrawerAnim > 0.05f) {
-        float padX = 22.0f * uiScale;
-        float contentW = drawerW - padX * 2.0f;
-        float contentTop = 114.0f * uiScale;
-        float contentBottom = h - 56.0f * uiScale;
-
-        // Calculate total content height based on active view
-        float totalContentH = 0.0f;
-        if (mWarpMenuOpen) {
-            int matchingCount = 0;
-            for (int i = 0; i < kNumGalaxies; i++) {
-                if (mWarpCategoryIndex == 0 || kGalaxies[i].category == mWarpCategoryIndex) {
-                    matchingCount++;
+        auto applySliderAtX = [&](int sliderKind, float x, float trackX0, float trackX1) {
+            float t = std::max(0.0f, std::min(1.0f, (x - trackX0) / std::max(1.0f, trackX1 - trackX0)));
+            if (sliderKind == HIT_SLIDER_SENSITIVITY) {
+                float rawSens = 0.50f + t * 2.50f;
+                float newSens = std::max(0.50f, std::min(3.00f, roundf(rawSens * 20.0f) * 0.05f));
+                if (fabsf(newSens - mSettings.rightStickSensitivity) > 0.001f) {
+                    if ((int)lroundf(newSens * 10.0f) != (int)lroundf(mSettings.rightStickSensitivity * 10.0f)) {
+                        mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                        port_play_ui_se(PORT_UI_SE_TICK);
+                    }
+                    mSettings.rightStickSensitivity = newSens;
+                }
+            } else if (sliderKind == HIT_SLIDER_FPS_LIMIT) {
+                int newLimit = std::max(30, std::min(60, (int)lroundf(30.0f + t * 30.0f)));
+                if (newLimit != mSettings.fpsLimit) {
+                    mSettings.fpsLimit = newLimit;
+                    mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                    port_play_ui_se(PORT_UI_SE_TICK);
+                }
+            } else if (sliderKind == HIT_SLIDER_LANGUAGE) {
+                int newLang = std::max(0, std::min(6, (int)(t * 6.0f + 0.5f)));
+                if (newLang != mSettings.languageIndex) {
+                    mSettings.languageIndex = newLang;
+                    port_set_game_language(newLang);
+                    mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                    port_play_ui_se(PORT_UI_SE_TICK);
                 }
             }
-            totalContentH = matchingCount * (78.0f * uiScale) + 16.0f * uiScale;
-        } else if (mSettingsTab == 0) {
-            totalContentH = 666.0f * uiScale;
-        } else if (mSettingsTab == 1) {
-            totalContentH = 740.0f * uiScale;
-        } else if (mSettingsTab == 2) {
-            totalContentH = mPlusEdition ? (1176.0f * uiScale) : (826.0f * uiScale);
-        } else {
-            totalContentH = 780.0f * uiScale;
-        }
-        float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
+            mDirty = true;
+        };
 
-        auto applySensitivitySlider = [&](float x) {
-            float trackX0 = drawerX + padX + 24.0f * uiScale;
-            float trackX1 = drawerX + drawerW - padX - 24.0f * uiScale;
-            float t = std::max(0.0f, std::min(1.0f, (x - trackX0) / std::max(1.0f, trackX1 - trackX0)));
-            float rawSens = 0.50f + t * 2.50f;
-            float newSens = std::max(0.50f, std::min(3.00f, roundf(rawSens * 20.0f) * 0.05f));
-            if (fabsf(newSens - mSettings.rightStickSensitivity) > 0.001f) {
-                if ((int)lroundf(newSens * 10.0f) != (int)lroundf(mSettings.rightStickSensitivity * 10.0f)) {
+        auto executeHit = [&](const UiHitbox& hb) {
+            bool saveNow = false;
+            switch (hb.kind) {
+            case HIT_CLOSE:
+                closeSettings(true);
+                return;
+            case HIT_DONATE:
+                port_open_url("https://ko-fi.com/sebsies");
+                port_play_ui_se(PORT_UI_SE_DECIDE);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                return;
+            case HIT_TAB:
+                if (hb.arg0 != mSettingsTab) {
+                    mSettingsTab = hb.arg0;
+                    mDrawerScrollY = 0.0f;
+                    mDrawerScrollTarget = 0.0f;
+                    port_play_ui_se(PORT_UI_SE_TAB);
                     mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                 }
-                mSettings.rightStickSensitivity = newSens;
-            }
-            mDirty = true;
-        };
-
-        auto applyFpsLimitSlider = [&](float x) {
-            float trackX0 = drawerX + padX + 24.0f * uiScale;
-            float trackX1 = drawerX + drawerW - padX - 24.0f * uiScale;
-            float t = std::max(0.0f, std::min(1.0f, (x - trackX0) / std::max(1.0f, trackX1 - trackX0)));
-            int newLimit = std::max(30, std::min(60, (int)lroundf(30.0f + t * 30.0f)));
-            if (newLimit != mSettings.fpsLimit) {
+                break;
+            case HIT_WARP_BACK:
+                mWarpMenuOpen = false;
+                port_play_ui_se(PORT_UI_SE_CANCEL);
                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                mSettings.fpsLimit = newLimit;
+                break;
+            case HIT_WARP_CAT: {
+                int newCat = hb.arg0;
+                if (newCat >= 0 && newCat < 8) {
+                    mWarpCategoryIndex = newCat;
+                    mWarpScrollY = 0.0f;
+                    mWarpScrollTarget = 0.0f;
+                    if (newCat != 0 && kGalaxies[mWarpSelectedGalaxy].category != newCat) {
+                        for (int i = 0; i < kNumGalaxies; i++) {
+                            if (kGalaxies[i].category == newCat) {
+                                mWarpSelectedGalaxy = i;
+                                mWarpSelectedScenario = 1;
+                                break;
+                            }
+                        }
+                    }
+                    port_play_ui_se(PORT_UI_SE_TAB);
+                    mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                }
+                break;
+            }
+            case HIT_WARP_SCENARIO:
+                mWarpSelectedGalaxy = hb.arg0;
+                mWarpSelectedScenario = hb.arg1;
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_WARP_QUICK: {
+                mWarpSelectedGalaxy = hb.arg0;
+                int clampedSc = std::max(1, std::min(mWarpSelectedScenario, kGalaxies[hb.arg0].maxScenarios));
+                port_request_warp(kGalaxies[hb.arg0].stageName, clampedSc);
+                port_play_ui_se(PORT_UI_SE_WARP);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                closeSettings(false);
+                return;
+            }
+            case HIT_WARP_CARD:
+                mWarpSelectedGalaxy = hb.arg0;
+                if (mWarpSelectedScenario > kGalaxies[hb.arg0].maxScenarios) {
+                    mWarpSelectedScenario = 1;
+                }
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_WARP_LAUNCH:
+                if (mWarpSelectedGalaxy >= 0 && mWarpSelectedGalaxy < kNumGalaxies) {
+                    int clampedSc = std::max(1, std::min(mWarpSelectedScenario, kGalaxies[mWarpSelectedGalaxy].maxScenarios));
+                    port_request_warp(kGalaxies[mWarpSelectedGalaxy].stageName, clampedSc);
+                }
+                port_play_ui_se(PORT_UI_SE_WARP);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                closeSettings(false);
+                return;
+            case HIT_TOGGLE_SHOW_CONTROLS:
+                mSettings.showControls = !mSettings.showControls;
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_TOGGLE_SHOW_DPAD:
+                mSettings.showDpad = !mSettings.showDpad;
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_SEG_DPAD_SIDE:
+                mSettings.dpadOnRight = (hb.arg0 != 0);
+                mSettings.dpadOffsetX = 0.0f;
+                mSettings.dpadOffsetY = 0.0f;
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_SEG_STICK_MODE:
+                mSettings.dynamicStick = (hb.arg0 == 0);
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_SEG_OPACITY: {
+                static const float kOps[4] = {0.25f, 0.50f, 0.75f, 1.00f};
+                int idx = std::max(0, std::min(3, hb.arg0));
+                mSettings.opacity = kOps[idx];
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            }
+            case HIT_SEG_BTN_SIZE: {
+                static const float kSizes[3] = {0.85f, 1.00f, 1.25f};
+                int idx = std::max(0, std::min(2, hb.arg0));
+                mSettings.scale = kSizes[idx];
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            }
+            case HIT_LAYOUT_EDIT:
+                mSettingsOpen = false;
+                mEditLayoutMode = true;
+                port_play_ui_se(PORT_UI_SE_DECIDE);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_LAYOUT_RESET:
+                mSettings.stickOffsetX = 0.0f;
+                mSettings.stickOffsetY = 0.0f;
+                mSettings.buttonOffsetX = 0.0f;
+                mSettings.buttonOffsetY = 0.0f;
+                mSettings.dpadOffsetX = 0.0f;
+                mSettings.dpadOffsetY = 0.0f;
+                port_play_ui_se(PORT_UI_SE_CANCEL);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_SEG_RIGHT_STICK_MODE:
+                mSettings.rightStickPointer = (hb.arg0 == 0);
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_TOGGLE_FULLSCREEN:
+                mSettings.fullscreen = !mSettings.fullscreen;
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_TOGGLE_CAMERA_CUTOUT:
+                mSettings.showCameraCutout = !mSettings.showCameraCutout;
+                port_set_camera_cutout(mSettings.showCameraCutout ? 1 : 0);
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_SEG_RESOLUTION:
+                mSettings.graphicsPreset = std::max(0, std::min(4, hb.arg0));
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_TOGGLE_HD_UI:
+                mSettings.hdUiTextures = !mSettings.hdUiTextures;
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_TOGGLE_FPS_COUNTER:
+                mSettings.showFpsCounter = !mSettings.showFpsCounter;
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_STEP_FPS_SCALE:
+                if (hb.arg0 < 0) {
+                    mSettings.fpsScale = std::max(0.60f, mSettings.fpsScale - 0.10f);
+                } else if (hb.arg0 > 0) {
+                    mSettings.fpsScale = std::min(2.20f, mSettings.fpsScale + 0.10f);
+                } else {
+                    mSettings.fpsScale = 1.00f;
+                }
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_FPS_EDIT:
+                mSettings.showFpsCounter = true;
+                mSwAnimFpsCounter = 1.0f;
+                mSettingsOpen = false;
+                mEditLayoutMode = true;
+                port_play_ui_se(PORT_UI_SE_DECIDE);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_FPS_RESET:
+                mSettings.fpsOffsetX = 0.0f;
+                mSettings.fpsOffsetY = 0.0f;
+                mSettings.fpsScale = 1.0f;
+                port_play_ui_se(PORT_UI_SE_CANCEL);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_TOGGLE_SKIP_CUTSCENES:
+                mSettings.modSkipCutscenes = !mSettings.modSkipCutscenes;
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_TOGGLE_INF_HP:
+                mSettings.modInfiniteHealth = !mSettings.modInfiniteHealth;
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_TOGGLE_INF_POWERUP:
+                mSettings.modInfinitePowerup = !mSettings.modInfinitePowerup;
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_TOGGLE_FLIGHT:
+                mSettings.modFlightEverywhere = !mSettings.modFlightEverywhere;
+                if (mSettings.modFlightEverywhere) {
+                    port_request_powerup(6);
+                } else if (port_get_current_powerup() == 7) {
+                    port_request_powerup(0);
+                }
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_POWERUP_MORPH:
+                port_request_powerup(hb.arg0);
+                port_play_ui_se(PORT_UI_SE_DECIDE);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_OPEN_WARP:
+                mWarpMenuOpen = true;
+                mWarpScrollY = 0.0f;
+                mWarpScrollTarget = 0.0f;
+                port_play_ui_se(PORT_UI_SE_WINDOW_OPEN);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_UNLOCK_SPIN:
+                port_request_unlock_spin();
+                port_play_ui_se(PORT_UI_SE_DECIDE);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_SEG_CHARACTER:
+                if (hb.arg0 != mSettings.playerCharacter) {
+                    mSettings.playerCharacter = hb.arg0;
+                    port_request_character_change(hb.arg0);
+                }
+                port_play_ui_se(PORT_UI_SE_DECIDE);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_TOGGLE_HAPTICS:
+                mSettings.modAdvancedHaptics = !mSettings.modAdvancedHaptics;
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_OPEN_INSTALLER:
+                port_open_installer();
+                port_play_ui_se(PORT_UI_SE_DECIDE);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_INSTALL_PLUS:
+                port_install_plus();
+                port_play_ui_se(PORT_UI_SE_DECIDE);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_SHARE_LOG:
+                port_share_log();
+                port_play_ui_se(PORT_UI_SE_DECIDE);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_NET_DISCONNECT:
+                port_net_disconnect();
+                port_play_ui_se(PORT_UI_SE_CANCEL);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_SEG_NET_MODE:
+                port_net_set_mode(hb.arg0);
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_NET_HOST_TOGGLE:
+                if (port_net_get_role() == 1) {
+                    port_net_disconnect();
+                    port_play_ui_se(PORT_UI_SE_CANCEL);
+                } else {
+                    if (mSettings.playerCharacter != 0) {
+                        mSettings.playerCharacter = 0;
+                        port_request_character_change(0);
+                    } else {
+                        port_set_player_character(0);
+                    }
+                    port_net_start_host(24601, port_net_get_mode(), "Galaxy Room");
+                    port_play_ui_se(PORT_UI_SE_DECIDE);
+                }
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            case HIT_NET_REFRESH:
+                port_net_refresh_discovery();
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_NET_JOIN_HOST: {
+                PortLanHostInfo hosts[3];
+                int n = port_net_get_lan_hosts(hosts, 3);
+                if (hb.arg0 >= 0 && hb.arg0 < n) {
+                    if (mSettings.playerCharacter != 1) {
+                        mSettings.playerCharacter = 1;
+                        port_request_character_change(1);
+                    } else {
+                        port_set_player_character(1);
+                    }
+                    port_net_connect(hosts[hb.arg0].ip, hosts[hb.arg0].port);
+                    port_play_ui_se(PORT_UI_SE_DECIDE);
+                    mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                    saveNow = true;
+                }
+                break;
+            }
+            case HIT_NET_DIRECT_CONNECT:
+                if (mSettings.playerCharacter != 1) {
+                    mSettings.playerCharacter = 1;
+                    port_request_character_change(1);
+                } else {
+                    port_set_player_character(1);
+                }
+                port_net_connect("192.168.43.1", 24601);
+                port_play_ui_se(PORT_UI_SE_DECIDE);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                saveNow = true;
+                break;
+            default:
+                break;
+            }
+            if (saveNow && !mSavePath.empty()) {
+                mSettings.save(mSavePath);
             }
             mDirty = true;
         };
 
-        // 1. Move Gesture for Smooth Scrolling
+        auto findHit = [&](float px, float py, bool wantFixed) -> const UiHitbox* {
+            for (int i = (int)mSettingsHits.size() - 1; i >= 0; i--) {
+                const UiHitbox& hb = mSettingsHits[i];
+                if (hb.fixed != wantFixed) continue;
+                if (px >= hb.x0 && px <= hb.x1 && py >= hb.y0 && py <= hb.y1) {
+                    return &hb;
+                }
+            }
+            return nullptr;
+        };
+
+        // 1. Move Gesture: Slider Dragging or Smooth Vertical Deck Scrolling
         if (action == AMOTION_EVENT_ACTION_MOVE) {
             if (mWarpMenuOpen && mWarpScrollPointerId >= 0) {
                 for (size_t i = 0; i < pointerCount; i++) {
-                    int32_t pid = AMotionEvent_getPointerId(event, i);
-                    if (pid == mWarpScrollPointerId) {
+                    if (AMotionEvent_getPointerId(event, i) == mWarpScrollPointerId) {
                         float py = AMotionEvent_getY(event, i);
                         float deltaY = py - mWarpTouchStartY;
                         if (fabsf(deltaY) > 6.0f * uiScale || mWarpIsScrolling) {
                             mWarpIsScrolling = true;
-                            mWarpScrollTarget = std::max(0.0f, std::min(mWarpScrollStartOffset - deltaY, maxScroll));
+                            mWarpScrollTarget = std::max(0.0f, std::min(mWarpScrollStartOffset - deltaY, mWarpMaxScroll));
                             mDirty = true;
                         }
                         return true;
@@ -869,100 +1290,35 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                 }
             } else if (!mWarpMenuOpen && mDrawerScrollPointerId >= 0) {
                 for (size_t i = 0; i < pointerCount; i++) {
-                    int32_t pid = AMotionEvent_getPointerId(event, i);
-                    if (pid == mDrawerScrollPointerId) {
+                    if (AMotionEvent_getPointerId(event, i) == mDrawerScrollPointerId) {
                         float px = AMotionEvent_getX(event, i);
                         float py = AMotionEvent_getY(event, i);
-                        if (mDraggingLanguageSlider) {
-                            float trackX0 = drawerX + padX + 24.0f * uiScale;
-                            float trackX1 = drawerX + drawerW - padX - 24.0f * uiScale;
-                            float t = (px - trackX0) / std::max(1.0f, trackX1 - trackX0);
-                            int newLang = std::max(0, std::min(6, (int)(t * 6.0f + 0.5f)));
-                            if (newLang != mSettings.languageIndex) {
-                                mSettings.languageIndex = newLang;
-                                port_set_game_language(newLang);
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            }
-                            mDirty = true;
-                            return true;
-                        }
-                        if (mDraggingSensitivitySlider) {
-                            applySensitivitySlider(px);
-                            return true;
-                        }
-                        if (mDraggingFpsLimitSlider) {
-                            applyFpsLimitSlider(px);
+                        if (mActiveSliderKind != 0) {
+                            applySliderAtX(mActiveSliderKind, px, mActiveSliderX0, mActiveSliderX1);
                             return true;
                         }
                         float deltaY = py - mDrawerTouchStartY;
                         if (fabsf(deltaY) > 6.0f * uiScale || mDrawerIsScrolling) {
                             mDrawerIsScrolling = true;
-                            mDrawerScrollTarget = std::max(0.0f, std::min(mDrawerScrollStartOffset - deltaY, maxScroll));
+                            mDrawerScrollTarget = std::max(0.0f, std::min(mDrawerScrollStartOffset - deltaY, mSettingsMaxScroll));
                             mDirty = true;
                         }
                         return true;
                     }
                 }
             }
+            return true;
         }
 
-        // 2. Up / Pointer Up / Cancel: Finish Drag or Handle Row Tap
+        // 2. Up / Pointer Up / Cancel: Finish Drag or Execute Deck Hit
         if (action == AMOTION_EVENT_ACTION_UP || action == AMOTION_EVENT_ACTION_POINTER_UP || action == AMOTION_EVENT_ACTION_CANCEL) {
             int32_t liftedPid = AMotionEvent_getPointerId(event, pointerIndex);
             if (mWarpMenuOpen && liftedPid == mWarpScrollPointerId) {
                 if (!mWarpIsScrolling && action != AMOTION_EVENT_ACTION_CANCEL) {
                     float px = AMotionEvent_getX(event, pointerIndex);
                     float py = AMotionEvent_getY(event, pointerIndex);
-
-                    if (py >= contentTop && py < contentBottom) {
-                        int cardIdx = 0;
-                        for (int i = 0; i < kNumGalaxies; i++) {
-                            if (mWarpCategoryIndex != 0 && kGalaxies[i].category != mWarpCategoryIndex) continue;
-
-                            float cardY0 = contentTop + 8.0f * uiScale + cardIdx * (78.0f * uiScale) - mWarpScrollY;
-                            float cardY1 = cardY0 + 70.0f * uiScale;
-
-                            if (py >= cardY0 && py <= cardY1) {
-                                mWarpSelectedGalaxy = i;
-
-                                // Quick [ WARP ] pill on right side of card
-                                float qWarpX0 = drawerX + drawerW - padX - 70.0f * uiScale;
-                                float qWarpX1 = drawerX + drawerW - padX - 8.0f * uiScale;
-                                float qWarpY0 = cardY0 + 34.0f * uiScale;
-                                float qWarpY1 = cardY0 + 60.0f * uiScale;
-                                if (px >= qWarpX0 && px <= qWarpX1 && py >= qWarpY0 && py <= qWarpY1) {
-                                    int clampedSc = std::max(1, std::min(mWarpSelectedScenario, kGalaxies[i].maxScenarios));
-                                    port_request_warp(kGalaxies[i].stageName, clampedSc);
-                                    closeSettings();
-                                    return true;
-                                }
-
-                                // Scenario pills selection
-                                int maxSc = kGalaxies[i].maxScenarios;
-                                float pillW = 28.0f * uiScale;
-                                float pillGap = 5.0f * uiScale;
-                                float pStartX = drawerX + padX + 12.0f * uiScale;
-                                float pY0 = cardY0 + 34.0f * uiScale;
-                                float pY1 = cardY0 + 60.0f * uiScale;
-
-                                if (py >= pY0 && py <= pY1) {
-                                    for (int s = 1; s <= maxSc; s++) {
-                                        float px0 = pStartX + (s - 1) * (pillW + pillGap);
-                                        float px1 = px0 + pillW;
-                                        if (px >= px0 && px <= px1) {
-                                            mWarpSelectedScenario = s;
-                                            break;
-                                        }
-                                    }
-                                } else {
-                                    if (mWarpSelectedScenario > maxSc) {
-                                        mWarpSelectedScenario = 1;
-                                    }
-                                }
-                                break;
-                            }
-                            cardIdx++;
-                        }
+                    if (const UiHitbox* hb = findHit(px, py, false)) {
+                        executeHit(*hb);
                     }
                 }
                 mWarpScrollPointerId = -1;
@@ -970,552 +1326,63 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                 mDirty = true;
                 return true;
             } else if (!mWarpMenuOpen && liftedPid == mDrawerScrollPointerId) {
-                if (!mDrawerIsScrolling && action != AMOTION_EVENT_ACTION_CANCEL) {
+                if (mActiveSliderKind != 0) {
+                    if (!mSavePath.empty()) mSettings.save(mSavePath);
+                } else if (!mDrawerIsScrolling && action != AMOTION_EVENT_ACTION_CANCEL) {
                     float px = AMotionEvent_getX(event, pointerIndex);
                     float py = AMotionEvent_getY(event, pointerIndex);
-                    float contentRelY = py - contentTop + mDrawerScrollY;
-
-                    if (mSettingsTab == 0) {
-                        // Tab 0: Controls
-                        // Row 1: Visibility Switch (Card 1: 32..78)
-                        if (contentRelY >= 32.0f * uiScale && contentRelY <= 78.0f * uiScale) {
-                            mSettings.showControls = !mSettings.showControls;
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // Row 2: Camera D-Pad Switch (Card 1: 80..126)
-                        else if (contentRelY >= 80.0f * uiScale && contentRelY <= 126.0f * uiScale) {
-                            mSettings.showDpad = !mSettings.showDpad;
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // Row 3: D-Pad Position Segmented (Card 1: 130..180)
-                        else if (contentRelY >= 130.0f * uiScale && contentRelY <= 180.0f * uiScale) {
-                            float midX = drawerX + padX + contentW * 0.5f;
-                            mSettings.dpadOnRight = (px >= midX);
-                            mSettings.dpadOffsetX = 0.0f;
-                            mSettings.dpadOffsetY = 0.0f;
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // Row 4: Joystick Mode Segmented (Card 1: 184..236)
-                        else if (contentRelY >= 184.0f * uiScale && contentRelY <= 236.0f * uiScale) {
-                            float midX = drawerX + padX + contentW * 0.5f;
-                            mSettings.dynamicStick = (px < midX);
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // Row 5: Controls Opacity Segmented (Card 2: 288..342)
-                        else if (contentRelY >= 288.0f * uiScale && contentRelY <= 342.0f * uiScale) {
-                            float segW = contentW / 4.0f;
-                            int idx = (int)((px - (drawerX + padX)) / segW);
-                            if (idx <= 0) mSettings.opacity = 0.25f;
-                            else if (idx == 1) mSettings.opacity = 0.50f;
-                            else if (idx == 2) mSettings.opacity = 0.75f;
-                            else mSettings.opacity = 1.00f;
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // Row 6: Button Size Segmented (Card 2: 348..402)
-                        else if (contentRelY >= 348.0f * uiScale && contentRelY <= 402.0f * uiScale) {
-                            float segW = contentW / 3.0f;
-                            int idx = (int)((px - (drawerX + padX)) / segW);
-                            if (idx <= 0) mSettings.scale = 0.85f;
-                            else if (idx == 1) mSettings.scale = 1.00f;
-                            else mSettings.scale = 1.25f;
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // Row 7: Layout Reposition / Reset (Card 2: 408..458)
-                        else if (contentRelY >= 408.0f * uiScale && contentRelY <= 458.0f * uiScale) {
-                            float splitX = drawerX + padX + contentW * 0.52f;
-                            if (px < splitX) {
-                                mSettingsOpen = false;
-                                mEditLayoutMode = true;
-                            } else {
-                                mSettings.stickOffsetX = 0.0f;
-                                mSettings.stickOffsetY = 0.0f;
-                                mSettings.buttonOffsetX = 0.0f;
-                                mSettings.buttonOffsetY = 0.0f;
-                                mSettings.dpadOffsetX = 0.0f;
-                                mSettings.dpadOffsetY = 0.0f;
-                            }
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // Row 8: Right Joystick Mode Segmented (Card 3: 502..562)
-                        else if (contentRelY >= 502.0f * uiScale && contentRelY <= 562.0f * uiScale) {
-                            float midX = drawerX + padX + contentW * 0.5f;
-                            mSettings.rightStickPointer = (px < midX);
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                    } else if (mSettingsTab == 1) {
-                        // Tab 1: Display
-                        // Row 1: Fullscreen Hor+ Switch (Card 1: 32..80)
-                        if (contentRelY >= 32.0f * uiScale && contentRelY <= 80.0f * uiScale) {
-                            mSettings.fullscreen = !mSettings.fullscreen;
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // Row 2: Camera Cutout Switch (Card 1: 82..134)
-                        else if (contentRelY >= 82.0f * uiScale && contentRelY <= 134.0f * uiScale) {
-                            mSettings.showCameraCutout = !mSettings.showCameraCutout;
-                            port_set_camera_cutout(mSettings.showCameraCutout ? 1 : 0);
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // Row 3: Resolution Preset Selector (Card 2: 178..228)
-                        else if (contentRelY >= 178.0f * uiScale && contentRelY <= 228.0f * uiScale) {
-                            float grpX0 = drawerX + padX + 14.0f * uiScale;
-                            float grpW = contentW - 28.0f * uiScale;
-                            float segW = (grpW - 4.0f * uiScale) / 5.0f;
-                            float relX = px - (grpX0 + 2.0f * uiScale);
-                            if (relX >= 0.0f) {
-                                int chip = (int)(relX / segW);
-                                if (chip >= 0 && chip < 5) {
-                                    static const int kPresetBySegment[5] = { 4, 0, 1, 2, 3 };
-                                    mSettings.graphicsPreset = kPresetBySegment[chip];
-                                    mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                                }
-                            }
-                        }
-                        // Row 4: HD UI & HUD Textures Switch (Card 3: 358..412)
-                        else if (contentRelY >= 358.0f * uiScale && contentRelY <= 412.0f * uiScale) {
-                            mSettings.hdUiTextures = !mSettings.hdUiTextures;
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // Row 5: Show FPS Counter Switch (Card 4: 462..510)
-                        else if (contentRelY >= 462.0f * uiScale && contentRelY <= 510.0f * uiScale) {
-                            mSettings.showFpsCounter = !mSettings.showFpsCounter;
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // Row 6: FPS Counter Size Stepper (Card 4: 512..570)
-                        else if (contentRelY >= 512.0f * uiScale && contentRelY <= 570.0f * uiScale) {
-                            float segW = contentW / 3.0f;
-                            int idx = (int)((px - (drawerX + padX)) / segW);
-                            if (idx <= 0) {
-                                mSettings.fpsScale = std::max(0.60f, mSettings.fpsScale - 0.10f);
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            } else if (idx >= 2) {
-                                mSettings.fpsScale = std::min(2.20f, mSettings.fpsScale + 0.10f);
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            } else {
-                                mSettings.fpsScale = 1.00f;
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            }
-                        }
-                        // Row 7: Move & Resize / Reset FPS (Card 4: 574..630)
-                        else if (contentRelY >= 574.0f * uiScale && contentRelY <= 630.0f * uiScale) {
-                            float splitX = drawerX + padX + contentW * 0.52f;
-                            if (px < splitX) {
-                                mSettings.showFpsCounter = true;
-                                mSwAnimFpsCounter = 1.0f;
-                                mSettingsOpen = false;
-                                mEditLayoutMode = true;
-                                if (!mSavePath.empty()) mSettings.save(mSavePath);
-                            } else {
-                                mSettings.fpsOffsetX = 0.0f;
-                                mSettings.fpsOffsetY = 0.0f;
-                                mSettings.fpsScale = 1.0f;
-                            }
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                    } else if (mSettingsTab == 3) {
-                        // Tab 3: Netplay (Local Wi-Fi & Online)
-                        float cardX0 = drawerX + padX;
-                        float cX0 = cardX0 + 8.0f * uiScale;
-                        float cX1 = cardX0 + contentW - 8.0f * uiScale;
-
-                        // 1. Disconnect / Stop Host (Card 1: 68..112)
-                        if (contentRelY >= 68.0f * uiScale && contentRelY <= 112.0f * uiScale && px >= cX1 - 120.0f * uiScale) {
-                            port_net_disconnect();
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // 2. Mode Selectors (Card 2: 148..198)
-                        else if (contentRelY >= 148.0f * uiScale && contentRelY <= 198.0f * uiScale) {
-                            if (px < (cX0 + cX1) * 0.5f) {
-                                port_net_set_mode(PORT_NET_MODE_COOP);
-                            } else {
-                                port_net_set_mode(PORT_NET_MODE_COSTAR);
-                            }
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // 2b. Player Character Selector in Netplay (Card 2: 200..252)
-                        else if (contentRelY >= 200.0f * uiScale && contentRelY <= 252.0f * uiScale) {
-                            int newChar = (px < (cX0 + cX1) * 0.5f) ? 0 : 1;
-                            if (newChar != mSettings.playerCharacter) {
-                                mSettings.playerCharacter = newChar;
-                                port_request_character_change(newChar);
-                            }
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // 3. Host Button (Card 3: 312..364)
-                        else if (contentRelY >= 312.0f * uiScale && contentRelY <= 364.0f * uiScale) {
-                            if (port_net_get_role() == 1) {
-                                port_net_disconnect();
-                            } else {
-                                // Host defaults to Mario (0)
-                                if (mSettings.playerCharacter != 0) {
-                                    mSettings.playerCharacter = 0;
-                                    port_request_character_change(0);
-                                } else {
-                                    port_set_player_character(0);
-                                }
-                                port_net_start_host(24601, port_net_get_mode(), "Galaxy Room");
-                            }
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                        // 4. Discovered LAN Hosts List & Reload Button (Card 4: 372..562)
-                        else if (contentRelY >= 372.0f * uiScale && contentRelY <= 562.0f * uiScale) {
-                            float rTop = 372.0f * uiScale;
-                            if (contentRelY >= rTop + 4.0f * uiScale && contentRelY <= rTop + 34.0f * uiScale && px >= cX1 - 96.0f * uiScale) {
-                                port_net_refresh_discovery();
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                                mDirty = true;
-                            } else {
-                                PortLanHostInfo hosts[3];
-                                int n = port_net_get_lan_hosts(hosts, 3);
-                                for (int i = 0; i < n; i++) {
-                                    float rY = 372.0f * uiScale + 36.0f * uiScale + i * 48.0f * uiScale;
-                                    if (contentRelY >= rY && contentRelY <= rY + 44.0f * uiScale && px >= cX1 - 100.0f * uiScale) {
-                                        // Joiner defaults to Luigi (1)
-                                        if (mSettings.playerCharacter != 1) {
-                                            mSettings.playerCharacter = 1;
-                                            port_request_character_change(1);
-                                        } else {
-                                            port_set_player_character(1);
-                                        }
-                                        port_net_connect(hosts[i].ip, hosts[i].port);
-                                        mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        // 5. Direct Connect Button (Card 5: 618..674)
-                        else if (contentRelY >= 618.0f * uiScale && contentRelY <= 674.0f * uiScale) {
-                            if (mSettings.playerCharacter != 1) {
-                                mSettings.playerCharacter = 1;
-                                port_request_character_change(1);
-                            } else {
-                                port_set_player_character(1);
-                            }
-                            port_net_connect("192.168.43.1", 24601);
-                            mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                        }
-                    } else {
-                        // Tab 2: System (Vanilla) or Advanced (Plus)
-                        if (mPlusEdition) {
-                            // Mod 1: Cutscene Prevention Switch
-                            if (contentRelY >= 32.0f * uiScale && contentRelY <= 78.0f * uiScale) {
-                                mSettings.modSkipCutscenes = !mSettings.modSkipCutscenes;
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            }
-                            // Mod 2: Infinite Health Switch
-                            else if (contentRelY >= 80.0f * uiScale && contentRelY <= 126.0f * uiScale) {
-                                mSettings.modInfiniteHealth = !mSettings.modInfiniteHealth;
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            }
-                            // Mod 3: Infinite Power-Up Duration Switch
-                            else if (contentRelY >= 128.0f * uiScale && contentRelY <= 174.0f * uiScale) {
-                                mSettings.modInfinitePowerup = !mSettings.modInfinitePowerup;
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            }
-                            // Mod 4: Advanced Haptic Feedback Switch
-                            else if (contentRelY >= 176.0f * uiScale && contentRelY <= 222.0f * uiScale) {
-                                mSettings.modAdvancedHaptics = !mSettings.modAdvancedHaptics;
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            }
-                            // Mod 5: Flight Everywhere (Red Star) Switch
-                            else if (contentRelY >= 224.0f * uiScale && contentRelY <= 274.0f * uiScale) {
-                                mSettings.modFlightEverywhere = !mSettings.modFlightEverywhere;
-                                if (mSettings.modFlightEverywhere) {
-                                    port_request_powerup(6);
-                                } else {
-                                    if (port_get_current_powerup() == 7) {
-                                        port_request_powerup(0);
-                                    }
-                                }
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            }
-                            // Mod 6: Live Power-Up Switcher Card Grid Tap (338..454)
-                            else if (contentRelY >= 338.0f * uiScale && contentRelY <= 454.0f * uiScale) {
-                                float gridTopRelY = 344.0f * uiScale;
-                                float cardX0 = drawerX + padX;
-                                float pStartX = cardX0 + 8.0f * uiScale;
-                                float pillW = (contentW - 16.0f * uiScale - 10.0f * uiScale) / 3.0f;
-                                float pillH = 30.0f * uiScale;
-                                float pillGapY = 5.0f * uiScale;
-                                float pillGapX = 5.0f * uiScale;
-
-                                if (contentRelY >= gridTopRelY && contentRelY <= gridTopRelY + 3.0f * (pillH + pillGapY)) {
-                                    int row = (int)((contentRelY - gridTopRelY) / (pillH + pillGapY));
-                                    float inRowY = contentRelY - (gridTopRelY + row * (pillH + pillGapY));
-                                    if (row >= 0 && row < 3 && inRowY <= pillH) {
-                                        float relX = px - pStartX;
-                                        if (relX >= 0.0f) {
-                                            int col = (int)(relX / (pillW + pillGapX));
-                                            float inColX = relX - col * (pillW + pillGapX);
-                                            if (col >= 0 && col < 3 && inColX <= pillW) {
-                                                static const int kPowerupMap[3][3] = {
-                                                    { 0, 5, 4 },
-                                                    { 2, 6, 7 },
-                                                    { 3, 1, 10 }
-                                                };
-                                                port_request_powerup(kPowerupMap[row][col]);
-                                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            // Mod 7: Galaxy Warp Menu Card
-                            else if (contentRelY >= 496.0f * uiScale && contentRelY <= 544.0f * uiScale) {
-                                mWarpMenuOpen = true;
-                                mWarpScrollY = 0.0f;
-                                mWarpScrollTarget = 0.0f;
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            }
-                            // Mod 8: Early Spin Ability Card
-                            else if (contentRelY >= 548.0f * uiScale && contentRelY <= 600.0f * uiScale) {
-                                port_request_unlock_spin();
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            }
-                            // Mod 9: Player Character Switcher (Card 3b: 614..710)
-                            else if (contentRelY >= 648.0f * uiScale && contentRelY <= 704.0f * uiScale) {
-                                float midX = drawerX + padX + contentW * 0.5f;
-                                int newChar = (px >= midX) ? 1 : 0;
-                                if (newChar != mSettings.playerCharacter) {
-                                    mSettings.playerCharacter = newChar;
-                                    port_request_character_change(newChar);
-                                }
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            }
-                            // Mod 10: Game Language Slider (Card 3c: 718..814)
-                            else if (contentRelY >= 746.0f * uiScale && contentRelY <= 810.0f * uiScale) {
-                                float trackX0 = drawerX + padX + 24.0f * uiScale;
-                                float trackX1 = drawerX + drawerW - padX - 24.0f * uiScale;
-                                float t = (px - trackX0) / std::max(1.0f, trackX1 - trackX0);
-                                int newLang = std::max(0, std::min(6, (int)(t * 6.0f + 0.5f)));
-                                if (newLang != mSettings.languageIndex) {
-                                    mSettings.languageIndex = newLang;
-                                    port_set_game_language(newLang);
-                                    mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                                }
-                            }
-                            // Mod 11: Support & Donations Card (914..1030)
-                            else if (contentRelY >= 914.0f * uiScale && contentRelY <= 1030.0f * uiScale) {
-                                port_open_url("https://ko-fi.com/sebsies");
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            }
-                            // Mod 12: Debug & Diagnostics Card (1040..1156)
-                            else if (contentRelY >= 1040.0f * uiScale && contentRelY <= 1156.0f * uiScale) {
-                                port_share_log();
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            }
-                        } else {
-                            // Vanilla System Tab items
-                            // Open Installer Button (Card 1: 80..126)
-                            if (contentRelY >= 80.0f * uiScale && contentRelY <= 126.0f * uiScale) {
-                                port_open_installer();
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            }
-                            // Open / Install GalaxyMobile+ (Card 2: 214..260)
-                            else if (contentRelY >= 214.0f * uiScale && contentRelY <= 260.0f * uiScale) {
-                                port_install_plus();
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            }
-                            // Haptic Feedback Switch (Card 3: 300..352)
-                            else if (contentRelY >= 300.0f * uiScale && contentRelY <= 352.0f * uiScale) {
-                                mSettings.modAdvancedHaptics = !mSettings.modAdvancedHaptics;
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            }
-                            // Game Language Slider (Card 3b: 398..462)
-                            else if (contentRelY >= 398.0f * uiScale && contentRelY <= 462.0f * uiScale) {
-                                float trackX0 = drawerX + padX + 24.0f * uiScale;
-                                float trackX1 = drawerX + drawerW - padX - 24.0f * uiScale;
-                                float t = (px - trackX0) / std::max(1.0f, trackX1 - trackX0);
-                                int newLang = std::max(0, std::min(6, (int)(t * 6.0f + 0.5f)));
-                                if (newLang != mSettings.languageIndex) {
-                                    mSettings.languageIndex = newLang;
-                                    port_set_game_language(newLang);
-                                    mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                                }
-                            }
-                            // Support & Donations Card (564..680)
-                            else if (contentRelY >= 564.0f * uiScale && contentRelY <= 680.0f * uiScale) {
-                                port_open_url("https://ko-fi.com/sebsies");
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            }
-                            // Debug & Diagnostics Card (690..806)
-                            else if (contentRelY >= 690.0f * uiScale && contentRelY <= 806.0f * uiScale) {
-                                port_share_log();
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            }
-                        }
+                    if (const UiHitbox* hb = findHit(px, py, false)) {
+                        executeHit(*hb);
                     }
-
-                    if (!mSavePath.empty()) mSettings.save(mSavePath);
-                } else if (mDraggingLanguageSlider || mDraggingSensitivitySlider || mDraggingFpsLimitSlider) {
-                    if (!mSavePath.empty()) mSettings.save(mSavePath);
                 }
                 mDrawerScrollPointerId = -1;
                 mDrawerIsScrolling = false;
-                mDraggingLanguageSlider = false;
-                mDraggingSensitivitySlider = false;
-                mDraggingFpsLimitSlider = false;
+                mActiveSliderKind = 0;
                 mDirty = true;
                 return true;
             }
+            return true;
         }
 
-        // 3. Down / Pointer Down: Fixed Buttons, Tabs, or Start Content Scroll
+        // 3. Down / Pointer Down: Instant Fixed Chrome Controls, Slider Grab, or Scroll Acquisition
         if (action == AMOTION_EVENT_ACTION_DOWN || action == AMOTION_EVENT_ACTION_POINTER_DOWN) {
             float px = AMotionEvent_getX(event, pointerIndex);
             float py = AMotionEvent_getY(event, pointerIndex);
             int32_t pid = AMotionEvent_getPointerId(event, pointerIndex);
 
-            // Outside drawer tap (scrim) closes settings
-            if (px > drawerX + drawerW) {
-                closeSettings();
+            if (const UiHitbox* fixedHit = findHit(px, py, true)) {
+                executeHit(*fixedHit);
                 return true;
             }
 
-            // Close [X] button at top-right of drawer
-            float closeBtnX = drawerX + drawerW - 36.0f * uiScale;
-            float closeBtnY = 36.0f * uiScale;
-            float dx = px - closeBtnX;
-            float dy = py - closeBtnY;
-            if (dx * dx + dy * dy <= 28.0f * uiScale * 28.0f * uiScale) {
-                closeSettings();
-                return true;
-            }
-
-            // Donate Button at top-right of drawer (left of close button)
-            float donateBtnW = 74.0f * uiScale;
-            float donateBtnX = closeBtnX - 26.0f * uiScale - donateBtnW;
-            if (px >= donateBtnX - 6.0f * uiScale && px <= donateBtnX + donateBtnW + 6.0f * uiScale &&
-                py >= 16.0f * uiScale && py <= 54.0f * uiScale) {
-                port_open_url("https://ko-fi.com/sebsies");
-                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                return true;
-            }
-
-            if (mWarpMenuOpen) {
-                // Fixed top header in Warp Menu
-                if (py < contentTop) {
-                    // [< Back] button at top left
-                    if (px >= drawerX + padX && px <= drawerX + padX + 80.0f * uiScale && py >= 18.0f * uiScale && py <= 50.0f * uiScale) {
-                        mWarpMenuOpen = false;
-                        mDirty = true;
-                        return true;
-                    }
-                    // Category Chips (2 rows: Row 0 = 54..78, Row 1 = 80..106)
-                    if (py >= 54.0f * uiScale && py <= 106.0f * uiScale) {
-                        int row = (py >= 80.0f * uiScale) ? 1 : 0;
-                        float chipW = (contentW - 9.0f * uiScale) / 4.0f;
-                        float relX = px - (drawerX + padX);
-                        int col = (int)(relX / (chipW + 3.0f * uiScale));
-                        if (col >= 0 && col < 4) {
-                            int newCat = row * 4 + col;
-                            if (newCat >= 0 && newCat < 8) {
-                                mWarpCategoryIndex = newCat;
-                                mWarpScrollY = 0.0f;
-                                mWarpScrollTarget = 0.0f;
-                                if (newCat != 0 && kGalaxies[mWarpSelectedGalaxy].category != newCat) {
-                                    for (int i = 0; i < kNumGalaxies; i++) {
-                                        if (kGalaxies[i].category == newCat) {
-                                            mWarpSelectedGalaxy = i;
-                                            mWarpSelectedScenario = 1;
-                                            break;
-                                        }
-                                    }
-                                }
-                                mDirty = true;
-                                return true;
-                            }
-                        }
-                    }
-                    return true;
-                }
-
-                // Fixed bottom bar in Warp Menu: [ WARP TO GALAXY ]
-                if (py >= contentBottom) {
-                    if (mWarpSelectedGalaxy >= 0 && mWarpSelectedGalaxy < kNumGalaxies) {
-                        int clampedSc = std::max(1, std::min(mWarpSelectedScenario, kGalaxies[mWarpSelectedGalaxy].maxScenarios));
-                        port_request_warp(kGalaxies[mWarpSelectedGalaxy].stageName, clampedSc);
-                    }
-                    closeSettings();
-                    return true;
-                }
-
-                // Content Viewport Touch Acquisition
-                if (py >= contentTop && py < contentBottom) {
+            if (px >= mDeckLeftX && py >= mDeckTopY && py < mDeckBottomY) {
+                if (mWarpMenuOpen) {
                     mWarpScrollPointerId = pid;
                     mWarpTouchStartY = py;
                     mWarpTouchStartX = px;
                     mWarpScrollStartOffset = mWarpScrollY;
                     mWarpIsScrolling = false;
-                    return true;
-                }
-            } else {
-                // Tab Bar Tap (Controls vs Display vs Cheats/System vs Netplay)
-                if (py >= 58.0f * uiScale && py <= 106.0f * uiScale) {
-                    int numTabs = mPlusEdition ? 4 : 3;
-                    float tabW = contentW / (float)numTabs;
-                    float relX = px - (drawerX + padX);
-                    int newTab = (int)(relX / tabW);
-                    if (newTab >= 0 && newTab < numTabs && newTab != mSettingsTab) {
-                        mSettingsTab = newTab;
-                        mDrawerScrollY = 0.0f;
-                        mDrawerScrollTarget = 0.0f;
-                        mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                    }
-                    mDirty = true;
-                    return true;
-                }
-
-                // Fixed [ Done ] button at bottom
-                if (py >= contentBottom) {
-                    closeSettings();
-                    return true;
-                }
-
-                // Content Viewport Touch Acquisition
-                if (py >= contentTop && py < contentBottom) {
+                } else {
                     mDrawerScrollPointerId = pid;
                     mDrawerTouchStartY = py;
                     mDrawerTouchStartX = px;
                     mDrawerScrollStartOffset = mDrawerScrollY;
                     mDrawerIsScrolling = false;
-                    mDraggingLanguageSlider = false;
-                    mDraggingSensitivitySlider = false;
-                    mDraggingFpsLimitSlider = false;
-                    if (mSettingsTab == 0) {
-                        float contentRelY = py - contentTop + mDrawerScrollY;
-                        if (contentRelY >= 578.0f * uiScale && contentRelY <= 650.0f * uiScale) {
-                            mDraggingSensitivitySlider = true;
-                            applySensitivitySlider(px);
-                        }
-                    } else if (mSettingsTab == 1) {
-                        float contentRelY = py - contentTop + mDrawerScrollY;
-                        if (contentRelY >= 634.0f * uiScale && contentRelY <= 732.0f * uiScale) {
-                            mDraggingFpsLimitSlider = true;
-                            applyFpsLimitSlider(px);
-                        }
-                    } else if (mSettingsTab == 2) {
-                        float contentRelY = py - contentTop + mDrawerScrollY;
-                        float langMinY = mPlusEdition ? (746.0f * uiScale) : (398.0f * uiScale);
-                        float langMaxY = mPlusEdition ? (810.0f * uiScale) : (462.0f * uiScale);
-                        if (contentRelY >= langMinY && contentRelY <= langMaxY) {
-                            mDraggingLanguageSlider = true;
-                            float trackX0 = drawerX + padX + 24.0f * uiScale;
-                            float trackX1 = drawerX + drawerW - padX - 24.0f * uiScale;
-                            float t = (px - trackX0) / std::max(1.0f, trackX1 - trackX0);
-                            int newLang = std::max(0, std::min(6, (int)(t * 6.0f + 0.5f)));
-                            if (newLang != mSettings.languageIndex) {
-                                mSettings.languageIndex = newLang;
-                                port_set_game_language(newLang);
-                                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
-                            }
-                            mDirty = true;
+                    mActiveSliderKind = 0;
+                    for (int i = (int)mSettingsHits.size() - 1; i >= 0; i--) {
+                        const UiHitbox& hb = mSettingsHits[i];
+                        if (!hb.fixed &&
+                            (hb.kind == HIT_SLIDER_SENSITIVITY || hb.kind == HIT_SLIDER_FPS_LIMIT || hb.kind == HIT_SLIDER_LANGUAGE) &&
+                            px >= hb.x0 && px <= hb.x1 && py >= hb.y0 && py <= hb.y1) {
+                            mActiveSliderKind = hb.kind;
+                            mActiveSliderX0 = hb.p0;
+                            mActiveSliderX1 = hb.p1;
+                            applySliderAtX(hb.kind, px, hb.p0, hb.p1);
+                            break;
                         }
                     }
-                    return true;
                 }
             }
-
             return true;
         }
         return true;
@@ -1762,16 +1629,17 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
 }
 
 void UIOverlay::render(int screenW, int screenH) {
+    mSettingsHits.clear();
     if (!init()) return;
 
     // Ensure OpenGL viewport always matches physical display window for UI overlay
     glViewport(0, 0, screenW, screenH);
 
     std::vector<UIVertex> verts;
-    verts.reserve(1024);
+    verts.reserve(2048);
 
     float baseDpi = (float)screenH / 650.0f;
-    float uiScale = baseDpi;
+    float uiScale = std::min(baseDpi, (float)screenW / 1060.0f);
     float scale = baseDpi * mSettings.scale;
     float op = mSettings.opacity;
     float w = (float)screenW;
@@ -1786,20 +1654,22 @@ void UIOverlay::render(int screenW, int screenH) {
     mLastAnimTime = now;
     if (dt < 0.0001f) dt = 0.016f;
     if (dt > 0.1f) dt = 0.1f;
+    float animPhase = (float)((double)(now % 60000000000ll) / 1e9);
 
     float target = mSettingsOpen ? 1.0f : 0.0f;
     if (fabsf(mDrawerAnim - target) > 0.0005f) {
-        float speed = 14.0f; // Material 3 snappy deceleration
+        float speed = 13.0f;
         mDrawerAnim += (target - mDrawerAnim) * (1.0f - expf(-speed * dt));
         if (fabsf(mDrawerAnim - target) < 0.001f) {
             mDrawerAnim = target;
         }
         mDirty = true;
     }
+    if (mSettingsOpen || mDrawerAnim > 0.01f) {
+        mDirty = true;
+    }
 
-    float drawerW = std::min(w * 0.54f, 480.0f * uiScale);
-    float drawerX = (mDrawerAnim - 1.0f) * drawerW;
-    float cogRot = mDrawerAnim * 1.5707963f; // Smooth 90-degree cogwheel turn
+    float cogRot = mDrawerAnim * 1.5707963f;
 
     // Fluid Switch Knob Animations
     auto updateSwAnim = [&](float& anim, bool state) {
@@ -1823,19 +1693,27 @@ void UIOverlay::render(int screenW, int screenH) {
     updateSwAnim(mSwAnimFlightEverywhere, mSettings.modFlightEverywhere);
     updateSwAnim(mSwAnimFpsCounter, mSettings.showFpsCounter);
 
-    // Fluid Tab Indicator Animation
-    float padX = 22.0f * uiScale;
-    float contentW = drawerW - padX * 2.0f;
-    int numTabs = mPlusEdition ? 4 : 3;
-    float tabW = contentW / (float)numTabs;
-    mTabTargetX = drawerX + padX + mSettingsTab * tabW + 3.0f * uiScale;
-    mTabTargetW = tabW - 6.0f * uiScale;
-    if (mTabIndicatorW < 1.0f) {
-        mTabIndicatorX = mTabTargetX;
-        mTabIndicatorW = mTabTargetW;
-    } else if (fabsf(mTabIndicatorX - mTabTargetX) > 0.2f || fabsf(mTabIndicatorW - mTabTargetW) > 0.2f) {
-        mTabIndicatorX += (mTabTargetX - mTabIndicatorX) * (1.0f - expf(-24.0f * dt));
-        mTabIndicatorW += (mTabTargetW - mTabIndicatorW) * (1.0f - expf(-24.0f * dt));
+    int numTabs = mPlusEdition ? 5 : 3;
+    if (mSettingsTab < 0 || mSettingsTab >= numTabs) mSettingsTab = 0;
+
+    // Fluid Vertical Observatory Sidebar Indicator Animation
+    float headerH = 68.0f * uiScale;
+    float sideTopY = headerH + 14.0f * uiScale;
+    if (mWarpMenuOpen) {
+        float domeStep = 34.0f * uiScale;
+        mTabTargetY = sideTopY + 14.0f * uiScale + mWarpCategoryIndex * domeStep;
+        mTabTargetH = 30.0f * uiScale;
+    } else {
+        float tabStep = 53.0f * uiScale;
+        mTabTargetY = sideTopY + 14.0f * uiScale + mSettingsTab * tabStep;
+        mTabTargetH = 46.0f * uiScale;
+    }
+    if (mTabIndicatorH < 1.0f) {
+        mTabIndicatorY = mTabTargetY;
+        mTabIndicatorH = mTabTargetH;
+    } else if (fabsf(mTabIndicatorY - mTabTargetY) > 0.2f || fabsf(mTabIndicatorH - mTabTargetH) > 0.2f) {
+        mTabIndicatorY += (mTabTargetY - mTabIndicatorY) * (1.0f - expf(-22.0f * dt));
+        mTabIndicatorH += (mTabTargetH - mTabIndicatorH) * (1.0f - expf(-22.0f * dt));
         mDirty = true;
     }
 
@@ -1873,9 +1751,23 @@ void UIOverlay::render(int screenW, int screenH) {
         }
     };
 
+    auto addGradRect = [&](float x0, float y0, float x1, float y1, const Color& topCol, const Color& botCol) {
+        verts.push_back({x0, y0, 0.0f, 0.0f, topCol.r, topCol.g, topCol.b, topCol.a, 0.0f, 0.0f, 1.0f, 0.0f});
+        verts.push_back({x1, y0, 0.0f, 0.0f, topCol.r, topCol.g, topCol.b, topCol.a, 0.0f, 0.0f, 1.0f, 0.0f});
+        verts.push_back({x1, y1, 0.0f, 0.0f, botCol.r, botCol.g, botCol.b, botCol.a, 0.0f, 0.0f, 1.0f, 0.0f});
+
+        verts.push_back({x0, y0, 0.0f, 0.0f, topCol.r, topCol.g, topCol.b, topCol.a, 0.0f, 0.0f, 1.0f, 0.0f});
+        verts.push_back({x1, y1, 0.0f, 0.0f, botCol.r, botCol.g, botCol.b, botCol.a, 0.0f, 0.0f, 1.0f, 0.0f});
+        verts.push_back({x0, y1, 0.0f, 0.0f, botCol.r, botCol.g, botCol.b, botCol.a, 0.0f, 0.0f, 1.0f, 0.0f});
+    };
+
     auto drawCard = [&](float x0, float y0, float x1, float y1, float radius, const Color& bg, const Color& border) {
         drawRoundRect(x0, y0, x1, y1, radius, border);
-        drawRoundRect(x0 + 1.2f * uiScale, y0 + 1.2f * uiScale, x1 - 1.2f * uiScale, y1 - 1.2f * uiScale, std::max(0.0f, radius - 1.2f * uiScale), bg);
+        drawRoundRect(x0 + 1.4f * uiScale, y0 + 1.4f * uiScale, x1 - 1.4f * uiScale, y1 - 1.4f * uiScale, std::max(0.0f, radius - 1.4f * uiScale), bg);
+        // Subtle SMG Wii upper glass sheen highlight
+        if (x1 - x0 > 24.0f * uiScale && y1 - y0 > 22.0f * uiScale) {
+            drawRoundRect(x0 + 10.0f * uiScale, y0 + 2.5f * uiScale, x1 - 10.0f * uiScale, y0 + 14.0f * uiScale, 5.5f * uiScale, rgba(1.0f, 1.0f, 1.0f, 0.048f));
+        }
     };
 
     auto drawCogwheel = [&](float cx, float cy, float r, const Color& c, float rot = 0.0f) {
@@ -1896,6 +1788,14 @@ void UIOverlay::render(int screenW, int screenH) {
 
     auto drawCameraIcon = [&](float cx, float cy, float r, const Color& c) {
         addQuad(cx - r, cy - r, cx + r, cy + r, -1.0f, -1.0f, 1.0f, 1.0f, c, 7.0f, 0.0f);
+    };
+
+    auto drawStar = [&](float cx, float cy, float r, const Color& c, float rot = 0.0f) {
+        addQuad(cx - r, cy - r, cx + r, cy + r, -1.0f, -1.0f, 1.0f, 1.0f, c, 8.0f, rot);
+    };
+
+    auto drawSparkle = [&](float cx, float cy, float r, const Color& c, float rot = 0.0f) {
+        addQuad(cx - r, cy - r, cx + r, cy + r, -1.0f, -1.0f, 1.0f, 1.0f, c, 9.0f, rot);
     };
 
     auto drawLine = [&](float x0, float y0, float x1, float y1, float thickness, const Color& c) {
@@ -1969,10 +1869,10 @@ void UIOverlay::render(int screenW, int screenH) {
     auto drawM3Switch = [&](float x, float y, float swW, float swH, float anim) {
         float r = swH * 0.5f;
         float t = std::max(0.0f, std::min(1.0f, anim));
-        Color trackOffBg = rgba(0.188f, 0.196f, 0.224f, 0.95f);
-        Color trackOffBorder = rgba(0.55f, 0.58f, 0.64f, 0.65f);
-        Color trackOnBg = rgba(0.043f, 0.380f, 0.880f, 1.0f);
-        Color trackOnBorder = rgba(0.220f, 0.741f, 0.969f, 0.95f);
+        Color trackOffBg = rgba(0.095f, 0.135f, 0.285f, 0.96f);
+        Color trackOffBorder = rgba(0.36f, 0.52f, 0.80f, 0.65f);
+        Color trackOnBg = rgba(0.045f, 0.360f, 0.860f, 1.0f);
+        Color trackOnBorder = rgba(0.220f, 0.780f, 0.990f, 0.98f);
 
         Color curTrackBg = {
             trackOffBg.r + (trackOnBg.r - trackOffBg.r) * t,
@@ -1988,18 +1888,22 @@ void UIOverlay::render(int screenW, int screenH) {
         };
 
         drawRoundRect(x, y, x + swW, y + swH, r, curTrackBorder);
-        drawRoundRect(x + 1.2f * uiScale, y + 1.2f * uiScale, x + swW - 1.2f * uiScale, y + swH - 1.2f * uiScale, r - 1.2f * uiScale, curTrackBg);
+        drawRoundRect(x + 1.4f * uiScale, y + 1.4f * uiScale, x + swW - 1.4f * uiScale, y + swH - 1.4f * uiScale, r - 1.4f * uiScale, curTrackBg);
 
-        float thumbMinR = r * 0.52f;
-        float thumbMaxR = r * 0.72f;
+        float thumbMinR = r * 0.54f;
+        float thumbMaxR = r * 0.74f;
         float curThumbR = thumbMinR + (thumbMaxR - thumbMinR) * t;
 
         float thumbMinX = x + r;
         float thumbMaxX = x + swW - r;
         float curThumbX = thumbMinX + (thumbMaxX - thumbMinX) * t;
 
-        Color thumbOffCol = rgba(0.70f, 0.74f, 0.80f, 1.0f);
-        Color thumbOnCol = rgba(1.0f, 1.0f, 1.0f, 1.0f);
+        if (t > 0.05f) {
+            drawCircle(curThumbX, y + r, curThumbR * 1.25f, rgba(0.35f, 0.85f, 1.0f, 0.25f * t));
+        }
+
+        Color thumbOffCol = rgba(0.68f, 0.78f, 0.94f, 1.0f);
+        Color thumbOnCol = rgba(1.0f, 0.98f, 0.88f, 1.0f);
         Color curThumbCol = {
             thumbOffCol.r + (thumbOnCol.r - thumbOffCol.r) * t,
             thumbOffCol.g + (thumbOnCol.g - thumbOffCol.g) * t,
@@ -2011,9 +1915,9 @@ void UIOverlay::render(int screenW, int screenH) {
     };
 
     auto drawSegmentedGroup = [&](float x, float y, float grpW, float grpH, const char** labels, int count, int activeIdx) {
-        float r = 12.0f * uiScale;
-        drawRoundRect(x, y, x + grpW, y + grpH, r, rgba(0.271f, 0.286f, 0.322f, 0.55f));
-        drawRoundRect(x + 1.0f, y + 1.0f, x + grpW - 1.0f, y + grpH - 1.0f, r - 1.0f, rgba(0.141f, 0.153f, 0.180f, 0.95f));
+        float r = 13.0f * uiScale;
+        drawRoundRect(x, y, x + grpW, y + grpH, r, rgba(0.30f, 0.48f, 0.78f, 0.55f));
+        drawRoundRect(x + 1.2f * uiScale, y + 1.2f * uiScale, x + grpW - 1.2f * uiScale, y + grpH - 1.2f * uiScale, std::max(1.0f, r - 1.2f * uiScale), rgba(0.055f, 0.088f, 0.220f, 0.96f));
 
         float segW = (grpW - 4.0f * uiScale) / (float)count;
         for (int i = 0; i < count; i++) {
@@ -2021,12 +1925,13 @@ void UIOverlay::render(int screenW, int screenH) {
             float sx1 = sx0 + segW;
             bool active = (i == activeIdx);
             if (active) {
-                drawRoundRect(sx0, y + 2.0f * uiScale, sx1, y + grpH - 2.0f * uiScale, r - 2.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 1.0f));
-                drawText(labels[i], (sx0 + sx1) * 0.5f, y + grpH * 0.64f, 0.34f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                drawRoundRect(sx0, y + 2.0f * uiScale, sx1, y + grpH - 2.0f * uiScale, std::max(1.0f, r - 2.0f * uiScale), rgba(0.220f, 0.780f, 0.980f, 0.92f));
+                drawRoundRect(sx0 + 1.2f * uiScale, y + 3.2f * uiScale, sx1 - 1.2f * uiScale, y + grpH - 3.2f * uiScale, std::max(1.0f, r - 3.2f * uiScale), rgba(0.060f, 0.380f, 0.880f, 1.0f));
+                drawText(labels[i], (sx0 + sx1) * 0.5f, y + grpH * 0.65f, 0.32f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
             } else {
-                drawText(labels[i], (sx0 + sx1) * 0.5f, y + grpH * 0.64f, 0.34f * uiScale, rgba(0.720f, 0.745f, 0.784f, 0.85f), 1);
-                if (i > 0 && (i - 1) != activeIdx && !active) {
-                    drawRoundRect(sx0 - 0.5f, y + 6.0f * uiScale, sx0 + 0.5f, y + grpH - 6.0f * uiScale, 0.0f, rgba(0.271f, 0.286f, 0.322f, 0.40f));
+                drawText(labels[i], (sx0 + sx1) * 0.5f, y + grpH * 0.65f, 0.32f * uiScale, rgba(0.74f, 0.82f, 0.95f, 0.82f), 1);
+                if (i > 0 && (i - 1) != activeIdx) {
+                    drawRoundRect(sx0 - 0.5f, y + 6.0f * uiScale, sx0 + 0.5f, y + grpH - 6.0f * uiScale, 0.0f, rgba(0.32f, 0.45f, 0.70f, 0.40f));
                 }
             }
         }
@@ -2037,7 +1942,7 @@ void UIOverlay::render(int screenW, int screenH) {
     // -------------------------------------------------------------
     if (mSettings.showControls && mDrawerAnim < 0.98f) {
         float hudOp = op * (1.0f - mDrawerAnim * 0.75f);
-        float cutoutInset = mSettings.showCameraCutout ? 0.0f : (42.0f * uiScale);
+        float cutoutInset = mSettings.showCameraCutout ? 0.0f : (42.0f * baseDpi);
 
         // ---------------------------------------------------------
         // 1. Virtual Joystick - Precision Minimalist Reticle & Laser Tether
@@ -2212,7 +2117,7 @@ void UIOverlay::render(int screenW, int screenH) {
         computeFpsRect(screenW, screenH, fpsX, fpsY, fpsW, fpsH, fpsBaseW);
         (void)fpsBaseW;
         float fpsScale = std::max(0.60f, std::min(2.20f, mSettings.fpsScale));
-        float fs = uiScale * fpsScale;
+        float fs = baseDpi * fpsScale;
 
         char fpsTxt[32];
         if (mDisplayedFps >= 0) {
@@ -2232,7 +2137,7 @@ void UIOverlay::render(int screenW, int screenH) {
 
         float pillR = fpsH * 0.5f;
         drawRoundRect(fpsX, fpsY, fpsX + fpsW, fpsY + fpsH, pillR, rgba(0.32f, 0.42f, 0.58f, 0.58f));
-        float inset = 1.2f * uiScale;
+        float inset = 1.2f * baseDpi;
         drawRoundRect(fpsX + inset, fpsY + inset, fpsX + fpsW - inset, fpsY + fpsH - inset, std::max(1.0f, pillR - inset), rgba(0.06f, 0.08f, 0.12f, 0.84f));
         drawCircle(fpsX + 12.0f * fs, fpsY + fpsH * 0.5f, 4.0f * fs, dotCol);
         drawText(fpsTxt, fpsX + 22.0f * fs, fpsY + 19.2f * fs, 0.34f * fs, rgba(0.96f, 0.97f, 1.0f, 0.98f), 0);
@@ -2246,20 +2151,20 @@ void UIOverlay::render(int screenW, int screenH) {
     }
 
     // -------------------------------------------------------------
-    // Material 3 Settings Tab Dock (Pinned to Top-Left Edge ⚙)
+    // Cosmic Observatory Settings Dock (Pinned to Top-Left Edge)
     // -------------------------------------------------------------
     if (mDrawerAnim < 0.95f) {
-        float tabW = 56.0f * uiScale;
-        float tabH = 48.0f * uiScale;
-        float tabY = 22.0f * uiScale;
+        float tabW = 56.0f * baseDpi;
+        float tabH = 48.0f * baseDpi;
+        float tabY = 22.0f * baseDpi;
         float tabPr = mBtnCfgPressed ? 0.92f : 1.0f;
 
-        // Docked pill container: rounded right edge
-        drawRoundRect(-10.0f, tabY, tabW * tabPr, tabY + tabH, 24.0f * uiScale, rgba(0.149f, 0.157f, 0.180f, 0.94f));
-        drawRoundRect(-10.0f, tabY, tabW * tabPr, tabY + tabH, 24.0f * uiScale, rgba(0.267f, 0.278f, 0.310f, 0.60f));
+        // Docked cosmic pill container with cyan outer rim
+        drawRoundRect(-10.0f, tabY, tabW * tabPr, tabY + tabH, 24.0f * baseDpi, rgba(0.220f, 0.760f, 0.980f, 0.75f));
+        drawRoundRect(-10.0f, tabY + 1.4f * baseDpi, tabW * tabPr - 1.4f * baseDpi, tabY + tabH - 1.4f * baseDpi, 22.6f * baseDpi, rgba(0.055f, 0.095f, 0.245f, 0.94f));
 
-        // Rotating Material 3 Cogwheel icon in Google Accent Blue
-        drawCogwheel(tabW * 0.50f, tabY + tabH * 0.5f, 15.0f * uiScale, rgba(0.659f, 0.780f, 0.980f, 1.0f), cogRot);
+        // Rotating Cogwheel icon in starlight cyan
+        drawCogwheel(tabW * 0.50f, tabY + tabH * 0.5f, 15.0f * baseDpi, rgba(0.55f, 0.88f, 1.0f, 1.0f), cogRot);
     }
 
     // -------------------------------------------------------------
@@ -2313,98 +2218,147 @@ void UIOverlay::render(int screenW, int screenH) {
             computeFpsRect(screenW, screenH, fpsX, fpsY, fpsW, fpsH, fpsBaseW);
             (void)fpsBaseW;
 
-            float pad = 4.0f * uiScale;
+            float pad = 4.0f * baseDpi;
             Color boxCol = rgba(0.220f, 0.741f, 0.969f, 0.95f);
             float x0 = fpsX - pad, y0 = fpsY - pad, x1 = fpsX + fpsW + pad, y1 = fpsY + fpsH + pad;
-            float stroke = 2.0f * uiScale;
+            float stroke = 2.0f * baseDpi;
             drawLine(x0, y0, x1, y0, stroke, boxCol);
             drawLine(x1, y0, x1, y1, stroke, boxCol);
             drawLine(x1, y1, x0, y1, stroke, boxCol);
             drawLine(x0, y1, x0, y0, stroke, boxCol);
 
             // Bottom-right circular resize handle
-            float hx = fpsX + fpsW + 2.0f * uiScale;
-            float hy = fpsY + fpsH + 2.0f * uiScale;
-            drawCircle(hx, hy, 11.0f * uiScale, boxCol);
-            drawCircle(hx, hy, 5.0f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f));
+            float hx = fpsX + fpsW + 2.0f * baseDpi;
+            float hy = fpsY + fpsH + 2.0f * baseDpi;
+            drawCircle(hx, hy, 11.0f * baseDpi, boxCol);
+            drawCircle(hx, hy, 5.0f * baseDpi, rgba(1.0f, 1.0f, 1.0f, 1.0f));
 
             char fpsTag[32];
             int pct = (int)lroundf(mSettings.fpsScale * 100.0f);
             snprintf(fpsTag, sizeof(fpsTag), "FPS (%d%%)", pct);
-            float labelY = (fpsY > 36.0f * uiScale) ? (y0 - 8.0f * uiScale) : (y1 + 20.0f * uiScale);
-            drawText(fpsTag, fpsX + fpsW * 0.5f, labelY, 0.34f * uiScale, boxCol, 1);
+            float labelY = (fpsY > 36.0f * baseDpi) ? (y0 - 8.0f * baseDpi) : (y1 + 20.0f * baseDpi);
+            drawText(fpsTag, fpsX + fpsW * 0.5f, labelY, 0.34f * baseDpi, boxCol, 1);
         }
     }
 
     // -------------------------------------------------------------
-    // Material 3 Side Sheet Navigation Drawer (Tabbed & Scrollable)
+    // Full-Screen Super Mario Galaxy "Comet Observatory" Settings UI
     // -------------------------------------------------------------
     if (mDrawerAnim > 0.001f) {
-        // Scrim backdrop (smoothly fades with animation)
-        drawRoundRect(0, 0, w, h, 0.0f, rgba(0.0f, 0.0f, 0.0f, mDrawerAnim * 0.58f));
+        float oa = std::max(0.0f, std::min(1.0f, mDrawerAnim));
+        float slideY = (1.0f - oa) * 24.0f * uiScale;
+        auto sc = [&](Color c) { c.a *= oa; return c; };
 
-        // Side Sheet container: Surface Container (#181A20) with 28dp rounded right corners
-        drawRoundRect(drawerX - 60.0f, 0.0f, drawerX + drawerW, h, 28.0f * uiScale, rgba(0.094f, 0.102f, 0.125f, 0.98f));
-        // Right edge outline border
-        drawRoundRect(drawerX + drawerW - 2.0f, 0.0f, drawerX + drawerW, h, 0.0f, rgba(0.271f, 0.286f, 0.322f, 0.55f));
+        // 1. Deep Cosmic Sky Gradient & Observatory Nebula Backdrop
+        addGradRect(0.0f, 0.0f, w, h * 0.56f,
+                    rgba(0.016f, 0.028f, 0.102f, 0.96f * oa),
+                    rgba(0.043f, 0.086f, 0.258f, 0.96f * oa));
+        addGradRect(0.0f, h * 0.56f, w, h,
+                    rgba(0.043f, 0.086f, 0.258f, 0.96f * oa),
+                    rgba(0.075f, 0.110f, 0.305f, 0.97f * oa));
 
-        float padX = 22.0f * uiScale;
-        float contentW = drawerW - padX * 2.0f;
-        float contentTop = 114.0f * uiScale;
-        float contentBottom = h - 56.0f * uiScale;
-        float totalContentH = 0.0f;
-        if (mWarpMenuOpen) {
-            int matchingCount = 0;
-            for (int i = 0; i < kNumGalaxies; i++) {
-                if (mWarpCategoryIndex == 0 || kGalaxies[i].category == mWarpCategoryIndex) {
-                    matchingCount++;
-                }
+        // Subtle nebula bloom & Comet Observatory orbital arcs
+        float orbCx = w * 0.78f;
+        float orbCy = h * 0.26f;
+        drawCircle(orbCx, orbCy, h * 0.44f, rgba(0.11f, 0.36f, 0.85f, 0.09f * oa));
+        drawCircle(w * 0.34f, h * 0.82f, h * 0.38f, rgba(0.30f, 0.14f, 0.65f, 0.08f * oa));
+        drawRing(orbCx, orbCy, h * 0.42f, 0.992f, rgba(0.28f, 0.72f, 0.99f, 0.13f * oa));
+        drawRing(orbCx, orbCy, h * 0.62f, 0.994f, rgba(0.98f, 0.82f, 0.28f, 0.08f * oa));
+
+        // Deterministic twinkling starfield & 4-point Luma sparkles
+        for (int s = 0; s < 36; s++) {
+            float sx = fmodf((float)((s * 173 + 47) % 1009) / 1009.0f * 1.13f, 1.0f) * w;
+            float sy = fmodf((float)((s * 293 + 91) % 1013) / 1013.0f * 1.07f, 1.0f) * h;
+            float tw = 0.45f + 0.55f * (0.5f + 0.5f * sinf(animPhase * (1.8f + (s % 5) * 0.55f) + (float)s * 1.7f));
+            bool goldStar = ((s % 5) == 0);
+            bool cyanStar = ((s % 3) == 0);
+            Color starCol = goldStar ? rgba(1.0f, 0.88f, 0.36f, 0.65f * tw * oa)
+                          : (cyanStar ? rgba(0.55f, 0.88f, 1.0f, 0.60f * tw * oa)
+                                      : rgba(0.95f, 0.97f, 1.0f, 0.55f * tw * oa));
+            if ((s % 4) == 0) {
+                drawSparkle(sx, sy, (4.2f + (s % 3) * 1.6f) * uiScale, starCol, animPhase * 0.4f + s);
+            } else {
+                drawCircle(sx, sy, (1.1f + (s % 3) * 0.65f) * uiScale, starCol);
             }
-            totalContentH = matchingCount * (78.0f * uiScale) + 16.0f * uiScale;
-        } else if (mSettingsTab == 0) {
-            totalContentH = 666.0f * uiScale;
-        } else if (mSettingsTab == 1) {
-            totalContentH = 740.0f * uiScale;
-        } else if (mSettingsTab == 2) {
-            totalContentH = mPlusEdition ? (1176.0f * uiScale) : (826.0f * uiScale);
-        } else {
-            totalContentH = 780.0f * uiScale;
         }
-        float maxScroll = std::max(0.0f, totalContentH - (contentBottom - contentTop));
 
-        // Smooth scroll damping
-        if (fabsf(mDrawerScrollY - mDrawerScrollTarget) > 0.5f) {
-            mDrawerScrollY += (mDrawerScrollTarget - mDrawerScrollY) * (1.0f - expf(-18.0f * dt));
-            mDirty = true;
-        } else {
-            mDrawerScrollY = mDrawerScrollTarget;
-        }
-        mDrawerScrollY = std::max(0.0f, std::min(mDrawerScrollY, maxScroll));
-        mDrawerScrollTarget = std::max(0.0f, std::min(mDrawerScrollTarget, maxScroll));
+        // SMG Palette & Chrome Geometry
+        float railX0 = 18.0f * uiScale;
+        float railW = 224.0f * uiScale;
+        float railX1 = railX0 + railW;
+        float railTopY = sideTopY;
+        float railBotY = h - 16.0f * uiScale;
 
+        mDeckLeftX = railX1 + 14.0f * uiScale;
+        mDeckTopY = headerH + 14.0f * uiScale;
+        mDeckBottomY = h - 16.0f * uiScale;
+        float deckX0 = mDeckLeftX;
+        float deckX1 = w - 20.0f * uiScale;
+        float deckW = std::max(280.0f * uiScale, deckX1 - deckX0);
+        float colGap = 14.0f * uiScale;
+        bool twoCol = (deckW >= 620.0f * uiScale);
+        float colW = twoCol ? ((deckW - colGap) * 0.5f) : deckW;
+        float visibleDeckH = std::max(1.0f, mDeckBottomY - mDeckTopY);
+
+        Color cCardBg = sc(rgba(0.055f, 0.098f, 0.255f, 0.93f));
+        Color cCardBgAlt = sc(rgba(0.072f, 0.122f, 0.305f, 0.94f));
+        Color cCardBorder = sc(rgba(0.28f, 0.64f, 0.95f, 0.48f));
+        Color cCardBorderGold = sc(rgba(0.98f, 0.80f, 0.26f, 0.60f));
+        Color cDivider = sc(rgba(0.32f, 0.52f, 0.85f, 0.30f));
+        Color cHeader = sc(rgba(0.30f, 0.84f, 1.0f, 1.0f));
+        Color cGold = sc(rgba(0.99f, 0.84f, 0.26f, 1.0f));
+        Color cTextPrimary = sc(rgba(0.96f, 0.98f, 1.0f, 1.0f));
+        Color cTextSecondary = sc(rgba(0.73f, 0.82f, 0.96f, 0.86f));
         float swW = 50.0f * uiScale, swH = 28.0f * uiScale;
 
-        // Colors
-        Color cCardBg = rgba(0.125f, 0.137f, 0.165f, 0.95f);
-        Color cCardBorder = rgba(0.271f, 0.286f, 0.322f, 0.55f);
-        Color cDivider = rgba(0.271f, 0.286f, 0.322f, 0.35f);
-        Color cHeader = rgba(0.220f, 0.741f, 0.969f, 0.95f); // Cyan accent
-        Color cTextPrimary = rgba(0.925f, 0.933f, 0.949f, 1.0f);
-        Color cTextSecondary = rgba(0.720f, 0.745f, 0.784f, 0.85f);
+        auto pushFixedHit = [&](float x0, float y0, float x1, float y1, int kind, int arg0 = 0, int arg1 = 0, float p0 = 0.0f, float p1 = 0.0f) {
+            if (x1 <= x0 || y1 <= y0) return;
+            mSettingsHits.push_back({x0, y0, x1, y1, kind, arg0, arg1, p0, p1, true});
+        };
+        auto pushDeckHit = [&](float x0, float y0, float x1, float y1, int kind, int arg0 = 0, int arg1 = 0, float p0 = 0.0f, float p1 = 0.0f) {
+            float cy0 = std::max(mDeckTopY, y0);
+            float cy1 = std::min(mDeckBottomY, y1);
+            if (cy1 <= cy0 || x1 <= x0) return;
+            mSettingsHits.push_back({x0, cy0, x1, cy1, kind, arg0, arg1, p0, p1, false});
+        };
+
+        auto drawSectionTitle = [&](float x0, float y, const char* title, const Color& accent, bool starGlyph = true) {
+            if (starGlyph) {
+                drawStar(x0 + 17.0f * uiScale, y + 18.0f * uiScale, 6.8f * uiScale, accent, sinf(animPhase * 1.4f) * 0.14f);
+            } else {
+                drawSparkle(x0 + 17.0f * uiScale, y + 18.0f * uiScale, 6.2f * uiScale, accent, animPhase * 0.6f);
+            }
+            drawText(title, x0 + 29.0f * uiScale, y + 22.0f * uiScale, 0.31f * uiScale, accent, 0);
+        };
+
+        auto drawGlossyBtn = [&](float x0, float y0, float x1, float y1, float r, const Color& rim, const Color& fill, const char* label, const Color& txtCol, float txtScale = 0.33f) {
+            drawRoundRect(x0, y0, x1, y1, r, sc(rim));
+            float inset = 1.4f * uiScale;
+            drawRoundRect(x0 + inset, y0 + inset, x1 - inset, y1 - inset, std::max(1.0f, r - inset), sc(fill));
+            if (y1 - y0 > 18.0f * uiScale) {
+                drawRoundRect(x0 + 6.0f * uiScale, y0 + 2.2f * uiScale, x1 - 6.0f * uiScale, y0 + (y1 - y0) * 0.44f, std::max(1.0f, r * 0.55f), rgba(1.0f, 1.0f, 1.0f, 0.12f * oa));
+            }
+            drawText(label, (x0 + x1) * 0.5f, (y0 + y1) * 0.5f + 5.0f * uiScale, txtScale * uiScale, sc(txtCol), 1);
+        };
 
         // ---------------------------------------------------------
-        // A. Content Layer (Warp Sub-View vs Settings Tabs)
+        // A. Scrollable Right Observatory Content Deck (Rendered BEFORE Fixed Chrome)
         // ---------------------------------------------------------
         if (mWarpMenuOpen) {
-            // Galaxy & Scenario Warp Menu Sub-View (Plus Edition)
+            int matchingIndices[64];
             int matchingCount = 0;
-            for (int i = 0; i < kNumGalaxies; i++) {
+            for (int i = 0; i < kNumGalaxies && matchingCount < 64; i++) {
                 if (mWarpCategoryIndex == 0 || kGalaxies[i].category == mWarpCategoryIndex) {
-                    matchingCount++;
+                    matchingIndices[matchingCount++] = i;
                 }
             }
-            float totalWarpH = matchingCount * (78.0f * uiScale) + 16.0f * uiScale;
-            float maxWarpScroll = std::max(0.0f, totalWarpH - (contentBottom - contentTop));
+            int warpCols = (deckW >= 600.0f * uiScale) ? 2 : 1;
+            float cardH = 78.0f * uiScale;
+            float rowGap = 10.0f * uiScale;
+            float rowStep = cardH + rowGap;
+            int rows = (matchingCount + warpCols - 1) / warpCols;
+            float totalWarpH = rows * rowStep + 8.0f * uiScale;
+            mWarpMaxScroll = std::max(0.0f, totalWarpH - visibleDeckH);
 
             if (fabsf(mWarpScrollY - mWarpScrollTarget) > 0.5f) {
                 mWarpScrollY += (mWarpScrollTarget - mWarpScrollY) * (1.0f - expf(-18.0f * dt));
@@ -2412,247 +2366,235 @@ void UIOverlay::render(int screenW, int screenH) {
             } else {
                 mWarpScrollY = mWarpScrollTarget;
             }
-            mWarpScrollY = std::max(0.0f, std::min(mWarpScrollY, maxWarpScroll));
-            mWarpScrollTarget = std::max(0.0f, std::min(mWarpScrollTarget, maxWarpScroll));
+            mWarpScrollY = std::max(0.0f, std::min(mWarpScrollY, mWarpMaxScroll));
+            mWarpScrollTarget = std::max(0.0f, std::min(mWarpScrollTarget, mWarpMaxScroll));
 
-            int cardIdx = 0;
-            for (int i = 0; i < kNumGalaxies; i++) {
-                if (mWarpCategoryIndex != 0 && kGalaxies[i].category != mWarpCategoryIndex) continue;
+            float wCardW = (warpCols == 2) ? ((deckW - colGap - 10.0f * uiScale) * 0.5f) : (deckW - 10.0f * uiScale);
+            for (int m = 0; m < matchingCount; m++) {
+                int i = matchingIndices[m];
+                int row = m / warpCols;
+                int col = m % warpCols;
+                float cardX0 = deckX0 + col * (wCardW + colGap);
+                float cardX1 = cardX0 + wCardW;
+                float cardY = mDeckTopY + slideY + row * rowStep - mWarpScrollY;
 
-                float cardY = contentTop + 8.0f * uiScale + cardIdx * (78.0f * uiScale) - mWarpScrollY;
-                float cardH = 70.0f * uiScale;
-
-                if (cardY + cardH >= contentTop - 12.0f && cardY <= contentBottom + 12.0f) {
+                if (cardY + cardH >= mDeckTopY - 24.0f && cardY <= mDeckBottomY + 24.0f) {
                     bool isSel = (mWarpSelectedGalaxy == i);
-                    float cardX0 = drawerX + padX;
-                    float cardX1 = drawerX + drawerW - padX;
+                    Color bg = isSel ? sc(rgba(0.09f, 0.22f, 0.48f, 0.96f)) : cCardBg;
+                    Color brd = isSel ? cGold : cCardBorder;
+                    drawCard(cardX0, cardY, cardX1, cardY + cardH, 16.0f * uiScale, bg, brd);
+                    pushDeckHit(cardX0, cardY, cardX1, cardY + cardH, HIT_WARP_CARD, i);
 
-                    Color bg = isSel ? rgba(0.12f, 0.22f, 0.36f, 0.96f) : cCardBg;
-                    Color brd = isSel ? rgba(0.220f, 0.741f, 0.969f, 0.90f) : cCardBorder;
-                    drawCard(cardX0, cardY, cardX1, cardY + cardH, 14.0f * uiScale, bg, brd);
+                    drawStar(cardX0 + 18.0f * uiScale, cardY + 21.0f * uiScale, 6.2f * uiScale, isSel ? cGold : cHeader, isSel ? animPhase * 0.8f : 0.0f);
+                    drawText(kGalaxies[i].displayName, cardX0 + 30.0f * uiScale, cardY + 25.0f * uiScale, 0.35f * uiScale, cTextPrimary, 0);
 
-                    // Galaxy Title
-                    drawText(kGalaxies[i].displayName, cardX0 + 14.0f * uiScale, cardY + 22.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
-
-                    // Category Badge tag on right
                     const char* catName = kCategoryNames[kGalaxies[i].category];
-                    drawText(catName, cardX1 - 14.0f * uiScale, cardY + 20.0f * uiScale, 0.28f * uiScale, rgba(0.58f, 0.72f, 0.90f, 0.85f), 2);
+                    drawText(catName, cardX1 - 14.0f * uiScale, cardY + 23.0f * uiScale, 0.26f * uiScale, isSel ? cGold : rgba(0.62f, 0.78f, 0.96f, 0.85f * oa), 2);
 
-                    // Scenario selector pills
                     int maxSc = kGalaxies[i].maxScenarios;
                     float pillW = 28.0f * uiScale;
                     float pillGap = 5.0f * uiScale;
                     float pStartX = cardX0 + 14.0f * uiScale;
-                    float pY = cardY + 36.0f * uiScale;
-                    float pH = 26.0f * uiScale;
+                    float pY = cardY + 40.0f * uiScale;
+                    float pH = 27.0f * uiScale;
 
                     for (int s = 1; s <= maxSc; s++) {
                         float px0 = pStartX + (s - 1) * (pillW + pillGap);
                         float px1 = px0 + pillW;
                         bool sActive = isSel && (mWarpSelectedScenario == s);
-
-                        Color pBg = sActive ? rgba(0.043f, 0.341f, 0.816f, 1.0f) : rgba(0.18f, 0.21f, 0.27f, 0.85f);
-                        Color pTxt = sActive ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.72f, 0.76f, 0.82f, 0.85f);
-                        drawRoundRect(px0, pY, px1, pY + pH, 8.0f * uiScale, pBg);
-
+                        Color pRim = sActive ? rgba(1.0f, 0.86f, 0.32f, 0.98f) : rgba(0.30f, 0.50f, 0.82f, 0.45f);
+                        Color pBg = sActive ? rgba(0.08f, 0.42f, 0.92f, 1.0f) : rgba(0.09f, 0.14f, 0.32f, 0.92f);
                         char sBuf[8];
                         snprintf(sBuf, sizeof(sBuf), "%d", s);
-                        drawText(sBuf, (px0 + px1) * 0.5f, pY + 18.0f * uiScale, 0.34f * uiScale, pTxt, 1);
+                        drawGlossyBtn(px0, pY, px1, pY + pH, 9.0f * uiScale, pRim, pBg, sBuf, sActive ? rgba(1.0f, 0.96f, 0.78f, 1.0f) : rgba(0.78f, 0.86f, 0.98f, 0.90f), 0.31f);
+                        pushDeckHit(px0, pY, px1, pY + pH, HIT_WARP_SCENARIO, i, s);
                     }
 
-                    // Quick [ WARP ] pill on right
-                    float qWarpX0 = cardX1 - 74.0f * uiScale;
-                    float qWarpX1 = cardX1 - 10.0f * uiScale;
-                    float qWarpY = cardY + 36.0f * uiScale;
-                    Color qBg = isSel ? rgba(0.14f, 0.48f, 0.26f, 0.95f) : rgba(0.18f, 0.22f, 0.28f, 0.75f);
-                    Color qTxt = isSel ? rgba(0.85f, 1.0f, 0.88f, 1.0f) : rgba(0.65f, 0.70f, 0.78f, 0.75f);
-                    drawRoundRect(qWarpX0, qWarpY, qWarpX1, qWarpY + pH, 8.0f * uiScale, qBg);
-                    drawText("WARP", (qWarpX0 + qWarpX1) * 0.5f, qWarpY + 18.0f * uiScale, 0.32f * uiScale, qTxt, 1);
+                    float qWarpX0 = cardX1 - 78.0f * uiScale;
+                    float qWarpX1 = cardX1 - 12.0f * uiScale;
+                    Color qRim = isSel ? rgba(0.45f, 0.96f, 0.65f, 0.95f) : rgba(0.32f, 0.68f, 0.95f, 0.55f);
+                    Color qBg = isSel ? rgba(0.11f, 0.52f, 0.28f, 0.98f) : rgba(0.10f, 0.22f, 0.45f, 0.90f);
+                    drawGlossyBtn(qWarpX0, pY, qWarpX1, pY + pH, 9.0f * uiScale, qRim, qBg, "WARP", isSel ? rgba(0.92f, 1.0f, 0.94f, 1.0f) : rgba(0.78f, 0.90f, 1.0f, 0.92f), 0.29f);
+                    pushDeckHit(qWarpX0, pY, qWarpX1, pY + pH, HIT_WARP_QUICK, i);
                 }
-                cardIdx++;
             }
 
-            // Scrollbar for Warp Sub-View
-            if (maxWarpScroll > 1.0f) {
-                float trackH = contentBottom - contentTop;
-                float thumbH = std::max(28.0f * uiScale, trackH * (trackH / totalWarpH));
-                float thumbY = contentTop + (mWarpScrollY / maxWarpScroll) * (trackH - thumbH);
-                drawRoundRect(drawerX + drawerW - 5.0f * uiScale, thumbY, drawerX + drawerW - 2.0f * uiScale, thumbY + thumbH, 1.5f * uiScale, rgba(0.85f, 0.92f, 1.0f, 0.40f));
+            if (mWarpMaxScroll > 1.0f) {
+                float thumbH = std::max(28.0f * uiScale, visibleDeckH * (visibleDeckH / totalWarpH));
+                float thumbY = mDeckTopY + (mWarpScrollY / mWarpMaxScroll) * (visibleDeckH - thumbH);
+                drawRoundRect(deckX1 - 4.0f * uiScale, thumbY, deckX1, thumbY + thumbH, 2.0f * uiScale, rgba(0.45f, 0.85f, 1.0f, 0.48f * oa));
             }
-
-            // Fixed Top Header for Warp Sub-View
-            drawRoundRect(drawerX - 60.0f, 0.0f, drawerX + drawerW, contentTop, 0.0f, rgba(0.094f, 0.102f, 0.125f, 1.0f));
-
-            // [< Back] button pill at top-left
-            float backBtnX0 = drawerX + padX;
-            float backBtnX1 = drawerX + padX + 80.0f * uiScale;
-            drawRoundRect(backBtnX0, 20.0f * uiScale, backBtnX1, 48.0f * uiScale, 14.0f * uiScale, rgba(0.18f, 0.22f, 0.28f, 0.95f));
-            drawText("< Back", (backBtnX0 + backBtnX1) * 0.5f, 38.0f * uiScale, 0.34f * uiScale, rgba(0.85f, 0.92f, 1.0f, 1.0f), 1);
-
-            // Title
-            drawText("Galaxy Warp", backBtnX1 + 14.0f * uiScale, 38.0f * uiScale, 0.48f * uiScale, cTextPrimary, 0);
-
-            // Close [X] circular button at top-right
-            float closeBtnX = drawerX + drawerW - 36.0f * uiScale;
-            float closeBtnY = 36.0f * uiScale;
-            drawCircle(closeBtnX, closeBtnY, 17.0f * uiScale, rgba(0.188f, 0.196f, 0.224f, 0.95f));
-            drawCloseIcon(closeBtnX, closeBtnY, 9.0f * uiScale, rgba(0.761f, 0.776f, 0.812f, 0.95f));
-
-            // Category Chips (2 rows: Row 0 = 54..78, Row 1 = 80..104)
-            for (int c = 0; c < 8; c++) {
-                int row = c / 4;
-                int col = c % 4;
-                float chipW = (contentW - 9.0f * uiScale) / 4.0f;
-                float chipX0 = drawerX + padX + col * (chipW + 3.0f * uiScale);
-                float chipX1 = chipX0 + chipW;
-                float chipY0 = (row == 0) ? (54.0f * uiScale) : (80.0f * uiScale);
-                float chipY1 = chipY0 + 24.0f * uiScale;
-                bool cSel = (mWarpCategoryIndex == c);
-
-                Color cBg = cSel ? rgba(0.043f, 0.341f, 0.816f, 1.0f) : rgba(0.16f, 0.18f, 0.22f, 0.90f);
-                Color cTxt = cSel ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.72f, 0.76f, 0.82f, 0.85f);
-                drawRoundRect(chipX0, chipY0, chipX1, chipY1, 10.0f * uiScale, cBg);
-                drawText(kCategoryNames[c], (chipX0 + chipX1) * 0.5f, chipY0 + 16.0f * uiScale, 0.28f * uiScale, cTxt, 1);
-            }
-
-            // Divider below header
-            drawRoundRect(drawerX + padX, contentTop - 1.0f, drawerX + drawerW - padX, contentTop, 0.5f, cDivider);
-
-            // Fixed Bottom Bar for Warp Sub-View: Prominent Action Button
-            drawRoundRect(drawerX - 60.0f, contentBottom, drawerX + drawerW, h, 0.0f, rgba(0.094f, 0.102f, 0.125f, 1.0f));
-            drawRoundRect(drawerX + padX, contentBottom, drawerX + drawerW - padX, contentBottom + 1.0f, 0.5f, cDivider);
-
-            float doneY = h - 48.0f * uiScale;
-            float doneX0 = drawerX + padX;
-            float doneX1 = drawerX + drawerW - padX;
-            drawRoundRect(doneX0, doneY, doneX1, doneY + 38.0f * uiScale, 19.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 1.0f));
-
-            char warpBtnTxt[64];
-            snprintf(warpBtnTxt, sizeof(warpBtnTxt), "WARP: %s (STAR %d)", kGalaxies[mWarpSelectedGalaxy].displayName, mWarpSelectedScenario);
-            drawText(warpBtnTxt, (doneX0 + doneX1) * 0.5f, doneY + 24.0f * uiScale, 0.34f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
         } else {
-            // Standard Settings Drawer (Controls, Display, System/Advanced)
-            auto renderCardBlock = [&](float relY, float cardH, auto func) {
-                float drawY = contentTop + relY - mDrawerScrollY;
-                if (drawY + cardH >= contentTop - 16.0f && drawY <= contentBottom + 16.0f) {
-                    func(drawY);
+            // Smooth deck scroll clamping using latest known max scroll
+            mDrawerScrollY = std::max(0.0f, std::min(mDrawerScrollY, mSettingsMaxScroll));
+            mDrawerScrollTarget = std::max(0.0f, std::min(mDrawerScrollTarget, mSettingsMaxScroll));
+            if (fabsf(mDrawerScrollY - mDrawerScrollTarget) > 0.5f) {
+                mDrawerScrollY += (mDrawerScrollTarget - mDrawerScrollY) * (1.0f - expf(-18.0f * dt));
+                mDirty = true;
+            } else {
+                mDrawerScrollY = mDrawerScrollTarget;
+            }
+
+            float colY[2] = { 0.0f, 0.0f };
+            float cardGap = 12.0f * uiScale;
+            float scrollAreaW = deckW - (mSettingsMaxScroll > 1.0f ? 8.0f * uiScale : 0.0f);
+            float effColW = twoCol ? ((scrollAreaW - colGap) * 0.5f) : scrollAreaW;
+
+            auto placeCard = [&](int prefCol, float cardH, auto func) {
+                int col = twoCol ? prefCol : 0;
+                float cX0 = deckX0 + col * (effColW + colGap);
+                float cX1 = cX0 + effColW;
+                float y = mDeckTopY + slideY + colY[col] - mDrawerScrollY;
+                colY[col] += cardH + cardGap;
+                if (y + cardH >= mDeckTopY - 24.0f && y <= mDeckBottomY + 24.0f) {
+                    func(cX0, cX1, effColW, y, cardH);
                 }
             };
 
-            float cX0 = drawerX + padX;
-            float cX1 = drawerX + drawerW - padX;
+            auto drawLangSliderCard = [&](float cX0, float cX1, float cw, float y, float ch) {
+                static const char* kLangNames[7] = {
+                    "English", "Espanol", "Francais", "Deutsch", "Italiano", "Nederlands", "Japanese"
+                };
+                static const char* kLangCodes[7] = {
+                    "EN", "ES", "FR", "DE", "IT", "NL", "JP"
+                };
+                drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
+                drawSectionTitle(cX0, y, "GAME LANGUAGE", cHeader, false);
+
+                int curLang = std::max(0, std::min(6, mSettings.languageIndex));
+                drawText(kLangNames[curLang], cX1 - 14.0f * uiScale, y + 22.0f * uiScale, 0.32f * uiScale, cGold, 2);
+
+                float trackX0 = cX0 + 24.0f * uiScale;
+                float trackX1 = cX1 - 24.0f * uiScale;
+                float trackY = y + 54.0f * uiScale;
+                float frac = (float)curLang / 6.0f;
+                float knobX = trackX0 + frac * (trackX1 - trackX0);
+
+                drawRoundRect(trackX0, trackY - 3.5f * uiScale, trackX1, trackY + 3.5f * uiScale, 3.5f * uiScale, sc(rgba(0.10f, 0.16f, 0.36f, 0.95f)));
+                if (knobX > trackX0 + 1.0f) {
+                    drawRoundRect(trackX0, trackY - 3.5f * uiScale, knobX, trackY + 3.5f * uiScale, 3.5f * uiScale, sc(rgba(0.14f, 0.54f, 0.98f, 1.0f)));
+                }
+                for (int l = 0; l < 7; l++) {
+                    float stepX = trackX0 + ((float)l / 6.0f) * (trackX1 - trackX0);
+                    bool isCur = (l == curLang);
+                    Color dotCol = (l <= curLang) ? sc(rgba(0.68f, 0.94f, 1.0f, 0.98f)) : sc(rgba(0.36f, 0.48f, 0.72f, 0.75f));
+                    drawCircle(stepX, trackY, 3.2f * uiScale, dotCol);
+                    drawText(kLangCodes[l], stepX, y + 84.0f * uiScale, (isCur ? 0.29f : 0.25f) * uiScale, isCur ? cTextPrimary : cTextSecondary, 1);
+                }
+                drawCircle(knobX, trackY, 11.0f * uiScale, sc(rgba(0.22f, 0.80f, 1.0f, 0.98f)));
+                drawCircle(knobX, trackY, 6.0f * uiScale, sc(rgba(1.0f, 0.98f, 0.88f, 1.0f)));
+                pushDeckHit(cX0 + 8.0f * uiScale, y + 32.0f * uiScale, cX1 - 8.0f * uiScale, y + ch - 4.0f * uiScale, HIT_SLIDER_LANGUAGE, 0, 0, trackX0, trackX1);
+                (void)cw;
+            };
+
+            auto drawHapticsCard = [&](float cX0, float cX1, float cw, float y, float ch) {
+                drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
+                drawSectionTitle(cX0, y, "VIBRATION & HAPTICS", cHeader, false);
+                float r1Y = y + 34.0f * uiScale;
+                drawText("Tactile Haptic Feedback", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.36f * uiScale, cTextPrimary, 0);
+                drawText("Vibration pulse on buttons & UI clicks", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
+                drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimHaptics);
+                pushDeckHit(cX0 + 8.0f * uiScale, r1Y, cX1 - 8.0f * uiScale, y + ch - 4.0f * uiScale, HIT_TOGGLE_HAPTICS);
+                (void)cw;
+            };
+
+            auto drawDonateAndLogCards = [&](int col) {
+                placeCard(col, 118.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, sc(rgba(0.95f, 0.42f, 0.46f, 0.55f)));
+                    drawSectionTitle(cX0, y, "SUPPORT & DONATIONS", sc(rgba(0.98f, 0.48f, 0.52f, 1.0f)), true);
+                    drawText("Support GalaxyMobile development on Ko-fi!", cX0 + 14.0f * uiScale, y + 40.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+                    float btnY = y + 56.0f * uiScale;
+                    drawGlossyBtn(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + 44.0f * uiScale, 15.0f * uiScale,
+                                  rgba(1.0f, 0.62f, 0.66f, 0.85f), rgba(0.84f, 0.22f, 0.28f, 0.96f),
+                                  "DONATE ON KO-FI (ko-fi.com/sebsies)", rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.31f);
+                    pushDeckHit(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + 44.0f * uiScale, HIT_DONATE);
+                    (void)cw;
+                });
+
+                placeCard(col, 118.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
+                    drawSectionTitle(cX0, y, "DEBUG & DIAGNOSTICS", cHeader, false);
+                    drawText("Export engine log & device info for troubleshooting", cX0 + 14.0f * uiScale, y + 40.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
+                    float btnY = y + 56.0f * uiScale;
+                    drawGlossyBtn(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + 44.0f * uiScale, 15.0f * uiScale,
+                                  rgba(0.30f, 0.78f, 0.98f, 0.85f), rgba(0.06f, 0.38f, 0.86f, 0.96f),
+                                  "SHARE DEBUG LOG", rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.32f);
+                    pushDeckHit(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + 44.0f * uiScale, HIT_SHARE_LOG);
+                    (void)cw;
+                });
+            };
 
             if (mSettingsTab == 0) {
-                // =========================================================
+                // =====================================================
                 // Tab 0: Controls
-                // =========================================================
+                // =====================================================
+                placeCard(0, 244.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
+                    drawSectionTitle(cX0, y, "ON-SCREEN CONTROLS (HUD)", cHeader, true);
 
-                // Card 1: On-Screen Controls (HUD)
-                renderCardBlock(6.0f * uiScale, 244.0f * uiScale, [&](float y) {
-                    drawCard(cX0, y, cX1, y + 244.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
-
-                    // Card Header
-                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                    drawText("ON-SCREEN CONTROLS (HUD)", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
-
-                    // Row 1: Show Controls
                     float r1Y = y + 34.0f * uiScale;
-                    drawText("Show Controls", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
-                    drawText("Display virtual thumbstick & buttons", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                    drawText("Show Controls", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.36f * uiScale, cTextPrimary, 0);
+                    drawText("Display virtual thumbstick & buttons", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
                     drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimShowControls);
+                    pushDeckHit(cX0 + 8.0f * uiScale, r1Y, cX1 - 8.0f * uiScale, r1Y + 44.0f * uiScale, HIT_TOGGLE_SHOW_CONTROLS);
 
-                    // Divider
                     drawRoundRect(cX0 + 14.0f * uiScale, y + 80.0f * uiScale, cX1 - 14.0f * uiScale, y + 81.0f * uiScale, 0.5f, cDivider);
 
-                    // Row 2: Camera D-Pad
                     float r2Y = y + 82.0f * uiScale;
-                    drawText("Camera D-Pad", cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
-                    drawText("Directional camera rotation dial", cX0 + 14.0f * uiScale, r2Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                    drawText("Camera D-Pad", cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, 0.36f * uiScale, cTextPrimary, 0);
+                    drawText("Directional camera rotation dial", cX0 + 14.0f * uiScale, r2Y + 34.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
                     drawM3Switch(cX1 - swW - 14.0f * uiScale, r2Y + 8.0f * uiScale, swW, swH, mSwAnimShowDpad);
+                    pushDeckHit(cX0 + 8.0f * uiScale, r2Y, cX1 - 8.0f * uiScale, r2Y + 44.0f * uiScale, HIT_TOGGLE_SHOW_DPAD);
 
-                    // Divider
                     drawRoundRect(cX0 + 14.0f * uiScale, y + 128.0f * uiScale, cX1 - 14.0f * uiScale, y + 129.0f * uiScale, 0.5f, cDivider);
 
-                    // Row 3: D-Pad Position
                     float r3Y = y + 130.0f * uiScale;
-                    drawText("D-Pad Placement", cX0 + 14.0f * uiScale, r3Y + 14.0f * uiScale, 0.34f * uiScale, cTextPrimary, 0);
+                    drawText("D-Pad Placement", cX0 + 14.0f * uiScale, r3Y + 14.0f * uiScale, 0.32f * uiScale, cTextPrimary, 0);
                     const char* dpadSideOpts[2] = {"Left Hand", "Right Hand"};
-                    drawSegmentedGroup(cX0 + 14.0f * uiScale, r3Y + 18.0f * uiScale, contentW - 28.0f * uiScale, 30.0f * uiScale, dpadSideOpts, 2, mSettings.dpadOnRight ? 1 : 0);
+                    float grpW = cw - 28.0f * uiScale;
+                    float segY0 = r3Y + 18.0f * uiScale;
+                    drawSegmentedGroup(cX0 + 14.0f * uiScale, segY0, grpW, 30.0f * uiScale, dpadSideOpts, 2, mSettings.dpadOnRight ? 1 : 0);
+                    for (int s = 0; s < 2; s++) {
+                        float sx0 = cX0 + 14.0f * uiScale + s * (grpW * 0.5f);
+                        pushDeckHit(sx0, segY0 - 4.0f * uiScale, sx0 + grpW * 0.5f, segY0 + 34.0f * uiScale, HIT_SEG_DPAD_SIDE, s);
+                    }
 
-                    // Divider
                     drawRoundRect(cX0 + 14.0f * uiScale, y + 184.0f * uiScale, cX1 - 14.0f * uiScale, y + 185.0f * uiScale, 0.5f, cDivider);
 
-                    // Row 4: Joystick Mode
                     float r4Y = y + 186.0f * uiScale;
-                    drawText("Joystick Placement", cX0 + 14.0f * uiScale, r4Y + 14.0f * uiScale, 0.34f * uiScale, cTextPrimary, 0);
+                    drawText("Joystick Placement", cX0 + 14.0f * uiScale, r4Y + 14.0f * uiScale, 0.32f * uiScale, cTextPrimary, 0);
                     const char* joyOpts[2] = {"Dynamic (Touch)", "Fixed Anchor"};
-                    drawSegmentedGroup(cX0 + 14.0f * uiScale, r4Y + 18.0f * uiScale, contentW - 28.0f * uiScale, 30.0f * uiScale, joyOpts, 2, mSettings.dynamicStick ? 0 : 1);
+                    float joyY0 = r4Y + 18.0f * uiScale;
+                    drawSegmentedGroup(cX0 + 14.0f * uiScale, joyY0, grpW, 30.0f * uiScale, joyOpts, 2, mSettings.dynamicStick ? 0 : 1);
+                    for (int s = 0; s < 2; s++) {
+                        float sx0 = cX0 + 14.0f * uiScale + s * (grpW * 0.5f);
+                        pushDeckHit(sx0, joyY0 - 4.0f * uiScale, sx0 + grpW * 0.5f, joyY0 + 34.0f * uiScale, HIT_SEG_STICK_MODE, s);
+                    }
                 });
 
-                // Card 2: Customize Touch Controls
-                renderCardBlock(258.0f * uiScale, 206.0f * uiScale, [&](float y) {
-                    drawCard(cX0, y, cX1, y + 206.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+                placeCard(0, 186.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
+                    drawSectionTitle(cX0, y, "CONTROLLER (GAMEPAD & POINTER)", cHeader, false);
 
-                    // Card Header
-                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                    drawText("CUSTOMIZE TOUCH CONTROLS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
-
-                    // Row 1: Opacity
+                    float grpW = cw - 28.0f * uiScale;
                     float r1Y = y + 32.0f * uiScale;
-                    drawText("Opacity Level", cX0 + 14.0f * uiScale, r1Y + 14.0f * uiScale, 0.34f * uiScale, cTextPrimary, 0);
-                    const char* opOpts[4] = {"25%", "50%", "75%", "100%"};
-                    int opIdx = (fabsf(mSettings.opacity - 0.25f) < 0.12f) ? 0 : (fabsf(mSettings.opacity - 0.50f) < 0.12f) ? 1 : (fabsf(mSettings.opacity - 0.75f) < 0.12f) ? 2 : 3;
-                    drawSegmentedGroup(cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, contentW - 28.0f * uiScale, 30.0f * uiScale, opOpts, 4, opIdx);
-
-                    // Divider
-                    drawRoundRect(cX0 + 14.0f * uiScale, y + 88.0f * uiScale, cX1 - 14.0f * uiScale, y + 89.0f * uiScale, 0.5f, cDivider);
-
-                    // Row 2: Button Scale
-                    float r2Y = y + 92.0f * uiScale;
-                    drawText("Button Size", cX0 + 14.0f * uiScale, r2Y + 14.0f * uiScale, 0.34f * uiScale, cTextPrimary, 0);
-                    const char* scOpts[3] = {"Small (85%)", "Medium (100%)", "Large (125%)"};
-                    int scIdx = (fabsf(mSettings.scale - 0.85f) < 0.08f) ? 0 : (fabsf(mSettings.scale - 1.25f) < 0.08f) ? 2 : 1;
-                    drawSegmentedGroup(cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, contentW - 28.0f * uiScale, 30.0f * uiScale, scOpts, 3, scIdx);
-
-                    // Divider
-                    drawRoundRect(cX0 + 14.0f * uiScale, y + 148.0f * uiScale, cX1 - 14.0f * uiScale, y + 149.0f * uiScale, 0.5f, cDivider);
-
-                    // Row 3: Layout Repositioning
-                    float r3Y = y + 152.0f * uiScale;
-                    float b1X0 = cX0 + 14.0f * uiScale;
-                    float b1X1 = cX0 + 14.0f * uiScale + (contentW - 36.0f * uiScale) * 0.58f;
-                    float b2X0 = b1X1 + 8.0f * uiScale;
-                    float b2X1 = cX1 - 14.0f * uiScale;
-                    drawRoundRect(b1X0, r3Y + 6.0f * uiScale, b1X1, r3Y + 40.0f * uiScale, 16.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 0.95f));
-                    drawText("Reposition Layout", (b1X0 + b1X1) * 0.5f, r3Y + 28.0f * uiScale, 0.34f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
-
-                    drawRoundRect(b2X0, r3Y + 6.0f * uiScale, b2X1, r3Y + 40.0f * uiScale, 16.0f * uiScale, rgba(0.35f, 0.15f, 0.18f, 0.95f));
-                    drawText("Reset", (b2X0 + b2X1) * 0.5f, r3Y + 28.0f * uiScale, 0.34f * uiScale, rgba(1.0f, 0.72f, 0.72f, 1.0f), 1);
-                });
-
-                // Card 3: Gamepad / Controller
-                renderCardBlock(472.0f * uiScale, 184.0f * uiScale, [&](float y) {
-                    drawCard(cX0, y, cX1, y + 184.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
-
-                    // Card Header
-                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                    drawText("CONTROLLER (GAMEPAD)", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
-
-                    // Row 1: Right Joystick Mode
-                    float r1Y = y + 32.0f * uiScale;
-                    drawText("Right Joystick Mode", cX0 + 14.0f * uiScale, r1Y + 14.0f * uiScale, 0.34f * uiScale, cTextPrimary, 0);
+                    drawText("Right Joystick Mode", cX0 + 14.0f * uiScale, r1Y + 14.0f * uiScale, 0.32f * uiScale, cTextPrimary, 0);
                     const char* rStickOpts[2] = {"Star Pointer", "Camera"};
-                    drawSegmentedGroup(cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, contentW - 28.0f * uiScale, 30.0f * uiScale, rStickOpts, 2, mSettings.rightStickPointer ? 0 : 1);
+                    float rsY0 = r1Y + 18.0f * uiScale;
+                    drawSegmentedGroup(cX0 + 14.0f * uiScale, rsY0, grpW, 30.0f * uiScale, rStickOpts, 2, mSettings.rightStickPointer ? 0 : 1);
+                    for (int s = 0; s < 2; s++) {
+                        float sx0 = cX0 + 14.0f * uiScale + s * (grpW * 0.5f);
+                        pushDeckHit(sx0, rsY0 - 4.0f * uiScale, sx0 + grpW * 0.5f, rsY0 + 34.0f * uiScale, HIT_SEG_RIGHT_STICK_MODE, s);
+                    }
 
                     drawRoundRect(cX0 + 14.0f * uiScale, y + 88.0f * uiScale, cX1 - 14.0f * uiScale, y + 89.0f * uiScale, 0.5f, cDivider);
 
-                    // Row 2: Right Joystick Sensitivity Slider
                     float r2Y = y + 92.0f * uiScale;
-                    drawText("Pointer Sensitivity", cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, 0.34f * uiScale, cTextPrimary, 0);
+                    drawText("Pointer Sensitivity", cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, 0.33f * uiScale, cTextPrimary, 0);
                     float curSens = std::max(0.50f, std::min(3.00f, mSettings.rightStickSensitivity));
                     char sensTxt[32];
                     snprintf(sensTxt, sizeof(sensTxt), "%.2fx (%d%%)", curSens, (int)lroundf(curSens * 100.0f));
-                    drawText(sensTxt, cX1 - 14.0f * uiScale, r2Y + 18.0f * uiScale, 0.33f * uiScale, rgba(0.40f, 0.85f, 1.0f, 1.0f), 2);
+                    drawText(sensTxt, cX1 - 14.0f * uiScale, r2Y + 18.0f * uiScale, 0.32f * uiScale, cGold, 2);
 
                     float trackX0 = cX0 + 24.0f * uiScale;
                     float trackX1 = cX1 - 24.0f * uiScale;
@@ -2660,159 +2602,217 @@ void UIOverlay::render(int screenW, int screenH) {
                     float frac = (curSens - 0.50f) / 2.50f;
                     float knobX = trackX0 + frac * (trackX1 - trackX0);
 
-                    drawRoundRect(trackX0, trackY - 3.5f * uiScale, trackX1, trackY + 3.5f * uiScale, 3.5f * uiScale, rgba(0.18f, 0.20f, 0.25f, 0.95f));
+                    drawRoundRect(trackX0, trackY - 3.5f * uiScale, trackX1, trackY + 3.5f * uiScale, 3.5f * uiScale, sc(rgba(0.10f, 0.16f, 0.36f, 0.95f)));
                     if (knobX > trackX0 + 1.0f) {
-                        drawRoundRect(trackX0, trackY - 3.5f * uiScale, knobX, trackY + 3.5f * uiScale, 3.5f * uiScale, rgba(0.043f, 0.380f, 0.880f, 1.0f));
+                        drawRoundRect(trackX0, trackY - 3.5f * uiScale, knobX, trackY + 3.5f * uiScale, 3.5f * uiScale, sc(rgba(0.14f, 0.54f, 0.98f, 1.0f)));
                     }
-
                     static const char* kSensTicks[6] = {"0.5x", "1.0x", "1.5x", "2.0x", "2.5x", "3.0x"};
                     for (int s = 0; s < 6; s++) {
                         float stepFrac = (float)s / 5.0f;
                         float stepX = trackX0 + stepFrac * (trackX1 - trackX0);
-                        Color dotCol = (stepFrac <= frac + 0.01f) ? rgba(0.75f, 0.90f, 1.0f, 0.95f) : rgba(0.45f, 0.50f, 0.58f, 0.80f);
-                        drawCircle(stepX, trackY, 3.0f * uiScale, dotCol);
-                        drawText(kSensTicks[s], stepX, r2Y + 74.0f * uiScale, 0.25f * uiScale, cTextSecondary, 1);
+                        Color dotCol = (stepFrac <= frac + 0.01f) ? sc(rgba(0.68f, 0.94f, 1.0f, 0.98f)) : sc(rgba(0.36f, 0.48f, 0.72f, 0.75f));
+                        drawCircle(stepX, trackY, 3.2f * uiScale, dotCol);
+                        drawText(kSensTicks[s], stepX, r2Y + 76.0f * uiScale, 0.24f * uiScale, cTextSecondary, 1);
+                    }
+                    drawCircle(knobX, trackY, 11.0f * uiScale, sc(rgba(0.22f, 0.80f, 1.0f, 0.98f)));
+                    drawCircle(knobX, trackY, 6.0f * uiScale, sc(rgba(1.0f, 0.98f, 0.88f, 1.0f)));
+                    pushDeckHit(cX0 + 8.0f * uiScale, r2Y + 24.0f * uiScale, cX1 - 8.0f * uiScale, r2Y + 74.0f * uiScale, HIT_SLIDER_SENSITIVITY, 0, 0, trackX0, trackX1);
+                });
+
+                placeCard(1, 210.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
+                    drawSectionTitle(cX0, y, "CUSTOMIZE TOUCH CONTROLS", cHeader, true);
+
+                    float grpW = cw - 28.0f * uiScale;
+                    float r1Y = y + 34.0f * uiScale;
+                    drawText("Opacity Level", cX0 + 14.0f * uiScale, r1Y + 14.0f * uiScale, 0.32f * uiScale, cTextPrimary, 0);
+                    const char* opOpts[4] = {"25%", "50%", "75%", "100%"};
+                    int opIdx = (fabsf(mSettings.opacity - 0.25f) < 0.12f) ? 0 : (fabsf(mSettings.opacity - 0.50f) < 0.12f) ? 1 : (fabsf(mSettings.opacity - 0.75f) < 0.12f) ? 2 : 3;
+                    float opY0 = r1Y + 18.0f * uiScale;
+                    drawSegmentedGroup(cX0 + 14.0f * uiScale, opY0, grpW, 30.0f * uiScale, opOpts, 4, opIdx);
+                    for (int s = 0; s < 4; s++) {
+                        float sx0 = cX0 + 14.0f * uiScale + s * (grpW * 0.25f);
+                        pushDeckHit(sx0, opY0 - 4.0f * uiScale, sx0 + grpW * 0.25f, opY0 + 34.0f * uiScale, HIT_SEG_OPACITY, s);
                     }
 
-                    drawCircle(knobX, trackY, 11.0f * uiScale, rgba(0.220f, 0.741f, 0.969f, 0.98f));
-                    drawCircle(knobX, trackY, 6.0f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f));
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 90.0f * uiScale, cX1 - 14.0f * uiScale, y + 91.0f * uiScale, 0.5f, cDivider);
+
+                    float r2Y = y + 94.0f * uiScale;
+                    drawText("Button Size", cX0 + 14.0f * uiScale, r2Y + 14.0f * uiScale, 0.32f * uiScale, cTextPrimary, 0);
+                    const char* scOpts[3] = {"Small (85%)", "Medium (100%)", "Large (125%)"};
+                    int scIdx = (fabsf(mSettings.scale - 0.85f) < 0.08f) ? 0 : (fabsf(mSettings.scale - 1.25f) < 0.08f) ? 2 : 1;
+                    float scY0 = r2Y + 18.0f * uiScale;
+                    drawSegmentedGroup(cX0 + 14.0f * uiScale, scY0, grpW, 30.0f * uiScale, scOpts, 3, scIdx);
+                    for (int s = 0; s < 3; s++) {
+                        float sx0 = cX0 + 14.0f * uiScale + s * (grpW / 3.0f);
+                        pushDeckHit(sx0, scY0 - 4.0f * uiScale, sx0 + grpW / 3.0f, scY0 + 34.0f * uiScale, HIT_SEG_BTN_SIZE, s);
+                    }
+
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 150.0f * uiScale, cX1 - 14.0f * uiScale, y + 151.0f * uiScale, 0.5f, cDivider);
+
+                    float r3Y = y + 156.0f * uiScale;
+                    float b1X0 = cX0 + 14.0f * uiScale;
+                    float b1X1 = b1X0 + (cw - 36.0f * uiScale) * 0.62f;
+                    float b2X0 = b1X1 + 8.0f * uiScale;
+                    float b2X1 = cX1 - 14.0f * uiScale;
+                    drawGlossyBtn(b1X0, r3Y, b1X1, r3Y + 38.0f * uiScale, 15.0f * uiScale,
+                                  rgba(0.32f, 0.78f, 0.99f, 0.85f), rgba(0.06f, 0.38f, 0.86f, 0.98f),
+                                  "Reposition Layout", rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.33f);
+                    pushDeckHit(b1X0, r3Y, b1X1, r3Y + 38.0f * uiScale, HIT_LAYOUT_EDIT);
+
+                    drawGlossyBtn(b2X0, r3Y, b2X1, r3Y + 38.0f * uiScale, 15.0f * uiScale,
+                                  rgba(0.92f, 0.45f, 0.48f, 0.65f), rgba(0.42f, 0.14f, 0.18f, 0.95f),
+                                  "Reset", rgba(1.0f, 0.78f, 0.78f, 1.0f), 0.33f);
+                    pushDeckHit(b2X0, r3Y, b2X1, r3Y + 38.0f * uiScale, HIT_LAYOUT_RESET);
+                });
+
+                placeCard(1, 118.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBgAlt, cCardBorderGold);
+                    drawSectionTitle(cX0, y, "STAR POINTER FLIGHT TIPS", cGold, true);
+                    drawText("• Touch anywhere on screen to aim Star Bits manually.", cX0 + 16.0f * uiScale, y + 48.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+                    drawText("• Connect a controller to use Right Stick as Star Pointer or Camera.", cX0 + 16.0f * uiScale, y + 70.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+                    drawText("• Use Reposition Layout to freely drag sticks, buttons & camera dial.", cX0 + 16.0f * uiScale, y + 92.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+                    (void)cw;
                 });
             } else if (mSettingsTab == 1) {
-                // =========================================================
-                // Tab 1: Display
-                // =========================================================
-
-                // Card 1: Viewport & Horizon (H = 136)
-                renderCardBlock(6.0f * uiScale, 136.0f * uiScale, [&](float y) {
-                    drawCard(cX0, y, cX1, y + 136.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
-
-                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                    drawText("DISPLAY & VIEWPORT", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+                // =====================================================
+                // Tab 1: Display & FPS
+                // =====================================================
+                placeCard(0, 136.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
+                    drawSectionTitle(cX0, y, "DISPLAY & VIEWPORT", cHeader, true);
 
                     float r1Y = y + 34.0f * uiScale;
-                    drawText("Native Ultrawide (Hor+)", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
-                    drawText("Expand horizontal FOV to fill entire phone screen", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                    drawText("Native Ultrawide (Hor+)", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.36f * uiScale, cTextPrimary, 0);
+                    drawText("Expand horizontal FOV to fill screen", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
                     drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimFullscreen);
+                    pushDeckHit(cX0 + 8.0f * uiScale, r1Y, cX1 - 8.0f * uiScale, r1Y + 44.0f * uiScale, HIT_TOGGLE_FULLSCREEN);
 
                     drawRoundRect(cX0 + 14.0f * uiScale, y + 80.0f * uiScale, cX1 - 14.0f * uiScale, y + 81.0f * uiScale, 0.5f, cDivider);
 
                     float r2Y = y + 82.0f * uiScale;
-                    drawText("Show Camera Cutout", cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
-                    drawText("Extend display into camera notch / punch-hole area", cX0 + 14.0f * uiScale, r2Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                    drawText("Show Camera Cutout", cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, 0.36f * uiScale, cTextPrimary, 0);
+                    drawText("Extend display into camera punch-hole", cX0 + 14.0f * uiScale, r2Y + 34.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
                     drawM3Switch(cX1 - swW - 14.0f * uiScale, r2Y + 8.0f * uiScale, swW, swH, mSwAnimCameraCutout);
+                    pushDeckHit(cX0 + 8.0f * uiScale, r2Y, cX1 - 8.0f * uiScale, r2Y + 46.0f * uiScale, HIT_TOGGLE_CAMERA_CUTOUT);
+                    (void)cw;
                 });
 
-                // Card 2: 3D Render Resolution Preset
-                renderCardBlock(150.0f * uiScale, 176.0f * uiScale, [&](float y) {
-                    drawCard(cX0, y, cX1, y + 176.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+                placeCard(0, 180.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
+                    drawSectionTitle(cX0, y, "3D RENDER RESOLUTION PRESET", cHeader, false);
 
-                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                    drawText("3D RENDER RESOLUTION PRESET", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
-
-                    // 5-way Preset Segmented Button
-                    float r1Y = y + 34.0f * uiScale;
+                    float r1Y = y + 36.0f * uiScale;
+                    float grpW = cw - 28.0f * uiScale;
                     static const char* kPresetNames[5] = { "480p", "720p", "900p", "1080p", "Ultra" };
                     static const int kSegmentByPreset[5] = { 1, 2, 3, 4, 0 };
+                    static const int kPresetBySegment[5] = { 4, 0, 1, 2, 3 };
                     int activeSeg = (mSettings.graphicsPreset >= 0 && mSettings.graphicsPreset < 5) ? kSegmentByPreset[mSettings.graphicsPreset] : 3;
-                    drawSegmentedGroup(cX0 + 14.0f * uiScale, r1Y, contentW - 28.0f * uiScale, 36.0f * uiScale, kPresetNames, 5, activeSeg);
+                    drawSegmentedGroup(cX0 + 14.0f * uiScale, r1Y, grpW, 34.0f * uiScale, kPresetNames, 5, activeSeg);
+                    for (int s = 0; s < 5; s++) {
+                        float sx0 = cX0 + 14.0f * uiScale + s * (grpW * 0.20f);
+                        pushDeckHit(sx0, r1Y - 4.0f * uiScale, sx0 + grpW * 0.20f, r1Y + 38.0f * uiScale, HIT_SEG_RESOLUTION, kPresetBySegment[s]);
+                    }
 
-                    // Live Status Box
                     float boxY = y + 78.0f * uiScale;
-                    float boxH = 86.0f * uiScale;
-                    drawRoundRect(cX0 + 14.0f * uiScale, boxY, cX1 - 14.0f * uiScale, boxY + boxH, 12.0f * uiScale, rgba(0.165f, 0.180f, 0.215f, 0.95f));
+                    float boxH = 88.0f * uiScale;
+                    drawRoundRect(cX0 + 14.0f * uiScale, boxY, cX1 - 14.0f * uiScale, boxY + boxH, 12.0f * uiScale, sc(rgba(0.08f, 0.14f, 0.34f, 0.95f)));
 
                     const char* resChip = "1080p FHD • Recommended";
                     const char* resSub = "Internal 1920x1080 render target. Optimal balance.";
-                    Color badgeBg = rgba(0.10f, 0.28f, 0.44f, 0.90f);
-                    Color badgeTxt = rgba(0.40f, 0.85f, 1.0f, 1.0f);
-                    Color badgeDot = rgba(0.220f, 0.741f, 0.969f, 1.0f);
+                    Color badgeBg = sc(rgba(0.10f, 0.28f, 0.44f, 0.90f));
+                    Color badgeTxt = sc(rgba(0.45f, 0.88f, 1.0f, 1.0f));
+                    Color badgeDot = cHeader;
 
                     if (mSettings.graphicsPreset == 4) {
                         resChip = "480p SD • Wii Native";
-                        resSub = "Internal 854x480 render target. Maximum battery & speed.";
-                        badgeBg = rgba(0.16f, 0.24f, 0.34f, 0.90f);
-                        badgeTxt = rgba(0.68f, 0.86f, 1.0f, 1.0f);
-                        badgeDot = rgba(0.45f, 0.72f, 0.98f, 1.0f);
+                        resSub = "Internal 854x480 target. Maximum battery & speed.";
+                        badgeBg = sc(rgba(0.14f, 0.24f, 0.40f, 0.90f));
+                        badgeTxt = sc(rgba(0.72f, 0.88f, 1.0f, 1.0f));
                     } else if (mSettings.graphicsPreset == 0) {
                         resChip = "720p HD • Power Saver";
-                        resSub = "Internal 1280x720 render target. Cooler battery operation.";
-                        badgeBg = rgba(0.12f, 0.32f, 0.20f, 0.90f);
-                        badgeTxt = rgba(0.50f, 0.95f, 0.60f, 1.0f);
-                        badgeDot = rgba(0.290f, 0.871f, 0.502f, 1.0f);
+                        resSub = "Internal 1280x720 target. Cooler battery operation.";
+                        badgeBg = sc(rgba(0.10f, 0.34f, 0.22f, 0.90f));
+                        badgeTxt = sc(rgba(0.55f, 0.96f, 0.65f, 1.0f));
+                        badgeDot = sc(rgba(0.290f, 0.871f, 0.502f, 1.0f));
                     } else if (mSettings.graphicsPreset == 1) {
                         resChip = "900p HD+ • Performance";
-                        resSub = "Internal 1600x900 render target. High fluidity.";
-                        badgeBg = rgba(0.35f, 0.28f, 0.10f, 0.90f);
-                        badgeTxt = rgba(1.0f, 0.85f, 0.40f, 1.0f);
-                        badgeDot = rgba(0.984f, 0.749f, 0.141f, 1.0f);
+                        resSub = "Internal 1600x900 target. High fluidity.";
+                        badgeBg = sc(rgba(0.36f, 0.28f, 0.10f, 0.90f));
+                        badgeTxt = sc(rgba(1.0f, 0.88f, 0.42f, 1.0f));
+                        badgeDot = cGold;
                     } else if (mSettings.graphicsPreset == 3) {
                         resChip = "Native Display • Ultra Fidelity";
-                        resSub = "Full 1440p+ QHD native device pixel grid. Maximum crispness.";
-                        badgeBg = rgba(0.34f, 0.18f, 0.42f, 0.90f);
-                        badgeTxt = rgba(0.92f, 0.65f, 1.0f, 1.0f);
-                        badgeDot = rgba(0.85f, 0.45f, 0.98f, 1.0f);
+                        resSub = "Full QHD+ native device pixels. Maximum crispness.";
+                        badgeBg = sc(rgba(0.34f, 0.16f, 0.44f, 0.90f));
+                        badgeTxt = sc(rgba(0.92f, 0.68f, 1.0f, 1.0f));
+                        badgeDot = sc(rgba(0.85f, 0.45f, 0.98f, 1.0f));
                     }
 
-                    drawStatusChip(cX0 + 26.0f * uiScale, boxY + 14.0f * uiScale, resChip, badgeBg, badgeTxt, badgeDot);
-                    drawText(resSub, cX0 + 26.0f * uiScale, boxY + 54.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
-                    drawText("Directly scales internal 3D scene geometry & shader buffers.", cX0 + 26.0f * uiScale, boxY + 70.0f * uiScale, 0.24f * uiScale, rgba(0.55f, 0.60f, 0.70f, 0.75f), 0);
+                    drawStatusChip(cX0 + 24.0f * uiScale, boxY + 12.0f * uiScale, resChip, badgeBg, badgeTxt, badgeDot);
+                    drawText(resSub, cX0 + 24.0f * uiScale, boxY + 54.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+                    drawText("Scales 3D scene geometry & offscreen EFB framebuffers.", cX0 + 24.0f * uiScale, boxY + 72.0f * uiScale, 0.23f * uiScale, sc(rgba(0.58f, 0.68f, 0.86f, 0.80f)), 0);
                 });
 
-                // Card 3: Texture Remaster
-                renderCardBlock(334.0f * uiScale, 88.0f * uiScale, [&](float y) {
-                    drawCard(cX0, y, cX1, y + 88.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
-
-                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                    drawText("TEXTURE ENHANCEMENTS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+                placeCard(0, 92.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
+                    drawSectionTitle(cX0, y, "TEXTURE ENHANCEMENTS", cHeader, false);
 
                     float r1Y = y + 34.0f * uiScale;
-                    drawText("HD UI & HUD (3D All-Stars)", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
-                    drawText("Crisp high-res upscaled fonts, icons, buttons & HUD", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                    drawText("HD UI & HUD (3D All-Stars)", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.36f * uiScale, cTextPrimary, 0);
+                    drawText("Crisp upscaled fonts, icons & HUD overlays", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
                     drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimHdUi);
+                    pushDeckHit(cX0 + 8.0f * uiScale, r1Y, cX1 - 8.0f * uiScale, y + ch - 4.0f * uiScale, HIT_TOGGLE_HD_UI);
+                    (void)cw;
                 });
 
-                // Card 4: Performance & FPS
-                renderCardBlock(430.0f * uiScale, 302.0f * uiScale, [&](float y) {
-                    drawCard(cX0, y, cX1, y + 302.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+                placeCard(1, 316.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorderGold);
+                    drawSectionTitle(cX0, y, "PERFORMANCE & FPS LIMITER", cGold, true);
 
-                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                    drawText("PERFORMANCE & FPS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
-
-                    // Row 1: Show FPS Counter Switch
                     float r1Y = y + 34.0f * uiScale;
-                    drawText("Show FPS Counter", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
-                    drawText("Display movable & resizable frame rate badge", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
+                    drawText("Show FPS Counter", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.36f * uiScale, cTextPrimary, 0);
+                    drawText("Display movable & resizable frame rate badge", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
                     drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimFpsCounter);
+                    pushDeckHit(cX0 + 8.0f * uiScale, r1Y, cX1 - 8.0f * uiScale, r1Y + 44.0f * uiScale, HIT_TOGGLE_FPS_COUNTER);
 
                     drawRoundRect(cX0 + 14.0f * uiScale, y + 80.0f * uiScale, cX1 - 14.0f * uiScale, y + 81.0f * uiScale, 0.5f, cDivider);
 
-                    // Row 2: FPS Counter Size Stepper
                     float r2Y = y + 84.0f * uiScale;
-                    drawText("Counter Size", cX0 + 14.0f * uiScale, r2Y + 14.0f * uiScale, 0.34f * uiScale, cTextPrimary, 0);
+                    drawText("Counter Size", cX0 + 14.0f * uiScale, r2Y + 14.0f * uiScale, 0.32f * uiScale, cTextPrimary, 0);
                     char sizePct[24];
                     snprintf(sizePct, sizeof(sizePct), "%d%%", (int)lroundf(mSettings.fpsScale * 100.0f));
                     const char* fpsSizeOpts[3] = {"- Smaller", sizePct, "+ Larger"};
-                    drawSegmentedGroup(cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, contentW - 28.0f * uiScale, 30.0f * uiScale, fpsSizeOpts, 3, 1);
+                    float grpW = cw - 28.0f * uiScale;
+                    float szY0 = r2Y + 18.0f * uiScale;
+                    drawSegmentedGroup(cX0 + 14.0f * uiScale, szY0, grpW, 30.0f * uiScale, fpsSizeOpts, 3, 1);
+                    static const int kStepArg[3] = { -1, 0, 1 };
+                    for (int s = 0; s < 3; s++) {
+                        float sx0 = cX0 + 14.0f * uiScale + s * (grpW / 3.0f);
+                        pushDeckHit(sx0, szY0 - 4.0f * uiScale, sx0 + grpW / 3.0f, szY0 + 34.0f * uiScale, HIT_STEP_FPS_SCALE, kStepArg[s]);
+                    }
 
                     drawRoundRect(cX0 + 14.0f * uiScale, y + 142.0f * uiScale, cX1 - 14.0f * uiScale, y + 143.0f * uiScale, 0.5f, cDivider);
 
-                    // Row 3: Move & Resize / Reset
-                    float r3Y = y + 146.0f * uiScale;
+                    float r3Y = y + 148.0f * uiScale;
                     float b1X0 = cX0 + 14.0f * uiScale;
-                    float b1X1 = cX0 + 14.0f * uiScale + (contentW - 36.0f * uiScale) * 0.58f;
+                    float b1X1 = b1X0 + (cw - 36.0f * uiScale) * 0.62f;
                     float b2X0 = b1X1 + 8.0f * uiScale;
                     float b2X1 = cX1 - 14.0f * uiScale;
-                    drawRoundRect(b1X0, r3Y + 6.0f * uiScale, b1X1, r3Y + 40.0f * uiScale, 16.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 0.95f));
-                    drawText("Move & Resize", (b1X0 + b1X1) * 0.5f, r3Y + 28.0f * uiScale, 0.34f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                    drawGlossyBtn(b1X0, r3Y, b1X1, r3Y + 36.0f * uiScale, 14.0f * uiScale,
+                                  rgba(0.32f, 0.78f, 0.99f, 0.85f), rgba(0.06f, 0.38f, 0.86f, 0.98f),
+                                  "Move & Resize Badge", rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.32f);
+                    pushDeckHit(b1X0, r3Y, b1X1, r3Y + 36.0f * uiScale, HIT_FPS_EDIT);
 
-                    drawRoundRect(b2X0, r3Y + 6.0f * uiScale, b2X1, r3Y + 40.0f * uiScale, 16.0f * uiScale, rgba(0.35f, 0.15f, 0.18f, 0.95f));
-                    drawText("Reset", (b2X0 + b2X1) * 0.5f, r3Y + 28.0f * uiScale, 0.34f * uiScale, rgba(1.0f, 0.72f, 0.72f, 1.0f), 1);
+                    drawGlossyBtn(b2X0, r3Y, b2X1, r3Y + 36.0f * uiScale, 14.0f * uiScale,
+                                  rgba(0.92f, 0.45f, 0.48f, 0.65f), rgba(0.42f, 0.14f, 0.18f, 0.95f),
+                                  "Reset", rgba(1.0f, 0.78f, 0.78f, 1.0f), 0.32f);
+                    pushDeckHit(b2X0, r3Y, b2X1, r3Y + 36.0f * uiScale, HIT_FPS_RESET);
 
-                    drawRoundRect(cX0 + 14.0f * uiScale, y + 204.0f * uiScale, cX1 - 14.0f * uiScale, y + 205.0f * uiScale, 0.5f, cDivider);
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 196.0f * uiScale, cX1 - 14.0f * uiScale, y + 197.0f * uiScale, 0.5f, cDivider);
 
-                    // Row 4: FPS Limiter Slider (30..60 FPS)
-                    float r4Y = y + 208.0f * uiScale;
-                    drawText("FPS Limiter", cX0 + 14.0f * uiScale, r4Y + 18.0f * uiScale, 0.34f * uiScale, cTextPrimary, 0);
+                    float r4Y = y + 202.0f * uiScale;
+                    drawText("FPS Limiter (Physics stays 60 Hz)", cX0 + 14.0f * uiScale, r4Y + 18.0f * uiScale, 0.31f * uiScale, cTextPrimary, 0);
                     int curLimit = std::max(30, std::min(60, mSettings.fpsLimit));
                     char limitTxt[32];
                     if (curLimit >= 60) {
@@ -2822,7 +2822,7 @@ void UIOverlay::render(int screenW, int screenH) {
                     } else {
                         snprintf(limitTxt, sizeof(limitTxt), "%d FPS", curLimit);
                     }
-                    drawText(limitTxt, cX1 - 14.0f * uiScale, r4Y + 18.0f * uiScale, 0.33f * uiScale, rgba(0.40f, 0.85f, 1.0f, 1.0f), 2);
+                    drawText(limitTxt, cX1 - 14.0f * uiScale, r4Y + 18.0f * uiScale, 0.31f * uiScale, cGold, 2);
 
                     float trackX0 = cX0 + 24.0f * uiScale;
                     float trackX1 = cX1 - 24.0f * uiScale;
@@ -2830,355 +2830,158 @@ void UIOverlay::render(int screenW, int screenH) {
                     float frac = (float)(curLimit - 30) / 30.0f;
                     float knobX = trackX0 + frac * (trackX1 - trackX0);
 
-                    drawRoundRect(trackX0, trackY - 3.5f * uiScale, trackX1, trackY + 3.5f * uiScale, 3.5f * uiScale, rgba(0.18f, 0.20f, 0.25f, 0.95f));
+                    drawRoundRect(trackX0, trackY - 3.5f * uiScale, trackX1, trackY + 3.5f * uiScale, 3.5f * uiScale, sc(rgba(0.10f, 0.16f, 0.36f, 0.95f)));
                     if (knobX > trackX0 + 1.0f) {
-                        drawRoundRect(trackX0, trackY - 3.5f * uiScale, knobX, trackY + 3.5f * uiScale, 3.5f * uiScale, rgba(0.043f, 0.380f, 0.880f, 1.0f));
+                        drawRoundRect(trackX0, trackY - 3.5f * uiScale, knobX, trackY + 3.5f * uiScale, 3.5f * uiScale, sc(rgba(0.14f, 0.54f, 0.98f, 1.0f)));
                     }
-
                     static const char* kFpsTicks[7] = {"30", "35", "40", "45", "50", "55", "60"};
                     for (int s = 0; s < 7; s++) {
                         float stepFrac = (float)s / 6.0f;
                         float stepX = trackX0 + stepFrac * (trackX1 - trackX0);
-                        Color dotCol = (stepFrac <= frac + 0.01f) ? rgba(0.75f, 0.90f, 1.0f, 0.95f) : rgba(0.45f, 0.50f, 0.58f, 0.80f);
-                        drawCircle(stepX, trackY, 3.0f * uiScale, dotCol);
-                        drawText(kFpsTicks[s], stepX, r4Y + 74.0f * uiScale, 0.25f * uiScale, cTextSecondary, 1);
+                        Color dotCol = (stepFrac <= frac + 0.01f) ? sc(rgba(0.68f, 0.94f, 1.0f, 0.98f)) : sc(rgba(0.36f, 0.48f, 0.72f, 0.75f));
+                        drawCircle(stepX, trackY, 3.2f * uiScale, dotCol);
+                        drawText(kFpsTicks[s], stepX, r4Y + 76.0f * uiScale, 0.24f * uiScale, cTextSecondary, 1);
                     }
-
-                    drawCircle(knobX, trackY, 11.0f * uiScale, rgba(0.220f, 0.741f, 0.969f, 0.98f));
-                    drawCircle(knobX, trackY, 6.0f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f));
+                    drawCircle(knobX, trackY, 11.0f * uiScale, sc(rgba(0.22f, 0.80f, 1.0f, 0.98f)));
+                    drawCircle(knobX, trackY, 6.0f * uiScale, sc(rgba(1.0f, 0.98f, 0.88f, 1.0f)));
+                    drawText("Frame cap skips redundant renders while preserving full speed.", cX0 + 14.0f * uiScale, r4Y + 98.0f * uiScale, 0.23f * uiScale, cTextSecondary, 0);
+                    pushDeckHit(cX0 + 8.0f * uiScale, r4Y + 24.0f * uiScale, cX1 - 8.0f * uiScale, r4Y + 78.0f * uiScale, HIT_SLIDER_FPS_LIMIT, 0, 0, trackX0, trackX1);
                 });
-            } else if (mSettingsTab == 2) {
-                static const char* kLangNames[7] = {
-                    "English", "Espanol", "Francais", "Deutsch", "Italiano", "Nederlands", "Japanese"
-                };
-                static const char* kLangCodes[7] = {
-                    "EN", "ES", "FR", "DE", "IT", "NL", "JP"
-                };
 
-                auto drawLanguageSliderCard = [&](float y) {
-                    drawCard(cX0, y, cX1, y + 96.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+                placeCard(1, 96.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBgAlt, cCardBorder);
+                    drawSectionTitle(cX0, y, "ENGINE & GRAPHICS PIPELINE", cHeader, false);
+                    drawText("GX-to-GLES3 hardware shader translation runs live on GPU.", cX0 + 16.0f * uiScale, y + 48.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+                    drawText("Lower resolution or FPS cap to cool device during long play.", cX0 + 16.0f * uiScale, y + 70.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+                    (void)cw;
+                });
+            } else if (mPlusEdition && mSettingsTab == 2) {
+                // =====================================================
+                // Tab 2 (Plus): Cosmic Mods, Power-Ups, Warp & Bros
+                // =====================================================
+                placeCard(0, 240.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorderGold);
+                    drawSectionTitle(cX0, y, "COSMIC CHEATS & MODS", cGold, true);
 
-                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                    drawText("GAME LANGUAGE (SLIDER)", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+                    float r1Y = y + 34.0f * uiScale;
+                    drawText("Skip Cutscenes", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.36f * uiScale, cTextPrimary, 0);
+                    drawText("Bypass intro & story event cinematics", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
+                    drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimSkipCutscenes);
+                    pushDeckHit(cX0 + 8.0f * uiScale, r1Y, cX1 - 8.0f * uiScale, r1Y + 46.0f * uiScale, HIT_TOGGLE_SKIP_CUTSCENES);
 
-                    int curLang = std::max(0, std::min(6, mSettings.languageIndex));
-                    drawText(kLangNames[curLang], cX1 - 14.0f * uiScale, y + 23.0f * uiScale, 0.34f * uiScale, rgba(0.40f, 0.85f, 1.0f, 1.0f), 2);
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 82.0f * uiScale, cX1 - 14.0f * uiScale, y + 83.0f * uiScale, 0.5f, cDivider);
 
-                    float trackX0 = cX0 + 24.0f * uiScale;
-                    float trackX1 = cX1 - 24.0f * uiScale;
-                    float trackY = y + 52.0f * uiScale;
-                    float frac = (float)curLang / 6.0f;
-                    float knobX = trackX0 + frac * (trackX1 - trackX0);
+                    float r2Y = y + 84.0f * uiScale;
+                    drawText("Infinite Health", cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, 0.36f * uiScale, cTextPrimary, 0);
+                    drawText("Invulnerable Hero locked at 6 HP max", cX0 + 14.0f * uiScale, r2Y + 34.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
+                    drawM3Switch(cX1 - swW - 14.0f * uiScale, r2Y + 8.0f * uiScale, swW, swH, mSwAnimInfiniteHp);
+                    pushDeckHit(cX0 + 8.0f * uiScale, r2Y, cX1 - 8.0f * uiScale, r2Y + 46.0f * uiScale, HIT_TOGGLE_INF_HP);
 
-                    // Inactive track
-                    drawRoundRect(trackX0, trackY - 3.5f * uiScale, trackX1, trackY + 3.5f * uiScale, 3.5f * uiScale, rgba(0.18f, 0.20f, 0.25f, 0.95f));
-                    // Active filled track
-                    if (knobX > trackX0 + 1.0f) {
-                        drawRoundRect(trackX0, trackY - 3.5f * uiScale, knobX, trackY + 3.5f * uiScale, 3.5f * uiScale, rgba(0.043f, 0.380f, 0.880f, 1.0f));
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 132.0f * uiScale, cX1 - 14.0f * uiScale, y + 133.0f * uiScale, 0.5f, cDivider);
+
+                    float r3Y = y + 134.0f * uiScale;
+                    drawText("Infinite Power-Up Duration", cX0 + 14.0f * uiScale, r3Y + 18.0f * uiScale, 0.36f * uiScale, cTextPrimary, 0);
+                    drawText("Never lose Fire, Bee, Boo or Ice timer", cX0 + 14.0f * uiScale, r3Y + 34.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
+                    drawM3Switch(cX1 - swW - 14.0f * uiScale, r3Y + 8.0f * uiScale, swW, swH, mSwAnimInfinitePowerup);
+                    pushDeckHit(cX0 + 8.0f * uiScale, r3Y, cX1 - 8.0f * uiScale, r3Y + 46.0f * uiScale, HIT_TOGGLE_INF_POWERUP);
+
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 182.0f * uiScale, cX1 - 14.0f * uiScale, y + 183.0f * uiScale, 0.5f, cDivider);
+
+                    float r4Y = y + 184.0f * uiScale;
+                    drawText("Flight Everywhere (Red Star)", cX0 + 14.0f * uiScale, r4Y + 18.0f * uiScale, 0.36f * uiScale, cTextPrimary, 0);
+                    drawText("Soar in any galaxy using Red Star suit", cX0 + 14.0f * uiScale, r4Y + 34.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
+                    drawM3Switch(cX1 - swW - 14.0f * uiScale, r4Y + 8.0f * uiScale, swW, swH, mSwAnimFlightEverywhere);
+                    pushDeckHit(cX0 + 8.0f * uiScale, r4Y, cX1 - 8.0f * uiScale, y + ch - 4.0f * uiScale, HIT_TOGGLE_FLIGHT);
+                    (void)cw;
+                });
+
+                placeCard(0, 110.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
+                    drawSectionTitle(cX0, y, "PLAYER CHARACTER (MARIO / LUIGI)", cHeader, true);
+                    drawText("Switch hero anytime in solo or co-op multiplayer", cX0 + 14.0f * uiScale, y + 42.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
+
+                    float mBtnY = y + 54.0f * uiScale;
+                    float mBtnW = (cw - 36.0f * uiScale) * 0.5f;
+                    bool isLuigi = (mSettings.playerCharacter != 0);
+
+                    drawGlossyBtn(cX0 + 14.0f * uiScale, mBtnY, cX0 + 14.0f * uiScale + mBtnW, mBtnY + 40.0f * uiScale, 14.0f * uiScale,
+                                  !isLuigi ? rgba(1.0f, 0.52f, 0.52f, 0.90f) : rgba(0.32f, 0.45f, 0.72f, 0.45f),
+                                  !isLuigi ? rgba(0.78f, 0.16f, 0.18f, 0.98f) : rgba(0.09f, 0.14f, 0.32f, 0.92f),
+                                  "MARIO", !isLuigi ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.72f, 0.80f, 0.94f, 0.85f), 0.34f);
+                    pushDeckHit(cX0 + 14.0f * uiScale, mBtnY, cX0 + 14.0f * uiScale + mBtnW, mBtnY + 40.0f * uiScale, HIT_SEG_CHARACTER, 0);
+
+                    drawGlossyBtn(cX1 - 14.0f * uiScale - mBtnW, mBtnY, cX1 - 14.0f * uiScale, mBtnY + 40.0f * uiScale, 14.0f * uiScale,
+                                  isLuigi ? rgba(0.45f, 0.95f, 0.62f, 0.90f) : rgba(0.32f, 0.45f, 0.72f, 0.45f),
+                                  isLuigi ? rgba(0.12f, 0.56f, 0.24f, 0.98f) : rgba(0.09f, 0.14f, 0.32f, 0.92f),
+                                  "LUIGI", isLuigi ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.72f, 0.80f, 0.94f, 0.85f), 0.34f);
+                    pushDeckHit(cX1 - 14.0f * uiScale - mBtnW, mBtnY, cX1 - 14.0f * uiScale, mBtnY + 40.0f * uiScale, HIT_SEG_CHARACTER, 1);
+                });
+
+                placeCard(1, 174.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
+                    drawSectionTitle(cX0, y, "LIVE POWER-UP MORPH", cHeader, true);
+                    drawText("Tap any form to transform Mario/Luigi instantly", cX0 + 14.0f * uiScale, y + 40.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
+
+                    int curMode = port_get_current_powerup();
+                    struct PowerupItem { const char* label; int type; int playerMode; };
+                    static const PowerupItem kPowerupGrid[3][3] = {
+                        { {"Normal", 0, 0}, {"Fire", 5, 2}, {"Ice", 4, 3} },
+                        { {"Bee", 2, 4}, {"Flying", 6, 7}, {"Rainbow", 7, 1} },
+                        { {"Boo", 3, 6}, {"Spring", 1, 5}, {"+Life 6HP", 10, -1} }
+                    };
+
+                    float pStartX = cX0 + 14.0f * uiScale;
+                    float pillW = (cw - 28.0f * uiScale - 12.0f * uiScale) / 3.0f;
+                    float pillH = 34.0f * uiScale;
+                    float pillGapY = 6.0f * uiScale;
+
+                    for (int r = 0; r < 3; r++) {
+                        for (int c = 0; c < 3; c++) {
+                            const auto& item = kPowerupGrid[r][c];
+                            float px0 = pStartX + c * (pillW + 6.0f * uiScale);
+                            float px1 = px0 + pillW;
+                            float py0 = y + 50.0f * uiScale + r * (pillH + pillGapY);
+                            float py1 = py0 + pillH;
+                            bool isActive = (item.playerMode >= 0 && curMode == item.playerMode);
+                            Color rim = isActive ? rgba(1.0f, 0.86f, 0.32f, 0.98f) : rgba(0.32f, 0.56f, 0.88f, 0.50f);
+                            Color fill = isActive ? rgba(0.08f, 0.42f, 0.92f, 1.0f) : rgba(0.09f, 0.15f, 0.34f, 0.92f);
+                            drawGlossyBtn(px0, py0, px1, py1, 10.0f * uiScale, rim, fill, item.label, isActive ? rgba(1.0f, 0.98f, 0.80f, 1.0f) : rgba(0.84f, 0.90f, 1.0f, 0.92f), 0.30f);
+                            pushDeckHit(px0, py0, px1, py1, HIT_POWERUP_MORPH, item.type);
+                        }
                     }
+                });
 
-                    // Step ticks and short language codes
-                    for (int l = 0; l < 7; l++) {
-                        float stepX = trackX0 + ((float)l / 6.0f) * (trackX1 - trackX0);
-                        bool isCur = (l == curLang);
-                        Color dotCol = (l <= curLang) ? rgba(0.75f, 0.90f, 1.0f, 0.95f) : rgba(0.45f, 0.50f, 0.58f, 0.80f);
-                        drawCircle(stepX, trackY, 3.0f * uiScale, dotCol);
-                        Color codeCol = isCur ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : cTextSecondary;
-                        drawText(kLangCodes[l], stepX, y + 80.0f * uiScale, (isCur ? 0.30f : 0.25f) * uiScale, codeCol, 1);
-                    }
+                placeCard(1, 144.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorderGold);
+                    drawSectionTitle(cX0, y, "WARP OBSERVATORY & ABILITIES", cGold, true);
 
-                    // Slider thumb knob
-                    drawCircle(knobX, trackY, 11.0f * uiScale, rgba(0.220f, 0.741f, 0.969f, 0.98f));
-                    drawCircle(knobX, trackY, 6.0f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f));
-                };
-                // =========================================================
-                // Tab 2: System (Vanilla) or Advanced (Plus)
-                // =========================================================
-                if (mPlusEdition) {
-                    // Plus Edition Advanced Tab
-                    // Card 1: Gameplay Cheats & Mods
-                    renderCardBlock(6.0f * uiScale, 284.0f * uiScale, [&](float y) {
-                        drawCard(cX0, y, cX1, y + 284.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+                    float btnW = 104.0f * uiScale;
+                    float btnH = 34.0f * uiScale;
+                    float r1Y = y + 36.0f * uiScale;
+                    drawText("Galaxy Warp Menu", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.35f * uiScale, cTextPrimary, 0);
+                    drawText("Teleport to any galaxy & scenario star", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
+                    drawGlossyBtn(cX1 - btnW - 14.0f * uiScale, r1Y + 5.0f * uiScale, cX1 - 14.0f * uiScale, r1Y + 5.0f * uiScale + btnH, 14.0f * uiScale,
+                                  rgba(1.0f, 0.86f, 0.32f, 0.95f), rgba(0.14f, 0.42f, 0.90f, 0.98f),
+                                  "Open Warp", rgba(1.0f, 0.98f, 0.84f, 1.0f), 0.31f);
+                    pushDeckHit(cX1 - btnW - 14.0f * uiScale, r1Y + 2.0f * uiScale, cX1 - 14.0f * uiScale, r1Y + 8.0f * uiScale + btnH, HIT_OPEN_WARP);
 
-                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                        drawText("GAMEPLAY CHEATS & MODS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 86.0f * uiScale, cX1 - 14.0f * uiScale, y + 87.0f * uiScale, 0.5f, cDivider);
 
-                        // Mod 1: Skip Cutscenes
-                        float r1Y = y + 34.0f * uiScale;
-                        drawText("Skip Cutscenes", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
-                        drawText("Bypass intro & story event cinematics", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
-                        drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimSkipCutscenes);
-
-                        drawRoundRect(cX0 + 14.0f * uiScale, y + 80.0f * uiScale, cX1 - 14.0f * uiScale, y + 81.0f * uiScale, 0.5f, cDivider);
-
-                        // Mod 2: Infinite Health
-                        float r2Y = y + 82.0f * uiScale;
-                        drawText("Infinite Health", cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
-                        drawText("Invulnerable Mario (locked at 6 HP max)", cX0 + 14.0f * uiScale, r2Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
-                        drawM3Switch(cX1 - swW - 14.0f * uiScale, r2Y + 8.0f * uiScale, swW, swH, mSwAnimInfiniteHp);
-
-                        drawRoundRect(cX0 + 14.0f * uiScale, y + 128.0f * uiScale, cX1 - 14.0f * uiScale, y + 129.0f * uiScale, 0.5f, cDivider);
-
-                        // Mod 3: Infinite Powerup
-                        float r3Y = y + 130.0f * uiScale;
-                        drawText("Infinite Power-Up Duration", cX0 + 14.0f * uiScale, r3Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
-                        drawText("Never lose Fire, Bee, Boo, Ice timer", cX0 + 14.0f * uiScale, r3Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
-                        drawM3Switch(cX1 - swW - 14.0f * uiScale, r3Y + 8.0f * uiScale, swW, swH, mSwAnimInfinitePowerup);
-
-                        drawRoundRect(cX0 + 14.0f * uiScale, y + 176.0f * uiScale, cX1 - 14.0f * uiScale, y + 177.0f * uiScale, 0.5f, cDivider);
-
-                        // Mod 4: Haptic Feedback
-                        float r4Y = y + 178.0f * uiScale;
-                        drawText("Tactile Haptic Feedback", cX0 + 14.0f * uiScale, r4Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
-                        drawText("Vibrations on button presses & gameplay events", cX0 + 14.0f * uiScale, r4Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
-                        drawM3Switch(cX1 - swW - 14.0f * uiScale, r4Y + 8.0f * uiScale, swW, swH, mSwAnimHaptics);
-
-                        drawRoundRect(cX0 + 14.0f * uiScale, y + 224.0f * uiScale, cX1 - 14.0f * uiScale, y + 225.0f * uiScale, 0.5f, cDivider);
-
-                        // Mod 5: Flight Everywhere (Red Star)
-                        float r5Y = y + 226.0f * uiScale;
-                        drawText("Flight Everywhere (Red Star)", cX0 + 14.0f * uiScale, r5Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
-                        drawText("Fly in all galaxies with the Red Star suit", cX0 + 14.0f * uiScale, r5Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
-                        drawM3Switch(cX1 - swW - 14.0f * uiScale, r5Y + 8.0f * uiScale, swW, swH, mSwAnimFlightEverywhere);
-                    });
-
-                    // Card 2: Live Power-Up Morph Switcher
-                    renderCardBlock(298.0f * uiScale, 158.0f * uiScale, [&](float y) {
-                        drawCard(cX0, y, cX1, y + 158.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
-
-                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                        drawText("LIVE POWER-UP SWITCHER", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
-                        drawText("Tap any form to morph Mario instantly during gameplay", cX0 + 14.0f * uiScale, y + 38.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
-
-                        int curMode = port_get_current_powerup();
-                        struct PowerupItem {
-                            const char* label;
-                            int type;
-                            int playerMode;
-                        };
-                        static const PowerupItem kPowerupGrid[3][3] = {
-                            { {"Normal", 0, 0}, {"Fire", 5, 2}, {"Ice", 4, 3} },
-                            { {"Bee", 2, 4}, {"Flying", 6, 7}, {"Rainbow", 7, 1} },
-                            { {"Boo", 3, 6}, {"Spring", 1, 5}, {"+Life 6HP", 10, -1} }
-                        };
-
-                        float pStartX = cX0 + 14.0f * uiScale;
-                        float pillW = (contentW - 28.0f * uiScale - 10.0f * uiScale) / 3.0f;
-                        float pillH = 30.0f * uiScale;
-                        float pillGapY = 5.0f * uiScale;
-
-                        for (int r = 0; r < 3; r++) {
-                            for (int c = 0; c < 3; c++) {
-                                const auto& item = kPowerupGrid[r][c];
-                                float px0 = pStartX + c * (pillW + 5.0f * uiScale);
-                                float px1 = px0 + pillW;
-                                float py0 = y + 46.0f * uiScale + r * (pillH + pillGapY);
-                                float py1 = py0 + pillH;
-                                bool isActive = (item.playerMode >= 0 && curMode == item.playerMode);
-
-                                Color pBg = isActive ? rgba(0.043f, 0.341f, 0.816f, 1.0f) : rgba(0.18f, 0.22f, 0.30f, 0.90f);
-                                Color pTxt = isActive ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.78f, 0.82f, 0.90f, 0.90f);
-                                drawRoundRect(px0, py0, px1, py1, 8.0f * uiScale, pBg);
-                                drawText(item.label, (px0 + px1) * 0.5f, py0 + 20.0f * uiScale, 0.31f * uiScale, pTxt, 1);
-                            }
-                        }
-                    });
-
-                    // Card 3: Stage Warp & Abilities
-                    renderCardBlock(470.0f * uiScale, 136.0f * uiScale, [&](float y) {
-                        drawCard(cX0, y, cX1, y + 136.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
-
-                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                        drawText("WARP & ABILITY UNLOCKS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
-
-                        // Row 1: Warp
-                        float r1Y = y + 34.0f * uiScale;
-                        drawText("Galaxy Warp Menu", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.36f * uiScale, cTextPrimary, 0);
-                        drawText("Instant stage selector with scenario stars", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
-
-                        float btnW = 90.0f * uiScale;
-                        float btnH = 32.0f * uiScale;
-                        drawRoundRect(cX1 - btnW - 14.0f * uiScale, r1Y + 6.0f * uiScale, cX1 - 14.0f * uiScale, r1Y + 6.0f * uiScale + btnH, 16.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 1.0f));
-                        drawText("Open Warp", cX1 - 14.0f * uiScale - btnW * 0.5f, r1Y + 26.0f * uiScale, 0.33f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
-
-                        drawRoundRect(cX0 + 14.0f * uiScale, y + 84.0f * uiScale, cX1 - 14.0f * uiScale, y + 85.0f * uiScale, 0.5f, cDivider);
-
-                        // Row 2: Early Spin
-                        float r2Y = y + 86.0f * uiScale;
-                        drawText("Early Spin Ability", cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, 0.36f * uiScale, cTextPrimary, 0);
-                        drawText("Unlock Spin attack & Launch Star usage early", cX0 + 14.0f * uiScale, r2Y + 34.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
-
-                        bool isSpinUnlocked = (port_is_spin_unlocked() != 0);
-                        float sBtnW = isSpinUnlocked ? 96.0f * uiScale : 90.0f * uiScale;
-                        Color sBtnBg = isSpinUnlocked ? rgba(0.14f, 0.48f, 0.26f, 0.95f) : rgba(0.043f, 0.341f, 0.816f, 1.0f);
-                        Color sBtnTxt = isSpinUnlocked ? rgba(0.85f, 1.0f, 0.88f, 1.0f) : rgba(1.0f, 1.0f, 1.0f, 1.0f);
-                        drawRoundRect(cX1 - sBtnW - 14.0f * uiScale, r2Y + 6.0f * uiScale, cX1 - 14.0f * uiScale, r2Y + 6.0f * uiScale + btnH, 16.0f * uiScale, sBtnBg);
-                        drawText(isSpinUnlocked ? "Unlocked" : "Unlock Spin", cX1 - 14.0f * uiScale - sBtnW * 0.5f, r2Y + 26.0f * uiScale, 0.33f * uiScale, sBtnTxt, 1);
-                    });
-
-                    // Card 3b: Player Character Switcher (Mario / Luigi)
-                    renderCardBlock(614.0f * uiScale, 96.0f * uiScale, [&](float y) {
-                        drawCard(cX0, y, cX1, y + 96.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
-
-                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                        drawText("PLAYER CHARACTER (MARIO / LUIGI)", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
-                        drawText("Switch character in solo or multiplayer (Host=Mario, Joiner=Luigi)", cX0 + 14.0f * uiScale, y + 38.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
-
-                        float mBtnY = y + 48.0f * uiScale;
-                        float mBtnW = (contentW - 36.0f * uiScale) * 0.5f;
-                        bool isLuigi = (mSettings.playerCharacter != 0);
-
-                        Color marioBg = !isLuigi ? rgba(0.75f, 0.16f, 0.18f, 0.95f) : rgba(0.165f, 0.180f, 0.215f, 0.90f);
-                        Color marioTxt = !isLuigi ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.70f, 0.74f, 0.80f, 0.80f);
-                        drawRoundRect(cX0 + 14.0f * uiScale, mBtnY, cX0 + 14.0f * uiScale + mBtnW, mBtnY + 36.0f * uiScale, 16.0f * uiScale, marioBg);
-                        drawText("MARIO", cX0 + 14.0f * uiScale + mBtnW * 0.5f, mBtnY + 23.0f * uiScale, 0.33f * uiScale, marioTxt, 1);
-
-                        Color luigiBg = isLuigi ? rgba(0.14f, 0.54f, 0.24f, 0.95f) : rgba(0.165f, 0.180f, 0.215f, 0.90f);
-                        Color luigiTxt = isLuigi ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.70f, 0.74f, 0.80f, 0.80f);
-                        drawRoundRect(cX1 - 14.0f * uiScale - mBtnW, mBtnY, cX1 - 14.0f * uiScale, mBtnY + 36.0f * uiScale, 16.0f * uiScale, luigiBg);
-                        drawText("LUIGI", cX1 - 14.0f * uiScale - mBtnW * 0.5f, mBtnY + 23.0f * uiScale, 0.33f * uiScale, luigiTxt, 1);
-                    });
-
-                    // Card 3c: Game Language Slider
-                    renderCardBlock(718.0f * uiScale, 96.0f * uiScale, drawLanguageSliderCard);
-
-                    // Card 4: System Info
-                    renderCardBlock(822.0f * uiScale, 80.0f * uiScale, [&](float y) {
-                        drawCard(cX0, y, cX1, y + 80.0f * uiScale, 18.0f * uiScale, rgba(0.165f, 0.180f, 0.215f, 0.95f), cCardBorder);
-
-                        drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "GalaxyMobile+ v0.7.7", rgba(0.38f, 0.28f, 0.08f, 0.95f), rgba(1.0f, 0.88f, 0.40f, 1.0f), rgba(0.988f, 0.827f, 0.302f, 1.0f));
-                        drawText("All-Star Edition • Native ARM64 • Vulkan/GLES3", cX0 + 16.0f * uiScale, y + 54.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
-                        drawText("Mods take effect in real-time during live gameplay.", cX0 + 16.0f * uiScale, y + 68.0f * uiScale, 0.24f * uiScale, rgba(0.55f, 0.60f, 0.70f, 0.75f), 0);
-                    });
-
-                    // Card 5: Support & Donations
-                    renderCardBlock(914.0f * uiScale, 116.0f * uiScale, [&](float y) {
-                        drawCard(cX0, y, cX1, y + 116.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
-
-                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, rgba(0.92f, 0.28f, 0.30f, 1.0f));
-                        drawText("SUPPORT & DONATIONS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, rgba(0.92f, 0.28f, 0.30f, 1.0f), 0);
-                        drawText("Support GalaxyMobile development on Ko-fi!", cX0 + 14.0f * uiScale, y + 38.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
-
-                        float btnY = y + 54.0f * uiScale;
-                        float btnH = 46.0f * uiScale;
-                        drawRoundRect(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + btnH, 16.0f * uiScale, rgba(0.92f, 0.28f, 0.30f, 0.95f));
-                        drawText("DONATE ON KO-FI (ko-fi.com/sebsies)", (cX0 + cX1) * 0.5f, btnY + 28.0f * uiScale, 0.33f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
-                    });
-
-                    // Card 6: Debug & Diagnostics
-                    renderCardBlock(1040.0f * uiScale, 116.0f * uiScale, [&](float y) {
-                        drawCard(cX0, y, cX1, y + 116.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
-
-                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                        drawText("DEBUG & DIAGNOSTICS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
-                        drawText("Export engine log & device info for troubleshooting", cX0 + 14.0f * uiScale, y + 38.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
-
-                        float btnY = y + 54.0f * uiScale;
-                        float btnH = 46.0f * uiScale;
-                        drawRoundRect(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + btnH, 16.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 0.95f));
-                        drawText("SHARE DEBUG LOG", (cX0 + cX1) * 0.5f, btnY + 28.0f * uiScale, 0.33f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
-                    });
-                } else {
-                    // Vanilla Edition System Tab
-                    // Card 1: Game Storage & Cooker Setup
-                    renderCardBlock(6.0f * uiScale, 126.0f * uiScale, [&](float y) {
-                        drawCard(cX0, y, cX1, y + 126.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
-
-                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                        drawText("GAME STORAGE & DUMP SETUP", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
-
-                        bool hasData = (port_has_game_data() != 0);
-                        if (hasData) {
-                            drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Ready (/sdcard/GalaxyData)", rgba(0.12f, 0.32f, 0.20f, 0.90f), rgba(0.50f, 0.95f, 0.60f, 1.0f), rgba(0.290f, 0.871f, 0.502f, 1.0f));
-                        } else {
-                            drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Missing - Setup Required", rgba(0.35f, 0.28f, 0.10f, 0.90f), rgba(1.0f, 0.85f, 0.40f, 1.0f), rgba(0.984f, 0.749f, 0.141f, 1.0f));
-                        }
-                        drawText("Select .rvz, .wbfs, .iso or .zip to install or re-cook.", cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
-
-                        float btnY = y + 84.0f * uiScale;
-                        drawRoundRect(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + 34.0f * uiScale, 16.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 0.95f));
-                        drawText("OPEN GAME INSTALLER & COOKER", (cX0 + cX1) * 0.5f, btnY + 22.0f * uiScale, 0.34f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
-                    });
-
-                    // Card 2: GalaxyMobile+ All-Star Edition Upgrade
-                    renderCardBlock(140.0f * uiScale, 126.0f * uiScale, [&](float y) {
-                        drawCard(cX0, y, cX1, y + 126.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
-
-                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, rgba(0.988f, 0.827f, 0.302f, 1.0f));
-                        drawText("GALAXYMOBILE+ ALL-STAR EDITION", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, rgba(0.988f, 0.827f, 0.302f, 1.0f), 0);
-
-                        bool plusInstalled = (port_is_plus_installed() != 0);
-                        if (plusInstalled) {
-                            drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Installed on Device", rgba(0.12f, 0.32f, 0.20f, 0.90f), rgba(0.50f, 0.95f, 0.60f, 1.0f), rgba(0.290f, 0.871f, 0.502f, 1.0f));
-                        } else {
-                            drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Bundled APK Ready (v0.7.7)", rgba(0.35f, 0.28f, 0.10f, 0.90f), rgba(1.0f, 0.85f, 0.40f, 1.0f), rgba(0.984f, 0.749f, 0.141f, 1.0f));
-                        }
-                        drawText("Includes Advanced Haptics, Cheats & Galaxy Warp.", cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
-
-                        float btnY = y + 84.0f * uiScale;
-                        Color pBtnBg = plusInstalled ? rgba(0.14f, 0.48f, 0.26f, 0.95f) : rgba(0.38f, 0.20f, 0.68f, 0.95f);
-                        drawRoundRect(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + 34.0f * uiScale, 16.0f * uiScale, pBtnBg);
-                        const char* pBtnTxt = plusInstalled ? "OPEN GALAXYMOBILE+" : "INSTALL GALAXYMOBILE+";
-                        drawText(pBtnTxt, (cX0 + cX1) * 0.5f, btnY + 22.0f * uiScale, 0.34f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
-                    });
-
-                    // Card 3: Vibration & Haptics
-                    renderCardBlock(274.0f * uiScale, 88.0f * uiScale, [&](float y) {
-                        drawCard(cX0, y, cX1, y + 88.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
-
-                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                        drawText("VIBRATION & HAPTICS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
-
-                        float r1Y = y + 34.0f * uiScale;
-                        drawText("Haptic Feedback", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.38f * uiScale, cTextPrimary, 0);
-                        drawText("Tactile vibration response on touch controls", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
-                        drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimHaptics);
-                    });
-
-                    // Card 3b: Game Language Slider
-                    renderCardBlock(370.0f * uiScale, 96.0f * uiScale, drawLanguageSliderCard);
-
-                    // Card 4: System Info
-                    renderCardBlock(474.0f * uiScale, 80.0f * uiScale, [&](float y) {
-                        drawCard(cX0, y, cX1, y + 80.0f * uiScale, 18.0f * uiScale, rgba(0.165f, 0.180f, 0.215f, 0.95f), cCardBorder);
-
-                        drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "GalaxyMobile v0.7.7", rgba(0.10f, 0.28f, 0.44f, 0.90f), rgba(0.40f, 0.85f, 1.0f, 1.0f), cHeader);
-                        drawText("Vanilla Edition • Native ARM64 • Vulkan/GLES3", cX0 + 16.0f * uiScale, y + 54.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
-                        drawText("Optimized for all Android 11+ Snapdragon & Dimensity chipsets.", cX0 + 16.0f * uiScale, y + 68.0f * uiScale, 0.24f * uiScale, rgba(0.55f, 0.60f, 0.70f, 0.75f), 0);
-                    });
-
-                    // Card 5: Support & Donations
-                    renderCardBlock(564.0f * uiScale, 116.0f * uiScale, [&](float y) {
-                        drawCard(cX0, y, cX1, y + 116.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
-
-                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, rgba(0.92f, 0.28f, 0.30f, 1.0f));
-                        drawText("SUPPORT & DONATIONS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, rgba(0.92f, 0.28f, 0.30f, 1.0f), 0);
-                        drawText("Support GalaxyMobile development on Ko-fi!", cX0 + 14.0f * uiScale, y + 38.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
-
-                        float btnY = y + 54.0f * uiScale;
-                        float btnH = 46.0f * uiScale;
-                        drawRoundRect(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + btnH, 16.0f * uiScale, rgba(0.92f, 0.28f, 0.30f, 0.95f));
-                        drawText("DONATE ON KO-FI (ko-fi.com/sebsies)", (cX0 + cX1) * 0.5f, btnY + 28.0f * uiScale, 0.33f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
-                    });
-
-                    // Card 6: Debug & Diagnostics
-                    renderCardBlock(690.0f * uiScale, 116.0f * uiScale, [&](float y) {
-                        drawCard(cX0, y, cX1, y + 116.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
-
-                        drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                        drawText("DEBUG & DIAGNOSTICS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
-                        drawText("Export engine log & device info for troubleshooting", cX0 + 14.0f * uiScale, y + 38.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
-
-                        float btnY = y + 54.0f * uiScale;
-                        float btnH = 46.0f * uiScale;
-                        drawRoundRect(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + btnH, 16.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 0.95f));
-                        drawText("SHARE DEBUG LOG", (cX0 + cX1) * 0.5f, btnY + 28.0f * uiScale, 0.33f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
-                    });
-                }
-            } else if (mSettingsTab == 3) {
-                // -------------------------------------------------------------
-                // Tab 3: Netplay (Local Wi-Fi LAN & Online Multiplayer)
-                // -------------------------------------------------------------
+                    float r2Y = y + 90.0f * uiScale;
+                    drawText("Early Spin Ability", cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, 0.35f * uiScale, cTextPrimary, 0);
+                    drawText("Unlock Spin & Launch Stars early", cX0 + 14.0f * uiScale, r2Y + 34.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
+                    bool isSpinUnlocked = (port_is_spin_unlocked() != 0);
+                    Color sRim = isSpinUnlocked ? rgba(0.45f, 0.95f, 0.65f, 0.90f) : rgba(0.32f, 0.78f, 0.99f, 0.85f);
+                    Color sBg = isSpinUnlocked ? rgba(0.12f, 0.52f, 0.28f, 0.98f) : rgba(0.06f, 0.38f, 0.86f, 0.98f);
+                    drawGlossyBtn(cX1 - btnW - 14.0f * uiScale, r2Y + 5.0f * uiScale, cX1 - 14.0f * uiScale, r2Y + 5.0f * uiScale + btnH, 14.0f * uiScale,
+                                  sRim, sBg, isSpinUnlocked ? "Unlocked" : "Unlock Spin", rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.31f);
+                    pushDeckHit(cX1 - btnW - 14.0f * uiScale, r2Y + 2.0f * uiScale, cX1 - 14.0f * uiScale, r2Y + 8.0f * uiScale + btnH, HIT_UNLOCK_SPIN);
+                    (void)cw;
+                });
+            } else if (mPlusEdition && mSettingsTab == 3) {
+                // =====================================================
+                // Tab 3 (Plus): Netplay (Wi-Fi LAN & Online Multiplayer)
+                // =====================================================
                 bool isConn = (port_net_is_connected() != 0);
                 int netRole = port_net_get_role();
                 int netMode = port_net_get_mode();
@@ -3186,250 +2989,414 @@ void UIOverlay::render(int screenW, int screenH) {
                 const char* peerIp = port_net_get_peer_ip();
                 const char* localIp = port_net_get_local_ip();
 
-                // Card 1: Network Connection Status & Live Metrics (H = 110)
-                renderCardBlock(6.0f * uiScale, 110.0f * uiScale, [&](float y) {
-                    drawCard(cX0, y, cX1, y + 110.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
-
-                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, isConn ? rgba(0.290f, 0.871f, 0.502f, 1.0f) : cHeader);
-                    drawText("MULTIPLAYER STATUS", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
+                placeCard(0, 114.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, isConn ? sc(rgba(0.35f, 0.92f, 0.56f, 0.65f)) : cCardBorder);
+                    drawSectionTitle(cX0, y, "MULTIPLAYER STATUS", isConn ? sc(rgba(0.35f, 0.92f, 0.56f, 1.0f)) : cHeader, true);
 
                     if (isConn) {
                         char statusBuf[64];
                         snprintf(statusBuf, sizeof(statusBuf), "Connected (%s)", (netRole == 1) ? "Host" : "Client");
                         drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, statusBuf,
-                                       rgba(0.12f, 0.32f, 0.20f, 0.90f), rgba(0.50f, 0.95f, 0.60f, 1.0f), rgba(0.290f, 0.871f, 0.502f, 1.0f));
-
+                                       sc(rgba(0.12f, 0.36f, 0.22f, 0.90f)), sc(rgba(0.55f, 0.98f, 0.65f, 1.0f)), sc(rgba(0.290f, 0.871f, 0.502f, 1.0f)));
                         char pingBuf[32];
                         snprintf(pingBuf, sizeof(pingBuf), "%d ms", ping);
-                        drawStatusChip(cX0 + 180.0f * uiScale, y + 36.0f * uiScale, pingBuf,
-                                       rgba(0.14f, 0.24f, 0.36f, 0.90f), rgba(0.60f, 0.85f, 1.0f, 1.0f), cHeader);
+                        drawStatusChip(cX0 + 178.0f * uiScale, y + 36.0f * uiScale, pingBuf,
+                                       sc(rgba(0.14f, 0.26f, 0.42f, 0.90f)), sc(rgba(0.65f, 0.88f, 1.0f, 1.0f)), cHeader);
 
                         char peerBuf[64];
                         snprintf(peerBuf, sizeof(peerBuf), "Peer: %s", (peerIp && *peerIp) ? peerIp : "Unknown");
-                        drawText(peerBuf, cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+                        drawText(peerBuf, cX0 + 14.0f * uiScale, y + 84.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
 
                         float dcBtnY = y + 70.0f * uiScale;
-                        drawRoundRect(cX1 - 110.0f * uiScale, dcBtnY, cX1 - 14.0f * uiScale, dcBtnY + 30.0f * uiScale, 14.0f * uiScale, rgba(0.55f, 0.15f, 0.15f, 0.95f));
-                        drawText("DISCONNECT", cX1 - 62.0f * uiScale, dcBtnY + 20.0f * uiScale, 0.28f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
-                    } else if (netRole == 1) { // Hosting
+                        drawGlossyBtn(cX1 - 112.0f * uiScale, dcBtnY, cX1 - 14.0f * uiScale, dcBtnY + 32.0f * uiScale, 13.0f * uiScale,
+                                      rgba(0.95f, 0.48f, 0.48f, 0.85f), rgba(0.62f, 0.15f, 0.18f, 0.96f),
+                                      "DISCONNECT", rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.27f);
+                        pushDeckHit(cX1 - 112.0f * uiScale, dcBtnY, cX1 - 14.0f * uiScale, dcBtnY + 32.0f * uiScale, HIT_NET_DISCONNECT);
+                    } else if (netRole == 1) {
                         drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Hosting • Port 24601",
-                                       rgba(0.38f, 0.28f, 0.08f, 0.95f), rgba(1.0f, 0.88f, 0.40f, 1.0f), rgba(0.988f, 0.827f, 0.302f, 1.0f));
-
+                                       sc(rgba(0.38f, 0.28f, 0.08f, 0.95f)), sc(rgba(1.0f, 0.90f, 0.42f, 1.0f)), cGold);
                         char localBuf[64];
                         snprintf(localBuf, sizeof(localBuf), "Local IP: %s (Beacon active)", (localIp && *localIp) ? localIp : "127.0.0.1");
-                        drawText(localBuf, cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+                        drawText(localBuf, cX0 + 14.0f * uiScale, y + 84.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
 
                         float stopBtnY = y + 70.0f * uiScale;
-                        drawRoundRect(cX1 - 100.0f * uiScale, stopBtnY, cX1 - 14.0f * uiScale, stopBtnY + 30.0f * uiScale, 14.0f * uiScale, rgba(0.55f, 0.15f, 0.15f, 0.95f));
-                        drawText("STOP", cX1 - 57.0f * uiScale, stopBtnY + 20.0f * uiScale, 0.28f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                        drawGlossyBtn(cX1 - 96.0f * uiScale, stopBtnY, cX1 - 14.0f * uiScale, stopBtnY + 32.0f * uiScale, 13.0f * uiScale,
+                                      rgba(0.95f, 0.48f, 0.48f, 0.85f), rgba(0.62f, 0.15f, 0.18f, 0.96f),
+                                      "STOP", rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.28f);
+                        pushDeckHit(cX1 - 96.0f * uiScale, stopBtnY, cX1 - 14.0f * uiScale, stopBtnY + 32.0f * uiScale, HIT_NET_DISCONNECT);
                     } else {
                         drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Offline / Ready",
-                                       rgba(0.18f, 0.20f, 0.25f, 0.90f), rgba(0.70f, 0.74f, 0.80f, 1.0f), rgba(0.50f, 0.54f, 0.60f, 1.0f));
-
+                                       sc(rgba(0.14f, 0.20f, 0.36f, 0.90f)), sc(rgba(0.75f, 0.82f, 0.95f, 1.0f)), rgba(0.55f, 0.65f, 0.85f, 1.0f * oa));
                         char localBuf[64];
                         snprintf(localBuf, sizeof(localBuf), "Local IP: %s", (localIp && *localIp) ? localIp : "127.0.0.1");
-                        drawText(localBuf, cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
-                        drawText("Host a room or join a friend on Wi-Fi or Online.", cX0 + 14.0f * uiScale, y + 92.0f * uiScale, 0.24f * uiScale, rgba(0.55f, 0.60f, 0.70f, 0.75f), 0);
+                        drawText(localBuf, cX0 + 14.0f * uiScale, y + 76.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+                        drawText("Host a room or join a friend on Wi-Fi or Hotspot.", cX0 + 14.0f * uiScale, y + 96.0f * uiScale, 0.24f * uiScale, cTextSecondary, 0);
                     }
+                    (void)cw;
                 });
 
-                // Card 2: Multiplayer Mode & Character Selection (H = 132)
-                renderCardBlock(124.0f * uiScale, 132.0f * uiScale, [&](float y) {
-                    drawCard(cX0, y, cX1, y + 132.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+                placeCard(0, 136.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
+                    drawSectionTitle(cX0, y, "GAMEPLAY MODE & HERO", cHeader, false);
 
-                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                    drawText("GAMEPLAY MODE & CHARACTER", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
-
-                    float mBtnY = y + 32.0f * uiScale;
-                    float mBtnW = (contentW - 36.0f * uiScale) * 0.5f;
-
+                    float mBtnY = y + 34.0f * uiScale;
+                    float mBtnW = (cw - 36.0f * uiScale) * 0.5f;
                     bool isCoop = (netMode == 1);
-                    Color coopBg = isCoop ? rgba(0.043f, 0.341f, 0.816f, 0.95f) : rgba(0.165f, 0.180f, 0.215f, 0.90f);
-                    Color coopTxt = isCoop ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.70f, 0.74f, 0.80f, 0.80f);
-                    drawRoundRect(cX0 + 14.0f * uiScale, mBtnY, cX0 + 14.0f * uiScale + mBtnW, mBtnY + 36.0f * uiScale, 16.0f * uiScale, coopBg);
-                    drawText("Mario & Luigi Co-op", cX0 + 14.0f * uiScale + mBtnW * 0.5f, mBtnY + 23.0f * uiScale, 0.30f * uiScale, coopTxt, 1);
-
                     bool isCostar = (netMode == 2);
-                    Color csBg = isCostar ? rgba(0.38f, 0.20f, 0.68f, 0.95f) : rgba(0.165f, 0.180f, 0.215f, 0.90f);
-                    Color csTxt = isCostar ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.70f, 0.74f, 0.80f, 0.80f);
-                    drawRoundRect(cX1 - 14.0f * uiScale - mBtnW, mBtnY, cX1 - 14.0f * uiScale, mBtnY + 36.0f * uiScale, 16.0f * uiScale, csBg);
-                    drawText("Co-Star Assist Mode", cX1 - 14.0f * uiScale - mBtnW * 0.5f, mBtnY + 23.0f * uiScale, 0.30f * uiScale, csTxt, 1);
 
-                    drawRoundRect(cX0 + 14.0f * uiScale, y + 76.0f * uiScale, cX1 - 14.0f * uiScale, y + 77.0f * uiScale, 0.5f, cDivider);
+                    drawGlossyBtn(cX0 + 14.0f * uiScale, mBtnY, cX0 + 14.0f * uiScale + mBtnW, mBtnY + 36.0f * uiScale, 14.0f * uiScale,
+                                  isCoop ? rgba(0.32f, 0.78f, 0.99f, 0.92f) : rgba(0.32f, 0.45f, 0.72f, 0.45f),
+                                  isCoop ? rgba(0.06f, 0.38f, 0.86f, 0.98f) : rgba(0.09f, 0.14f, 0.32f, 0.92f),
+                                  "Mario & Luigi Co-op", isCoop ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.72f, 0.80f, 0.94f, 0.85f), 0.28f);
+                    pushDeckHit(cX0 + 14.0f * uiScale, mBtnY, cX0 + 14.0f * uiScale + mBtnW, mBtnY + 36.0f * uiScale, HIT_SEG_NET_MODE, 1);
 
-                    float cBtnY = y + 84.0f * uiScale;
+                    drawGlossyBtn(cX1 - 14.0f * uiScale - mBtnW, mBtnY, cX1 - 14.0f * uiScale, mBtnY + 36.0f * uiScale, 14.0f * uiScale,
+                                  isCostar ? rgba(0.78f, 0.52f, 1.0f, 0.92f) : rgba(0.32f, 0.45f, 0.72f, 0.45f),
+                                  isCostar ? rgba(0.42f, 0.20f, 0.74f, 0.98f) : rgba(0.09f, 0.14f, 0.32f, 0.92f),
+                                  "Co-Star Assist Mode", isCostar ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.72f, 0.80f, 0.94f, 0.85f), 0.28f);
+                    pushDeckHit(cX1 - 14.0f * uiScale - mBtnW, mBtnY, cX1 - 14.0f * uiScale, mBtnY + 36.0f * uiScale, HIT_SEG_NET_MODE, 2);
+
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 78.0f * uiScale, cX1 - 14.0f * uiScale, y + 79.0f * uiScale, 0.5f, cDivider);
+
+                    float cBtnY = y + 86.0f * uiScale;
                     bool isLuigi = (mSettings.playerCharacter != 0);
-                    Color marioBg = !isLuigi ? rgba(0.75f, 0.16f, 0.18f, 0.95f) : rgba(0.165f, 0.180f, 0.215f, 0.90f);
-                    Color marioTxt = !isLuigi ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.70f, 0.74f, 0.80f, 0.80f);
-                    drawRoundRect(cX0 + 14.0f * uiScale, cBtnY, cX0 + 14.0f * uiScale + mBtnW, cBtnY + 36.0f * uiScale, 16.0f * uiScale, marioBg);
-                    drawText("Play as MARIO (Host)", cX0 + 14.0f * uiScale + mBtnW * 0.5f, cBtnY + 23.0f * uiScale, 0.29f * uiScale, marioTxt, 1);
+                    drawGlossyBtn(cX0 + 14.0f * uiScale, cBtnY, cX0 + 14.0f * uiScale + mBtnW, cBtnY + 36.0f * uiScale, 14.0f * uiScale,
+                                  !isLuigi ? rgba(1.0f, 0.52f, 0.52f, 0.90f) : rgba(0.32f, 0.45f, 0.72f, 0.45f),
+                                  !isLuigi ? rgba(0.78f, 0.16f, 0.18f, 0.98f) : rgba(0.09f, 0.14f, 0.32f, 0.92f),
+                                  "MARIO (Host)", !isLuigi ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.72f, 0.80f, 0.94f, 0.85f), 0.29f);
+                    pushDeckHit(cX0 + 14.0f * uiScale, cBtnY, cX0 + 14.0f * uiScale + mBtnW, cBtnY + 36.0f * uiScale, HIT_SEG_CHARACTER, 0);
 
-                    Color luigiBg = isLuigi ? rgba(0.14f, 0.54f, 0.24f, 0.95f) : rgba(0.165f, 0.180f, 0.215f, 0.90f);
-                    Color luigiTxt = isLuigi ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.70f, 0.74f, 0.80f, 0.80f);
-                    drawRoundRect(cX1 - 14.0f * uiScale - mBtnW, cBtnY, cX1 - 14.0f * uiScale, cBtnY + 36.0f * uiScale, 16.0f * uiScale, luigiBg);
-                    drawText("Play as LUIGI (Joiner)", cX1 - 14.0f * uiScale - mBtnW * 0.5f, cBtnY + 23.0f * uiScale, 0.29f * uiScale, luigiTxt, 1);
+                    drawGlossyBtn(cX1 - 14.0f * uiScale - mBtnW, cBtnY, cX1 - 14.0f * uiScale, cBtnY + 36.0f * uiScale, 14.0f * uiScale,
+                                  isLuigi ? rgba(0.45f, 0.95f, 0.62f, 0.90f) : rgba(0.32f, 0.45f, 0.72f, 0.45f),
+                                  isLuigi ? rgba(0.12f, 0.56f, 0.24f, 0.98f) : rgba(0.09f, 0.14f, 0.32f, 0.92f),
+                                  "LUIGI (Joiner)", isLuigi ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.72f, 0.80f, 0.94f, 0.85f), 0.29f);
+                    pushDeckHit(cX1 - 14.0f * uiScale - mBtnW, cBtnY, cX1 - 14.0f * uiScale, cBtnY + 36.0f * uiScale, HIT_SEG_CHARACTER, 1);
                 });
 
-                // Card 3: Host a Room (H = 100)
-                renderCardBlock(264.0f * uiScale, 100.0f * uiScale, [&](float y) {
-                    drawCard(cX0, y, cX1, y + 100.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
-
-                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, rgba(0.988f, 0.827f, 0.302f, 1.0f));
-                    drawText("HOST A GAME ROOM", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, rgba(0.988f, 0.827f, 0.302f, 1.0f), 0);
-
-                    drawText("Beacons room to Wi-Fi / Hotspot & listens on UDP port 24601.", cX0 + 14.0f * uiScale, y + 44.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
-
+                placeCard(0, 104.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorderGold);
+                    drawSectionTitle(cX0, y, "HOST A GAME ROOM", cGold, true);
+                    drawText("Broadcasts room on Wi-Fi / Hotspot (UDP 24601)", cX0 + 14.0f * uiScale, y + 44.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
                     float hBtnY = y + 56.0f * uiScale;
                     bool hosting = (netRole == 1);
-                    Color hBtnBg = hosting ? rgba(0.48f, 0.18f, 0.18f, 0.95f) : rgba(0.043f, 0.341f, 0.816f, 0.95f);
-                    drawRoundRect(cX0 + 14.0f * uiScale, hBtnY, cX1 - 14.0f * uiScale, hBtnY + 34.0f * uiScale, 16.0f * uiScale, hBtnBg);
-                    const char* hBtnTxt = hosting ? "STOP HOSTING ROOM" : "START HOSTING ROOM (PORT 24601)";
-                    drawText(hBtnTxt, (cX0 + cX1) * 0.5f, hBtnY + 22.0f * uiScale, 0.33f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                    drawGlossyBtn(cX0 + 14.0f * uiScale, hBtnY, cX1 - 14.0f * uiScale, hBtnY + 36.0f * uiScale, 14.0f * uiScale,
+                                  hosting ? rgba(0.95f, 0.48f, 0.48f, 0.85f) : rgba(0.32f, 0.78f, 0.99f, 0.90f),
+                                  hosting ? rgba(0.55f, 0.16f, 0.18f, 0.96f) : rgba(0.06f, 0.38f, 0.86f, 0.98f),
+                                  hosting ? "STOP HOSTING ROOM" : "START HOSTING ROOM (PORT 24601)", rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.31f);
+                    pushDeckHit(cX0 + 14.0f * uiScale, hBtnY, cX1 - 14.0f * uiScale, hBtnY + 36.0f * uiScale, HIT_NET_HOST_TOGGLE);
+                    (void)cw;
                 });
 
-                // Card 4: Discovered LAN Rooms (H = 190)
-                renderCardBlock(372.0f * uiScale, 190.0f * uiScale, [&](float y) {
-                    drawCard(cX0, y, cX1, y + 190.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
+                placeCard(1, 196.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
+                    drawSectionTitle(cX0, y, "DISCOVERED LAN ROOMS", cHeader, false);
 
-                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                    drawText("DISCOVERED LAN ROOMS (WI-FI / HOTSPOT)", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.30f * uiScale, cHeader, 0);
-
-                    // Reload / Refresh Discovery Button on top-right of card
-                    float rBtnW = 76.0f * uiScale;
-                    float rBtnH = 24.0f * uiScale;
+                    float rBtnW = 78.0f * uiScale;
+                    float rBtnH = 26.0f * uiScale;
                     float rBtnX1 = cX1 - 14.0f * uiScale;
                     float rBtnX0 = rBtnX1 - rBtnW;
                     float rBtnY0 = y + 8.0f * uiScale;
-                    float rBtnY1 = rBtnY0 + rBtnH;
-                    drawRoundRect(rBtnX0, rBtnY0, rBtnX1, rBtnY1, 12.0f * uiScale, rgba(0.18f, 0.28f, 0.44f, 0.95f));
-                    drawText("RELOAD", (rBtnX0 + rBtnX1) * 0.5f, rBtnY0 + 16.0f * uiScale, 0.26f * uiScale, rgba(0.85f, 0.92f, 1.0f, 1.0f), 1);
+                    drawGlossyBtn(rBtnX0, rBtnY0, rBtnX1, rBtnY0 + rBtnH, 11.0f * uiScale,
+                                  rgba(0.35f, 0.78f, 0.98f, 0.75f), rgba(0.14f, 0.28f, 0.56f, 0.96f),
+                                  "RELOAD", rgba(0.88f, 0.95f, 1.0f, 1.0f), 0.26f);
+                    pushDeckHit(rBtnX0, rBtnY0, rBtnX1, rBtnY0 + rBtnH, HIT_NET_REFRESH);
 
                     PortLanHostInfo hosts[3];
                     int numHosts = port_net_get_lan_hosts(hosts, 3);
                     if (numHosts == 0) {
-                        drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Searching LAN for active rooms...",
-                                       rgba(0.18f, 0.20f, 0.25f, 0.90f), rgba(0.70f, 0.74f, 0.80f, 1.0f), rgba(0.50f, 0.54f, 0.60f, 1.0f));
-                        drawText("Make sure both devices are on the same Wi-Fi or Hotspot.", cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
-                        drawText("Host must tap 'Start Hosting Room' above.", cX0 + 14.0f * uiScale, y + 92.0f * uiScale, 0.24f * uiScale, rgba(0.55f, 0.60f, 0.70f, 0.75f), 0);
+                        drawStatusChip(cX0 + 14.0f * uiScale, y + 40.0f * uiScale, "Searching LAN for active rooms...",
+                                       sc(rgba(0.14f, 0.20f, 0.36f, 0.90f)), sc(rgba(0.75f, 0.82f, 0.95f, 1.0f)), cHeader);
+                        drawText("Both devices must be on the same Wi-Fi or Hotspot.", cX0 + 14.0f * uiScale, y + 82.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
+                        drawText("Host must tap 'Start Hosting Room' on the left.", cX0 + 14.0f * uiScale, y + 102.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
                     } else {
                         for (int hIdx = 0; hIdx < numHosts; hIdx++) {
-                            float rowY = y + 36.0f * uiScale + hIdx * 48.0f * uiScale;
-                            drawRoundRect(cX0 + 14.0f * uiScale, rowY, cX1 - 14.0f * uiScale, rowY + 42.0f * uiScale, 12.0f * uiScale, rgba(0.141f, 0.153f, 0.180f, 0.95f));
-
-                            drawText(hosts[hIdx].name, cX0 + 24.0f * uiScale, rowY + 18.0f * uiScale, 0.31f * uiScale, cTextPrimary, 0);
+                            float rowY = y + 40.0f * uiScale + hIdx * 48.0f * uiScale;
+                            drawRoundRect(cX0 + 14.0f * uiScale, rowY, cX1 - 14.0f * uiScale, rowY + 42.0f * uiScale, 12.0f * uiScale, sc(rgba(0.08f, 0.15f, 0.36f, 0.96f)));
+                            drawText(hosts[hIdx].name, cX0 + 24.0f * uiScale, rowY + 18.0f * uiScale, 0.30f * uiScale, cTextPrimary, 0);
                             char infoStr[64];
                             snprintf(infoStr, sizeof(infoStr), "%s:%d • %s", hosts[hIdx].ip, hosts[hIdx].port, (hosts[hIdx].mode == 1) ? "Co-op" : "Co-Star");
                             drawText(infoStr, cX0 + 24.0f * uiScale, rowY + 34.0f * uiScale, 0.24f * uiScale, cTextSecondary, 0);
 
                             float jBtnX1 = cX1 - 22.0f * uiScale;
-                            float jBtnX0 = jBtnX1 - 70.0f * uiScale;
+                            float jBtnX0 = jBtnX1 - 72.0f * uiScale;
                             float jBtnY = rowY + 7.0f * uiScale;
-                            drawRoundRect(jBtnX0, jBtnY, jBtnX1, jBtnY + 28.0f * uiScale, 12.0f * uiScale, rgba(0.14f, 0.48f, 0.26f, 0.95f));
-                            drawText("JOIN", (jBtnX0 + jBtnX1) * 0.5f, jBtnY + 19.0f * uiScale, 0.30f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                            drawGlossyBtn(jBtnX0, jBtnY, jBtnX1, jBtnY + 28.0f * uiScale, 11.0f * uiScale,
+                                          rgba(0.45f, 0.95f, 0.65f, 0.90f), rgba(0.12f, 0.52f, 0.28f, 0.96f),
+                                          "JOIN", rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.28f);
+                            pushDeckHit(jBtnX0, jBtnY, jBtnX1, jBtnY + 28.0f * uiScale, HIT_NET_JOIN_HOST, hIdx);
                         }
                     }
+                    (void)cw;
                 });
 
-                // Card 5: Direct Online Connect (H = 110)
-                renderCardBlock(570.0f * uiScale, 110.0f * uiScale, [&](float y) {
-                    drawCard(cX0, y, cX1, y + 110.0f * uiScale, 18.0f * uiScale, cCardBg, cCardBorder);
-
-                    drawCircle(cX0 + 16.0f * uiScale, y + 20.0f * uiScale, 4.0f * uiScale, cHeader);
-                    drawText("DIRECT IP CONNECT (ONLINE / HOTSPOT)", cX0 + 26.0f * uiScale, y + 23.0f * uiScale, 0.32f * uiScale, cHeader, 0);
-
-                    drawText("Connect to remote host via IP:Port or Hotspot gateway.", cX0 + 14.0f * uiScale, y + 44.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
-
+                placeCard(1, 112.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
+                    drawSectionTitle(cX0, y, "DIRECT IP CONNECT (HOTSPOT)", cHeader, false);
+                    drawText("Connect directly to Hotspot gateway host", cX0 + 14.0f * uiScale, y + 44.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
                     float cBtnY = y + 58.0f * uiScale;
-                    drawRoundRect(cX0 + 14.0f * uiScale, cBtnY, cX1 - 14.0f * uiScale, cBtnY + 36.0f * uiScale, 16.0f * uiScale, rgba(0.18f, 0.32f, 0.55f, 0.95f));
-                    drawText("CONNECT TO LOCAL GATEWAY (192.168.43.1)", (cX0 + cX1) * 0.5f, cBtnY + 23.0f * uiScale, 0.30f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                    drawGlossyBtn(cX0 + 14.0f * uiScale, cBtnY, cX1 - 14.0f * uiScale, cBtnY + 38.0f * uiScale, 14.0f * uiScale,
+                                  rgba(0.32f, 0.78f, 0.99f, 0.75f), rgba(0.14f, 0.30f, 0.62f, 0.96f),
+                                  "CONNECT TO GATEWAY (192.168.43.1)", rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.29f);
+                    pushDeckHit(cX0 + 14.0f * uiScale, cBtnY, cX1 - 14.0f * uiScale, cBtnY + 38.0f * uiScale, HIT_NET_DIRECT_CONNECT);
+                    (void)cw;
                 });
 
-                // Card 6: Info & Guidance (H = 80)
-                renderCardBlock(688.0f * uiScale, 80.0f * uiScale, [&](float y) {
-                    drawCard(cX0, y, cX1, y + 80.0f * uiScale, 18.0f * uiScale, rgba(0.165f, 0.180f, 0.215f, 0.95f), cCardBorder);
-
-                    drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "Galaxy Netplay Core v1.0", rgba(0.38f, 0.28f, 0.08f, 0.95f), rgba(1.0f, 0.88f, 0.40f, 1.0f), rgba(0.988f, 0.827f, 0.302f, 1.0f));
-                    drawText("Ultra-low latency UDP protocol • Auto NAT & Broadcast", cX0 + 16.0f * uiScale, y + 54.0f * uiScale, 0.27f * uiScale, cTextSecondary, 0);
-                    drawText("Both players enjoy full 60 FPS gameplay synchronization.", cX0 + 16.0f * uiScale, y + 68.0f * uiScale, 0.24f * uiScale, rgba(0.55f, 0.60f, 0.70f, 0.75f), 0);
+                placeCard(1, 86.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBgAlt, cCardBorderGold);
+                    drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "Galaxy Netplay Core v1.0",
+                                   sc(rgba(0.38f, 0.28f, 0.08f, 0.95f)), sc(rgba(1.0f, 0.90f, 0.42f, 1.0f)), cGold);
+                    drawText("Ultra-low latency UDP protocol • Auto LAN discovery", cX0 + 16.0f * uiScale, y + 54.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
+                    drawText("Both heroes enjoy synchronized 60 FPS cosmic gameplay.", cX0 + 16.0f * uiScale, y + 70.0f * uiScale, 0.24f * uiScale, sc(rgba(0.60f, 0.72f, 0.90f, 0.85f)), 0);
+                    (void)cw;
                 });
+            } else {
+                // =====================================================
+                // System Tab: Plus (Tab 4) & Vanilla (Tab 2)
+                // =====================================================
+                if (!mPlusEdition) {
+                    placeCard(0, 130.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                        drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
+                        drawSectionTitle(cX0, y, "GAME STORAGE & DUMP SETUP", cHeader, true);
+                        bool hasData = (port_has_game_data() != 0);
+                        if (hasData) {
+                            drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Ready (/sdcard/GalaxyData)", sc(rgba(0.10f, 0.34f, 0.22f, 0.90f)), sc(rgba(0.55f, 0.96f, 0.65f, 1.0f)), sc(rgba(0.290f, 0.871f, 0.502f, 1.0f)));
+                        } else {
+                            drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Missing - Setup Required", sc(rgba(0.36f, 0.28f, 0.10f, 0.90f)), sc(rgba(1.0f, 0.88f, 0.42f, 1.0f)), cGold);
+                        }
+                        drawText("Select .rvz, .wbfs, .iso or .zip to install or re-cook.", cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
+                        float btnY = y + 84.0f * uiScale;
+                        drawGlossyBtn(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + 36.0f * uiScale, 14.0f * uiScale,
+                                      rgba(0.32f, 0.78f, 0.99f, 0.85f), rgba(0.06f, 0.38f, 0.86f, 0.98f),
+                                      "OPEN GAME INSTALLER & COOKER", rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.31f);
+                        pushDeckHit(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + 36.0f * uiScale, HIT_OPEN_INSTALLER);
+                        (void)cw;
+                    });
+
+                    placeCard(0, 130.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                        drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorderGold);
+                        drawSectionTitle(cX0, y, "GALAXYMOBILE+ ALL-STAR EDITION", cGold, true);
+                        bool plusInstalled = (port_is_plus_installed() != 0);
+                        if (plusInstalled) {
+                            drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Installed on Device", sc(rgba(0.10f, 0.34f, 0.22f, 0.90f)), sc(rgba(0.55f, 0.96f, 0.65f, 1.0f)), sc(rgba(0.290f, 0.871f, 0.502f, 1.0f)));
+                        } else {
+                            drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Bundled APK Ready (v0.7.7)", sc(rgba(0.36f, 0.28f, 0.10f, 0.90f)), sc(rgba(1.0f, 0.88f, 0.42f, 1.0f)), cGold);
+                        }
+                        drawText("Includes Cheats, Netplay Co-op, Power-Ups & Galaxy Warp.", cX0 + 14.0f * uiScale, y + 74.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
+                        float btnY = y + 84.0f * uiScale;
+                        drawGlossyBtn(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + 36.0f * uiScale, 14.0f * uiScale,
+                                      plusInstalled ? rgba(0.45f, 0.95f, 0.65f, 0.90f) : rgba(0.82f, 0.58f, 1.0f, 0.90f),
+                                      plusInstalled ? rgba(0.12f, 0.52f, 0.28f, 0.98f) : rgba(0.40f, 0.20f, 0.72f, 0.98f),
+                                      plusInstalled ? "OPEN GALAXYMOBILE+" : "INSTALL GALAXYMOBILE+", rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.32f);
+                        pushDeckHit(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + 36.0f * uiScale, HIT_INSTALL_PLUS);
+                        (void)cw;
+                    });
+
+                    placeCard(0, 92.0f * uiScale, drawHapticsCard);
+                    placeCard(1, 102.0f * uiScale, drawLangSliderCard);
+
+                    placeCard(1, 88.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                        drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBgAlt, cCardBorder);
+                        drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "GalaxyMobile v0.7.7", sc(rgba(0.10f, 0.28f, 0.46f, 0.92f)), sc(rgba(0.45f, 0.88f, 1.0f, 1.0f)), cHeader);
+                        drawText("Vanilla Edition • Native ARM64 • GLES3 / Vulkan", cX0 + 16.0f * uiScale, y + 54.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+                        drawText("Tuned for Android 11+ Snapdragon & Dimensity devices.", cX0 + 16.0f * uiScale, y + 72.0f * uiScale, 0.24f * uiScale, sc(rgba(0.60f, 0.72f, 0.90f, 0.85f)), 0);
+                        (void)cw;
+                    });
+
+                    drawDonateAndLogCards(1);
+                } else {
+                    placeCard(0, 92.0f * uiScale, drawHapticsCard);
+                    placeCard(0, 102.0f * uiScale, drawLangSliderCard);
+
+                    placeCard(0, 96.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                        drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBgAlt, cCardBorderGold);
+                        drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "GalaxyMobile+ v0.7.7", sc(rgba(0.38f, 0.28f, 0.08f, 0.95f)), sc(rgba(1.0f, 0.90f, 0.42f, 1.0f)), cGold);
+                        drawText("All-Star Edition • Native ARM64 • GLES3 / Vulkan", cX0 + 16.0f * uiScale, y + 54.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
+                        drawText("Mods, Power-Ups, Warp & Netplay run live in-engine.", cX0 + 16.0f * uiScale, y + 72.0f * uiScale, 0.24f * uiScale, sc(rgba(0.60f, 0.72f, 0.90f, 0.85f)), 0);
+                        (void)cw;
+                    });
+
+                    drawDonateAndLogCards(1);
+                }
             }
 
-            // Scrollbar Thumb (rendered inside content area)
-            if (maxScroll > 1.0f) {
-                float trackH = contentBottom - contentTop;
-                float thumbH = std::max(28.0f * uiScale, trackH * (trackH / totalContentH));
-                float thumbY = contentTop + (mDrawerScrollY / maxScroll) * (trackH - thumbH);
-                drawRoundRect(drawerX + drawerW - 5.0f * uiScale, thumbY, drawerX + drawerW - 2.0f * uiScale, thumbY + thumbH, 1.5f * uiScale, rgba(0.85f, 0.92f, 1.0f, 0.40f));
+            float totalContentH = (twoCol ? std::max(colY[0], colY[1]) : colY[0]) + 8.0f * uiScale;
+            mSettingsMaxScroll = std::max(0.0f, totalContentH - visibleDeckH);
+            mDrawerScrollY = std::max(0.0f, std::min(mDrawerScrollY, mSettingsMaxScroll));
+            mDrawerScrollTarget = std::max(0.0f, std::min(mDrawerScrollTarget, mSettingsMaxScroll));
+
+            if (mSettingsMaxScroll > 1.0f) {
+                float thumbH = std::max(28.0f * uiScale, visibleDeckH * (visibleDeckH / totalContentH));
+                float thumbY = mDeckTopY + (mDrawerScrollY / mSettingsMaxScroll) * (visibleDeckH - thumbH);
+                drawRoundRect(deckX1 - 4.0f * uiScale, thumbY, deckX1, thumbY + thumbH, 2.0f * uiScale, rgba(0.45f, 0.85f, 1.0f, 0.48f * oa));
+            }
+        }
+
+        // ---------------------------------------------------------
+        // B. Fixed Header Backdrop & Bottom Frame Mask (Clips scrolled cards cleanly)
+        // ---------------------------------------------------------
+        addGradRect(0.0f, 0.0f, w, headerH,
+                    rgba(0.022f, 0.042f, 0.155f, 0.99f * oa),
+                    rgba(0.045f, 0.088f, 0.255f, 0.98f * oa));
+        drawRoundRect(0.0f, headerH - 2.0f * uiScale, w, headerH, 0.0f, rgba(0.28f, 0.78f, 0.99f, 0.55f * oa));
+        drawRoundRect(0.0f, headerH - 0.8f * uiScale, w, headerH, 0.0f, rgba(0.98f, 0.84f, 0.30f, 0.45f * oa));
+        drawRoundRect(0.0f, mDeckBottomY, w, h, 0.0f, rgba(0.024f, 0.045f, 0.145f, 0.96f * oa));
+
+        // ---------------------------------------------------------
+        // C. Top Observatory Command Header Controls (fixed == true)
+        // ---------------------------------------------------------
+        float closeBtnX = w - 34.0f * uiScale;
+        float closeBtnY = headerH * 0.5f;
+        drawCircle(closeBtnX, closeBtnY, 19.0f * uiScale, sc(rgba(0.28f, 0.68f, 0.98f, 0.55f)));
+        drawCircle(closeBtnX, closeBtnY, 17.5f * uiScale, sc(rgba(0.08f, 0.14f, 0.34f, 0.96f)));
+        drawCloseIcon(closeBtnX, closeBtnY, 9.0f * uiScale, sc(rgba(0.84f, 0.92f, 1.0f, 0.98f)));
+        pushFixedHit(closeBtnX - 24.0f * uiScale, closeBtnY - 24.0f * uiScale, closeBtnX + 24.0f * uiScale, closeBtnY + 24.0f * uiScale, HIT_CLOSE);
+
+        float doneW = 104.0f * uiScale;
+        float doneX1 = closeBtnX - 30.0f * uiScale;
+        float doneX0 = doneX1 - doneW;
+        drawGlossyBtn(doneX0, 15.0f * uiScale, doneX1, headerH - 15.0f * uiScale, 18.0f * uiScale,
+                      rgba(0.42f, 0.86f, 1.0f, 0.95f), rgba(0.06f, 0.40f, 0.90f, 0.98f),
+                      "Resume", rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.36f);
+        pushFixedHit(doneX0, 8.0f * uiScale, doneX1, headerH - 8.0f * uiScale, HIT_CLOSE);
+
+        if (mWarpMenuOpen) {
+            float backX0 = 18.0f * uiScale;
+            float backX1 = backX0 + 132.0f * uiScale;
+            drawGlossyBtn(backX0, 15.0f * uiScale, backX1, headerH - 15.0f * uiScale, 18.0f * uiScale,
+                          rgba(0.40f, 0.78f, 0.98f, 0.75f), rgba(0.10f, 0.22f, 0.48f, 0.96f),
+                          "< Observatory", rgba(0.92f, 0.96f, 1.0f, 1.0f), 0.33f);
+            pushFixedHit(backX0, 8.0f * uiScale, backX1, headerH - 8.0f * uiScale, HIT_WARP_BACK);
+
+            drawStar(backX1 + 26.0f * uiScale, headerH * 0.5f, 13.0f * uiScale, cGold, animPhase * 0.9f);
+            drawText("GALAXY WARP OBSERVATORY", backX1 + 46.0f * uiScale, headerH * 0.5f + 7.0f * uiScale, 0.46f * uiScale, cTextPrimary, 0);
+
+            // Top-right Launch shortcut in addition to Sidebar Launch Beacon
+            float lW = 134.0f * uiScale;
+            float lX1 = doneX0 - 12.0f * uiScale;
+            float lX0 = lX1 - lW;
+            drawGlossyBtn(lX0, 15.0f * uiScale, lX1, headerH - 15.0f * uiScale, 18.0f * uiScale,
+                          rgba(1.0f, 0.88f, 0.32f, 0.96f), rgba(0.14f, 0.44f, 0.92f, 0.98f),
+                          "Launch Warp", rgba(1.0f, 0.98f, 0.84f, 1.0f), 0.33f);
+            pushFixedHit(lX0, 8.0f * uiScale, lX1, headerH - 8.0f * uiScale, HIT_WARP_LAUNCH);
+        } else {
+            // Orbiting Power Star emblem + COMET OBSERVATORY title
+            float emblemX = 38.0f * uiScale;
+            float emblemY = headerH * 0.5f;
+            drawCircle(emblemX, emblemY, 17.0f * uiScale, rgba(1.0f, 0.84f, 0.24f, 0.16f * oa));
+            drawStar(emblemX, emblemY, 15.0f * uiScale, cGold, sinf(animPhase * 1.2f) * 0.16f);
+            drawText("COMET OBSERVATORY", emblemX + 26.0f * uiScale, headerH * 0.5f - 2.0f * uiScale, 0.46f * uiScale, cTextPrimary, 0);
+            const char* subEd = mPlusEdition ? "GalaxyMobile+  •  All-Star Observatory" : "GalaxyMobile  •  Observatory Settings";
+            drawText(subEd, emblemX + 27.0f * uiScale, headerH * 0.5f + 16.0f * uiScale, 0.26f * uiScale, mPlusEdition ? cGold : cHeader, 0);
+
+            // Version Pill Badge next to subtitle/title
+            float badgeX = emblemX + 276.0f * uiScale;
+            drawRoundRect(badgeX, 17.0f * uiScale, badgeX + 62.0f * uiScale, 39.0f * uiScale, 11.0f * uiScale, sc(rgba(0.10f, 0.22f, 0.46f, 0.92f)));
+            drawText("v0.7.7", badgeX + 31.0f * uiScale, 33.0f * uiScale, 0.29f * uiScale, cHeader, 1);
+
+            // Support Ko-fi pill button on top right
+            float donateW = 92.0f * uiScale;
+            float donateX1 = doneX0 - 12.0f * uiScale;
+            float donateX0 = donateX1 - donateW;
+            drawGlossyBtn(donateX0, 15.0f * uiScale, donateX1, headerH - 15.0f * uiScale, 18.0f * uiScale,
+                          rgba(1.0f, 0.62f, 0.66f, 0.90f), rgba(0.84f, 0.22f, 0.28f, 0.96f),
+                          "Ko-fi", rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.34f);
+            pushFixedHit(donateX0, 8.0f * uiScale, donateX1, headerH - 8.0f * uiScale, HIT_DONATE);
+        }
+
+        // ---------------------------------------------------------
+        // D. Fixed Left Observatory Navigation Rail (fixed == true)
+        // ---------------------------------------------------------
+        drawCard(railX0, railTopY, railX1, railBotY, 20.0f * uiScale, sc(rgba(0.042f, 0.075f, 0.215f, 0.96f)), cCardBorder);
+
+        float navX0 = railX0 + 10.0f * uiScale;
+        float navX1 = railX1 - 10.0f * uiScale;
+
+        // Animated SMG vertical pill indicator
+        drawRoundRect(navX0, mTabIndicatorY, navX1, mTabIndicatorY + mTabIndicatorH, 13.0f * uiScale, sc(rgba(0.32f, 0.84f, 1.0f, 0.95f)));
+        drawRoundRect(navX0 + 1.5f * uiScale, mTabIndicatorY + 1.5f * uiScale, navX1 - 1.5f * uiScale, mTabIndicatorY + mTabIndicatorH - 1.5f * uiScale, 11.5f * uiScale, sc(rgba(0.06f, 0.38f, 0.88f, 0.98f)));
+
+        if (mWarpMenuOpen) {
+            for (int c = 0; c < 8; c++) {
+                float ty = railTopY + 14.0f * uiScale + c * (34.0f * uiScale);
+                float th = 30.0f * uiScale;
+                bool isSel = (mWarpCategoryIndex == c);
+                if (isSel) {
+                    drawStar(navX0 + 18.0f * uiScale, ty + th * 0.5f, 6.2f * uiScale, cGold, animPhase * 0.6f);
+                } else {
+                    drawSparkle(navX0 + 18.0f * uiScale, ty + th * 0.5f, 4.8f * uiScale, sc(rgba(0.45f, 0.70f, 0.95f, 0.65f)), 0.0f);
+                }
+                drawText(kCategoryNames[c], navX0 + 32.0f * uiScale, ty + 20.0f * uiScale, 0.32f * uiScale, isSel ? cTextPrimary : cTextSecondary, 0);
+                pushFixedHit(navX0, ty, navX1, ty + th, HIT_WARP_CAT, c);
             }
 
-            // Fixed Top Header & Tab Bar Mask Overlay
-            drawRoundRect(drawerX - 60.0f, 0.0f, drawerX + drawerW, contentTop, 0.0f, rgba(0.094f, 0.102f, 0.125f, 1.0f));
-
-            // Header Title & Cogwheel
-            drawCogwheel(drawerX + padX + 16.0f * uiScale, 36.0f * uiScale, 15.0f * uiScale, cHeader, cogRot);
-            const char* appTitle = mPlusEdition ? "GalaxyMobile+" : "GalaxyMobile";
-            drawText(appTitle, drawerX + padX + 40.0f * uiScale, 44.0f * uiScale, 0.52f * uiScale, cTextPrimary, 0);
-
-            // Version chip pill badge next to title
-            float strW = 0.0f;
-            for (const char* p = appTitle; *p; p++) {
-                char ch = *p;
-                if (ch >= 32 && ch < 127) strW += (face.glyphs[ch - 32].advance * 0.25f) * (0.52f * uiScale);
+            // Selected Galaxy & Launch Star Beacon Card pinned at bottom of Left Rail
+            float launchTop = railBotY - 96.0f * uiScale;
+            if (launchTop > railTopY + 14.0f * uiScale + 8 * 34.0f * uiScale + 8.0f * uiScale) {
+                drawRoundRect(navX0, launchTop, navX1, railBotY - 12.0f * uiScale, 14.0f * uiScale, sc(rgba(0.06f, 0.12f, 0.34f, 0.94f)));
+                drawText("DESTINATION", navX0 + 10.0f * uiScale, launchTop + 17.0f * uiScale, 0.22f * uiScale, cGold, 0);
+                drawText(kGalaxies[mWarpSelectedGalaxy].displayName, navX0 + 10.0f * uiScale, launchTop + 33.0f * uiScale, 0.27f * uiScale, cTextPrimary, 0);
+                char btnLbl[32];
+                snprintf(btnLbl, sizeof(btnLbl), "LAUNCH STAR %d", mWarpSelectedScenario);
+                drawGlossyBtn(navX0 + 6.0f * uiScale, launchTop + 42.0f * uiScale, navX1 - 6.0f * uiScale, railBotY - 18.0f * uiScale, 12.0f * uiScale,
+                              rgba(1.0f, 0.88f, 0.32f, 0.96f), rgba(0.12f, 0.44f, 0.92f, 0.98f),
+                              btnLbl, rgba(1.0f, 0.98f, 0.84f, 1.0f), 0.30f);
+                pushFixedHit(navX0 + 6.0f * uiScale, launchTop + 42.0f * uiScale, navX1 - 6.0f * uiScale, railBotY - 18.0f * uiScale, HIT_WARP_LAUNCH);
             }
-            float vChipX = drawerX + padX + 46.0f * uiScale + strW;
-            drawRoundRect(vChipX, 26.0f * uiScale, vChipX + 54.0f * uiScale, 48.0f * uiScale, 11.0f * uiScale, rgba(0.18f, 0.24f, 0.35f, 0.85f));
-            drawText("v0.7.7", vChipX + 27.0f * uiScale, 42.0f * uiScale, 0.30f * uiScale, cHeader, 1);
-
-            // Close [X] circular tonal button
-            float closeBtnX = drawerX + drawerW - 36.0f * uiScale;
-            float closeBtnY = 36.0f * uiScale;
-            drawCircle(closeBtnX, closeBtnY, 18.0f * uiScale, rgba(0.188f, 0.196f, 0.224f, 0.95f));
-            drawCloseIcon(closeBtnX, closeBtnY, 9.0f * uiScale, rgba(0.761f, 0.776f, 0.812f, 0.95f));
-
-            // Donate pill button
-            float donateBtnW = 74.0f * uiScale;
-            float donateBtnX = closeBtnX - 26.0f * uiScale - donateBtnW;
-            drawRoundRect(donateBtnX, 24.0f * uiScale, donateBtnX + donateBtnW, 48.0f * uiScale, 12.0f * uiScale, rgba(0.92f, 0.28f, 0.30f, 0.95f));
-            drawText("Donate", donateBtnX + donateBtnW * 0.5f, 41.0f * uiScale, 0.31f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
-
-            // Material 3 Tab Dock ([ Controls ]  [ Display ]  [ System / Advanced ])
-            float tabBoxY0 = 62.0f * uiScale;
-            float tabBoxY1 = 102.0f * uiScale;
-            drawRoundRect(drawerX + padX, tabBoxY0, drawerX + drawerW - padX, tabBoxY1, 20.0f * uiScale, rgba(0.141f, 0.153f, 0.180f, 0.95f));
-            drawRoundRect(drawerX + padX, tabBoxY0, drawerX + drawerW - padX, tabBoxY1, 20.0f * uiScale, rgba(0.271f, 0.286f, 0.322f, 0.45f));
-
-            // Animated Sliding Pill Indicator
-            drawRoundRect(mTabIndicatorX, tabBoxY0 + 3.0f * uiScale, mTabIndicatorX + mTabIndicatorW, tabBoxY1 - 3.0f * uiScale, 17.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 0.95f));
-
-            int numTabs = mPlusEdition ? 4 : 3;
-            float tabW = contentW / (float)numTabs;
-            const char* kTabTitles[4];
-            kTabTitles[0] = "Controls";
-            kTabTitles[1] = "Display";
-            kTabTitles[2] = mPlusEdition ? "Cheats" : "System";
-            kTabTitles[3] = "Netplay";
+        } else {
+            const char* tabTitles[5];
+            const char* tabSubs[5];
+            if (mPlusEdition) {
+                tabTitles[0] = "Controls";       tabSubs[0] = "HUD, Sticks & Pointer";
+                tabTitles[1] = "Display & FPS";  tabSubs[1] = "Resolution & Limiter";
+                tabTitles[2] = "Cosmic Mods";    tabSubs[2] = "Cheats, Suits & Warp";
+                tabTitles[3] = "Netplay";        tabSubs[3] = "Co-op & Co-Star Room";
+                tabTitles[4] = "System";         tabSubs[4] = "Language, Haptics & Log";
+            } else {
+                tabTitles[0] = "Controls";       tabSubs[0] = "HUD, Sticks & Pointer";
+                tabTitles[1] = "Display & FPS";  tabSubs[1] = "Resolution & Limiter";
+                tabTitles[2] = "System";         tabSubs[2] = "Dump, Plus+, Lang & Log";
+            }
 
             for (int t = 0; t < numTabs; t++) {
-                float tX0 = drawerX + padX + t * tabW;
-                float tX1 = tX0 + tabW;
-                float tMidX = (tX0 + tX1) * 0.5f;
+                float ty = railTopY + 14.0f * uiScale + t * (53.0f * uiScale);
+                float th = 46.0f * uiScale;
                 bool isSel = (mSettingsTab == t);
-                Color tCol = isSel ? rgba(1.0f, 1.0f, 1.0f, 1.0f) : rgba(0.720f, 0.745f, 0.784f, 0.75f);
-                drawText(kTabTitles[t], tMidX, tabBoxY0 + 26.0f * uiScale, 0.33f * uiScale, tCol, 1);
+                if (isSel) {
+                    drawStar(navX0 + 20.0f * uiScale, ty + th * 0.5f, 8.2f * uiScale, cGold, sinf(animPhase * 1.6f) * 0.14f);
+                } else {
+                    drawSparkle(navX0 + 20.0f * uiScale, ty + th * 0.5f, 6.2f * uiScale, sc(rgba(0.45f, 0.72f, 0.98f, 0.70f)), 0.0f);
+                }
+                drawText(tabTitles[t], navX0 + 36.0f * uiScale, ty + 21.0f * uiScale, 0.34f * uiScale, isSel ? cTextPrimary : sc(rgba(0.82f, 0.88f, 0.98f, 0.88f)), 0);
+                drawText(tabSubs[t], navX0 + 36.0f * uiScale, ty + 36.0f * uiScale, 0.22f * uiScale, isSel ? rgba(0.84f, 0.94f, 1.0f, 0.95f * oa) : cTextSecondary, 0);
+                pushFixedHit(navX0, ty, navX1, ty + th, HIT_TAB, t);
             }
 
-            // Divider below tab bar
-            drawRoundRect(drawerX + padX, contentTop - 1.0f, drawerX + drawerW - padX, contentTop, 0.5f, cDivider);
+            // Live Observatory Telemetry Summary Box at bottom of Left Sidebar
+            float tabsBottom = railTopY + 14.0f * uiScale + numTabs * (53.0f * uiScale);
+            float teleTop = railBotY - 122.0f * uiScale;
+            if (teleTop > tabsBottom + 10.0f * uiScale) {
+                drawRoundRect(navX0, teleTop, navX1, railBotY - 12.0f * uiScale, 14.0f * uiScale, sc(rgba(0.06f, 0.11f, 0.30f, 0.90f)));
+                drawText("OBSERVATORY TELEMETRY", navX0 + 10.0f * uiScale, teleTop + 18.0f * uiScale, 0.22f * uiScale, cHeader, 0);
 
-            // Fixed Bottom Bar Mask Overlay & [ Done ] Button
-            drawRoundRect(drawerX - 60.0f, contentBottom, drawerX + drawerW, h, 0.0f, rgba(0.094f, 0.102f, 0.125f, 1.0f));
-            drawRoundRect(drawerX + padX, contentBottom, drawerX + drawerW - padX, contentBottom + 1.0f, 0.5f, cDivider);
+                char fpsLine[40];
+                if (mDisplayedFps >= 0) snprintf(fpsLine, sizeof(fpsLine), "Live FPS: %d / %d", mDisplayedFps, std::max(30, std::min(60, mSettings.fpsLimit)));
+                else snprintf(fpsLine, sizeof(fpsLine), "FPS Cap: %d Hz", std::max(30, std::min(60, mSettings.fpsLimit)));
+                drawText(fpsLine, navX0 + 10.0f * uiScale, teleTop + 40.0f * uiScale, 0.25f * uiScale, cTextPrimary, 0);
 
-            float doneY = h - 48.0f * uiScale;
-            float doneX0 = drawerX + padX;
-            float doneX1 = drawerX + drawerW - padX;
-            drawRoundRect(doneX0, doneY, doneX1, doneY + 38.0f * uiScale, 19.0f * uiScale, rgba(0.043f, 0.341f, 0.816f, 1.0f));
-            drawText("Done", (doneX0 + doneX1) * 0.5f, doneY + 24.0f * uiScale, 0.40f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                static const char* kShortRes[5] = { "720p HD", "900p HD+", "1080p FHD", "Ultra Native", "480p Wii" };
+                int gp = std::max(0, std::min(4, mSettings.graphicsPreset));
+                char resLine[40];
+                snprintf(resLine, sizeof(resLine), "3D Target: %s", kShortRes[gp]);
+                drawText(resLine, navX0 + 10.0f * uiScale, teleTop + 60.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
+
+                const char* heroLine = mPlusEdition ? ((mSettings.playerCharacter != 0) ? "Hero: Luigi" : "Hero: Mario")
+                                                    : (mSettings.hdUiTextures ? "HUD: 3D All-Stars HD" : "HUD: Wii Classic");
+                drawText(heroLine, navX0 + 10.0f * uiScale, teleTop + 80.0f * uiScale, 0.25f * uiScale, cGold, 0);
+
+                const char* netLine = (port_net_is_connected() != 0) ? "Netplay: Connected"
+                                    : (port_net_get_role() == 1 ? "Netplay: Hosting" : (mSettings.fullscreen ? "View: Ultrawide Hor+" : "View: 16:9 Framed"));
+                drawText(netLine, navX0 + 10.0f * uiScale, teleTop + 98.0f * uiScale, 0.24f * uiScale, cTextSecondary, 0);
+            }
         }
     }
 
