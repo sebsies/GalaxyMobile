@@ -269,10 +269,12 @@ void FurDrawer::createFurMap() {
     u32 width = mFurTexture->getTexInfo()->mWidth;
     u32 height = mFurTexture->getTexInfo()->mHeight;
     pPixels = reinterpret_cast< u16* >(mFurTexture->mImage);
+    u8* pBytes = reinterpret_cast< u8* >(pPixels);
     count = height * width;
 
     for (u32 i = 0; i < count; i++) {
-        pPixels[i] = 255;
+        pBytes[i * 2] = 0;
+        pBytes[i * 2 + 1] = 255;
     }
 
     for (u32 type = 0; type < 4; type++) {
@@ -290,7 +292,9 @@ void FurDrawer::createFurMap() {
                 x = s32(width) - 1;
             }
 
-            pPixels[x + width * y] = (u16(255.0f * mThickness[type]) << 8) | u16(255 - mLengthMap[type]);
+            u32 pixIdx = (x + width * y) * 2;
+            pBytes[pixIdx] = u8(255.0f * mThickness[type]);
+            pBytes[pixIdx + 1] = u8(255 - mLengthMap[type]);
         }
     }
 

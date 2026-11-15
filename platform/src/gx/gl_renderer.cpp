@@ -291,6 +291,7 @@ static std::string sShaderCachePath;
 
 struct Renderer::Impl {
     bool ready = false;
+    float maxAniso = 1.0f;
     // Programs by shader key (0: failed to build), shared with the compile
     // thread; guarded by progLock.
     std::mutex progLock;
@@ -491,7 +492,14 @@ void Renderer::Impl::init() {
     std::string exts;
     for (GLint i = 0; i < numExt; i++) {
         const char* e = (const char*)glGetStringi(GL_EXTENSIONS, (GLuint)i);
-        if (strstr(e, "parallel") || strstr(e, "binary") || strstr(e, "multiview") || strstr(e, "buffer_storage") || strstr(e, "QCOM") || strstr(e, "foveat")) {
+        if (strcmp(e, "GL_EXT_texture_filter_anisotropic") == 0) {
+            GLfloat supAniso = 1.0f;
+            glGetFloatv(0x84FF /* GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT */, &supAniso);
+            if (supAniso > 1.0f) {
+                maxAniso = supAniso > 8.0f ? 8.0f : supAniso;
+            }
+        }
+        if (strstr(e, "parallel") || strstr(e, "binary") || strstr(e, "multiview") || strstr(e, "buffer_storage") || strstr(e, "QCOM") || strstr(e, "foveat") || strstr(e, "anisotropic")) {
             exts += e;
             exts += ' ';
         }
@@ -518,7 +526,7 @@ void Renderer::Impl::init() {
 // ---------------------------------------------------------------------------
 // Programs: disk cache of linked binaries + background compilation
 // ---------------------------------------------------------------------------
-static const u32 kCacheMagic = 0x3A43475Fu;  // "PGCM"
+static const u32 kCacheMagic = 0x3B43475Fu;  // "PGCN"
 
 void Renderer::Impl::loadShaderCache() {
     if (sShaderCachePath.empty()) {
@@ -769,7 +777,7 @@ GLuint Renderer::Impl::vao(u32 flags, FrameBuffers& fb) {
 }
 
 GLuint Renderer::Impl::sampler(u32 mode0, u32 mode1, u32 levels) {
-    u64 key = ((u64)(mode0 & 0xFFFFFF) << 32) | ((mode1 & 0xFFFF) << 8) | (levels > 1 ? 1 : 0);
+    u64 key = ((u64)(mode0 & 0xFFFFFF) << 32) | ((mode1 & 0xFFFF) << 8) | (levels > 1 ? (levels & 0xFFu) : 1u);
     auto it = samplers.find(key);
     if (it != samplers.end()) {
         return it->second;
@@ -793,6 +801,9 @@ GLuint Renderer::Impl::sampler(u32 mode0, u32 mode1, u32 levels) {
     case 2:
         min = mips ? GL_NEAREST_MIPMAP_LINEAR : GL_NEAREST;
         break;
+    case 4:
+        min = GL_LINEAR;
+        break;
     case 5:
         min = mips ? GL_LINEAR_MIPMAP_NEAREST : GL_LINEAR;
         break;
@@ -804,8 +815,19 @@ GLuint Renderer::Impl::sampler(u32 mode0, u32 mode1, u32 levels) {
         break;
     }
     glSamplerParameteri(s, GL_TEXTURE_MIN_FILTER, min);
-    glSamplerParameterf(s, GL_TEXTURE_MIN_LOD, (mode1 & 0xFF) / 16.0f);
-    glSamplerParameterf(s, GL_TEXTURE_MAX_LOD, ((mode1 >> 8) & 0xFF) / 16.0f);
+    if (mips) {
+        float minLod = (mode1 & 0xFF) / 16.0f;
+        float maxLod = ((mode1 >> 8) & 0xFF) / 16.0f;
+        if (minLod > 0.0f) {
+            glSamplerParameterf(s, GL_TEXTURE_MIN_LOD, minLod);
+        }
+        if (maxLod < (float)(levels - 1)) {
+            glSamplerParameterf(s, GL_TEXTURE_MAX_LOD, maxLod);
+        }
+        if (maxAniso > 1.0f && (min == GL_LINEAR_MIPMAP_NEAREST || min == GL_LINEAR_MIPMAP_LINEAR)) {
+            glSamplerParameterf(s, 0x84FE /* GL_TEXTURE_MAX_ANISOTROPY_EXT */, maxAniso);
+        }
+    }
     samplers[key] = s;
     return s;
 }
@@ -1689,19 +1711,26 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
         if (img->glTex && img->glVersion == img->version) {
             continue;
         }
-        if (!img->glTex) {
-            glGenTextures(1, &img->glTex);
+        if (img->glTex) {
+            glDeleteTextures(1, &img->glTex);
+            img->glTex = 0;
         }
+        glGenTextures(1, &img->glTex);
         glBindTexture(GL_TEXTURE_2D, img->glTex);
+        u32 levels = img->levels > 0 ? img->levels : 1;
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, (GLint)levels - 1);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, levels > 1 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexStorage2D(GL_TEXTURE_2D, (GLsizei)levels, GL_RGBA8, (GLsizei)img->width, (GLsizei)img->height);
         const u32* px = img->rgba.data();
         u32 w = img->width, h = img->height;
-        for (u32 l = 0; l < img->levels; l++) {
-            glTexImage2D(GL_TEXTURE_2D, (GLint)l, GL_RGBA8, (GLsizei)w, (GLsizei)h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+        for (u32 l = 0; l < levels; l++) {
+            glTexSubImage2D(GL_TEXTURE_2D, (GLint)l, 0, 0, (GLsizei)w, (GLsizei)h, GL_RGBA, GL_UNSIGNED_BYTE, px);
             px += (size_t)w * h;
             w = w > 1 ? w / 2 : 1;
             h = h > 1 ? h / 2 : 1;
         }
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, (GLint)img->levels - 1);
         img->glVersion = img->version;
         // Images never change once recorded, so the pixels are not needed
         // again (except by the PETARI_DUMP texture dump).
