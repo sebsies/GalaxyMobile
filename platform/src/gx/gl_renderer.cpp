@@ -526,7 +526,7 @@ void Renderer::Impl::init() {
 // ---------------------------------------------------------------------------
 // Programs: disk cache of linked binaries + background compilation
 // ---------------------------------------------------------------------------
-static const u32 kCacheMagic = 0x3B43475Fu;  // "PGCN"
+static const u32 kCacheMagic = 0x3C43475Fu;  // "PGCO"
 
 void Renderer::Impl::loadShaderCache() {
     if (sShaderCachePath.empty()) {

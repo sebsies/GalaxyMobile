@@ -58,13 +58,13 @@ void uiTapGrad(vec2 d, vec2 dirN, float scaleN, float scaleT, inout float wSum, 
     wSum += w;
 }
 
-vec4 sampleUiTex(sampler2D t, vec2 uv, float bias) {
+vec4 sampleUiTex(sampler2D t, vec2 uv) {
     vec2 tsz = vec2(textureSize(t, 0));
     vec2 invTsz = 1.0 / max(tsz, vec2(1.0));
     vec2 uvPx = uv * tsz;
     vec2 dx = dFdx(uvPx);
     vec2 dy = dFdy(uvPx);
-    vec4 baseSample = abs(bias) < 0.01 ? texture(t, uv) : textureGrad(t, uv, dx * invTsz * exp2(bias), dy * invTsz * exp2(bias));
+    vec4 baseSample = texture(t, uv);
     float texelsPerPx = max(length(dx), length(dy));
     if (vrFlags.y == 0 || tsz.x < 8.0 || tsz.y < 8.0 || texelsPerPx >= 0.85 || texelsPerPx < 0.04) {
         return baseSample;
@@ -589,12 +589,6 @@ std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
     o.w("in float v_viewz;\nin float v_gxz;\nout vec4 o_color;\n");
     o.w("vec2 projUv(vec3 t) { return (abs(t.z) > 1.0e-6) ? t.xy / t.z : t.xy; }\n");
     o.w("int idot(ivec3 a, ivec3 b) { ivec3 t = a * b; return t.x + t.y + t.z; }\n");
-    o.w("vec4 sampleTexBias(sampler2D t, vec2 uv, float bias) {\n");
-    o.w("  vec2 dx = dFdx(uv);\n  vec2 dy = dFdy(uv);\n");
-    o.w("  if (abs(bias) < 0.01) return texture(t, uv);\n");
-    o.w("  float s = exp2(bias);\n");
-    o.w("  return textureGrad(t, uv, dx * s, dy * s);\n");
-    o.w("}\n");
     if (u.hud) {
         o.s += kUiUpscaleHelpers;
     }
@@ -640,8 +634,8 @@ std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
         uint32_t scale = (u.indScale[s / 2] >> ((s & 1) * 8)) & 0xFF;
         uint32_t scaleS = scale & 15, scaleT = (scale >> 4) & 15;
         if (coord < u.numTexGens) {
-            o.w("  vec3 ind%u = floor(sampleTexBias(s_tex%u, projUv(v_tex%u) / vec2(%.1f, %.1f), texSize[%u].x).abg * 255.0 + 0.5);\n", s, map, coord,
-                (double)(1u << (scaleS & 15)), (double)(1u << (scaleT & 15)), map);
+            o.w("  vec3 ind%u = floor(texture(s_tex%u, projUv(v_tex%u) / vec2(%.1f, %.1f)).abg * 255.0 + 0.5);\n", s, map, coord,
+                (double)(1u << (scaleS & 15)), (double)(1u << (scaleT & 15)));
         } else {
             o.w("  vec3 ind%u = vec3(0.0);\n", s);
         }
@@ -679,7 +673,7 @@ std::string genFragmentShader(const ShaderUid& u, bool useVertexTextures) {
             }
         }
         if (en) {
-            o.w("  tex = ivec4(round(%s(s_tex%u, %s, texSize[%u].x)%s * 255.0));\n", u.hud ? "sampleUiTex" : "sampleTexBias", map, uv.c_str(), map,
+            o.w("  tex = ivec4(round(%s(s_tex%u, %s)%s * 255.0));\n", u.hud ? "sampleUiTex" : "texture", map, uv.c_str(),
                 swapString(u, tswap).c_str());
             if (u.zTex) {
                 o.w("  ztex = tex;\n");
