@@ -1293,7 +1293,7 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
                 mobile_ui::get().render(a.screenWidth, a.screenHeight);
                 eglSwapBuffers(a.display, a.surface);
                 usleep(16000);
-            } else if (mobile_ui::get().isSettingsOpen() && mobile_ui::get().needsRedraw()) {
+            } else if (mobile_ui::get().isSettingsOpen() || mobile_ui::get().needsRedraw()) {
                 glBindFramebuffer(GL_FRAMEBUFFER, 0);
                 glViewport(0, 0, a.screenWidth, a.screenHeight);
                 glDisable(GL_SCISSOR_TEST);

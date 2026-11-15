@@ -513,7 +513,7 @@ void UIOverlay::setSavePath(const std::string& path) {
 
 bool UIOverlay::needsRedraw() {
     float target = mSettingsOpen ? 1.0f : 0.0f;
-    if (fabsf(mDrawerAnim - target) > 0.0005f) {
+    if (fabsf(mDrawerAnim - target) > 0.01f) {
         return true;
     }
     if (fabsf(mDrawerScrollY - mDrawerScrollTarget) > 0.5f) {
@@ -879,7 +879,7 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
     }
 
     // Handle Full-Screen Observatory Settings Touches (Hitbox-driven)
-    if (mSettingsOpen || mDrawerAnim > 0.05f) {
+    if (mSettingsOpen) {
         auto applySliderAtX = [&](int sliderKind, float x, float trackX0, float trackX1) {
             float t = std::max(0.0f, std::min(1.0f, (x - trackX0) / std::max(1.0f, trackX1 - trackX0)));
             if (sliderKind == HIT_SLIDER_SENSITIVITY) {
@@ -1657,15 +1657,17 @@ void UIOverlay::render(int screenW, int screenH) {
     float animPhase = (float)((double)(now % 60000000000ll) / 1e9);
 
     float target = mSettingsOpen ? 1.0f : 0.0f;
-    if (fabsf(mDrawerAnim - target) > 0.0005f) {
-        float speed = 13.0f;
+    if (fabsf(mDrawerAnim - target) > 0.01f) {
+        float speed = mSettingsOpen ? 16.0f : 34.0f;
         mDrawerAnim += (target - mDrawerAnim) * (1.0f - expf(-speed * dt));
-        if (fabsf(mDrawerAnim - target) < 0.001f) {
+        if (fabsf(mDrawerAnim - target) < 0.02f) {
             mDrawerAnim = target;
         }
         mDirty = true;
+    } else if (mDrawerAnim != target) {
+        mDrawerAnim = target;
     }
-    if (mSettingsOpen || mDrawerAnim > 0.01f) {
+    if (mSettingsOpen || mDrawerAnim > 0.02f) {
         mDirty = true;
     }
 
@@ -1761,12 +1763,14 @@ void UIOverlay::render(int screenW, int screenH) {
         verts.push_back({x0, y1, 0.0f, 0.0f, botCol.r, botCol.g, botCol.b, botCol.a, 0.0f, 0.0f, 1.0f, 0.0f});
     };
 
+    float uiFade = std::max(0.0f, std::min(1.0f, mDrawerAnim));
+
     auto drawCard = [&](float x0, float y0, float x1, float y1, float radius, const Color& bg, const Color& border) {
         drawRoundRect(x0, y0, x1, y1, radius, border);
         drawRoundRect(x0 + 1.4f * uiScale, y0 + 1.4f * uiScale, x1 - 1.4f * uiScale, y1 - 1.4f * uiScale, std::max(0.0f, radius - 1.4f * uiScale), bg);
         // Subtle SMG Wii upper glass sheen highlight
         if (x1 - x0 > 24.0f * uiScale && y1 - y0 > 22.0f * uiScale) {
-            drawRoundRect(x0 + 10.0f * uiScale, y0 + 2.5f * uiScale, x1 - 10.0f * uiScale, y0 + 14.0f * uiScale, 5.5f * uiScale, rgba(1.0f, 1.0f, 1.0f, 0.048f));
+            drawRoundRect(x0 + 10.0f * uiScale, y0 + 2.5f * uiScale, x1 - 10.0f * uiScale, y0 + 14.0f * uiScale, 5.5f * uiScale, rgba(1.0f, 1.0f, 1.0f, 0.048f * uiFade));
         }
     };
 
@@ -1869,10 +1873,10 @@ void UIOverlay::render(int screenW, int screenH) {
     auto drawM3Switch = [&](float x, float y, float swW, float swH, float anim) {
         float r = swH * 0.5f;
         float t = std::max(0.0f, std::min(1.0f, anim));
-        Color trackOffBg = rgba(0.095f, 0.135f, 0.285f, 0.96f);
-        Color trackOffBorder = rgba(0.36f, 0.52f, 0.80f, 0.65f);
-        Color trackOnBg = rgba(0.045f, 0.360f, 0.860f, 1.0f);
-        Color trackOnBorder = rgba(0.220f, 0.780f, 0.990f, 0.98f);
+        Color trackOffBg = rgba(0.095f, 0.135f, 0.285f, 0.96f * uiFade);
+        Color trackOffBorder = rgba(0.36f, 0.52f, 0.80f, 0.65f * uiFade);
+        Color trackOnBg = rgba(0.045f, 0.360f, 0.860f, 1.0f * uiFade);
+        Color trackOnBorder = rgba(0.220f, 0.780f, 0.990f, 0.98f * uiFade);
 
         Color curTrackBg = {
             trackOffBg.r + (trackOnBg.r - trackOffBg.r) * t,
@@ -1899,16 +1903,16 @@ void UIOverlay::render(int screenW, int screenH) {
         float curThumbX = thumbMinX + (thumbMaxX - thumbMinX) * t;
 
         if (t > 0.05f) {
-            drawCircle(curThumbX, y + r, curThumbR * 1.25f, rgba(0.35f, 0.85f, 1.0f, 0.25f * t));
+            drawCircle(curThumbX, y + r, curThumbR * 1.25f, rgba(0.35f, 0.85f, 1.0f, 0.25f * t * uiFade));
         }
 
-        Color thumbOffCol = rgba(0.68f, 0.78f, 0.94f, 1.0f);
-        Color thumbOnCol = rgba(1.0f, 0.98f, 0.88f, 1.0f);
+        Color thumbOffCol = rgba(0.68f, 0.78f, 0.94f, uiFade);
+        Color thumbOnCol = rgba(1.0f, 0.98f, 0.88f, uiFade);
         Color curThumbCol = {
             thumbOffCol.r + (thumbOnCol.r - thumbOffCol.r) * t,
             thumbOffCol.g + (thumbOnCol.g - thumbOffCol.g) * t,
             thumbOffCol.b + (thumbOnCol.b - thumbOffCol.b) * t,
-            1.0f
+            uiFade
         };
 
         drawCircle(curThumbX, y + r, curThumbR, curThumbCol);
@@ -1916,8 +1920,8 @@ void UIOverlay::render(int screenW, int screenH) {
 
     auto drawSegmentedGroup = [&](float x, float y, float grpW, float grpH, const char** labels, int count, int activeIdx) {
         float r = 13.0f * uiScale;
-        drawRoundRect(x, y, x + grpW, y + grpH, r, rgba(0.30f, 0.48f, 0.78f, 0.55f));
-        drawRoundRect(x + 1.2f * uiScale, y + 1.2f * uiScale, x + grpW - 1.2f * uiScale, y + grpH - 1.2f * uiScale, std::max(1.0f, r - 1.2f * uiScale), rgba(0.055f, 0.088f, 0.220f, 0.96f));
+        drawRoundRect(x, y, x + grpW, y + grpH, r, rgba(0.30f, 0.48f, 0.78f, 0.55f * uiFade));
+        drawRoundRect(x + 1.2f * uiScale, y + 1.2f * uiScale, x + grpW - 1.2f * uiScale, y + grpH - 1.2f * uiScale, std::max(1.0f, r - 1.2f * uiScale), rgba(0.055f, 0.088f, 0.220f, 0.96f * uiFade));
 
         float segW = (grpW - 4.0f * uiScale) / (float)count;
         for (int i = 0; i < count; i++) {
@@ -1925,13 +1929,13 @@ void UIOverlay::render(int screenW, int screenH) {
             float sx1 = sx0 + segW;
             bool active = (i == activeIdx);
             if (active) {
-                drawRoundRect(sx0, y + 2.0f * uiScale, sx1, y + grpH - 2.0f * uiScale, std::max(1.0f, r - 2.0f * uiScale), rgba(0.220f, 0.780f, 0.980f, 0.92f));
-                drawRoundRect(sx0 + 1.2f * uiScale, y + 3.2f * uiScale, sx1 - 1.2f * uiScale, y + grpH - 3.2f * uiScale, std::max(1.0f, r - 3.2f * uiScale), rgba(0.060f, 0.380f, 0.880f, 1.0f));
-                drawText(labels[i], (sx0 + sx1) * 0.5f, y + grpH * 0.65f, 0.32f * uiScale, rgba(1.0f, 1.0f, 1.0f, 1.0f), 1);
+                drawRoundRect(sx0, y + 2.0f * uiScale, sx1, y + grpH - 2.0f * uiScale, std::max(1.0f, r - 2.0f * uiScale), rgba(0.220f, 0.780f, 0.980f, 0.92f * uiFade));
+                drawRoundRect(sx0 + 1.2f * uiScale, y + 3.2f * uiScale, sx1 - 1.2f * uiScale, y + grpH - 3.2f * uiScale, std::max(1.0f, r - 3.2f * uiScale), rgba(0.060f, 0.380f, 0.880f, uiFade));
+                drawText(labels[i], (sx0 + sx1) * 0.5f, y + grpH * 0.65f, 0.32f * uiScale, rgba(1.0f, 1.0f, 1.0f, uiFade), 1);
             } else {
-                drawText(labels[i], (sx0 + sx1) * 0.5f, y + grpH * 0.65f, 0.32f * uiScale, rgba(0.74f, 0.82f, 0.95f, 0.82f), 1);
+                drawText(labels[i], (sx0 + sx1) * 0.5f, y + grpH * 0.65f, 0.32f * uiScale, rgba(0.74f, 0.82f, 0.95f, 0.82f * uiFade), 1);
                 if (i > 0 && (i - 1) != activeIdx) {
-                    drawRoundRect(sx0 - 0.5f, y + 6.0f * uiScale, sx0 + 0.5f, y + grpH - 6.0f * uiScale, 0.0f, rgba(0.32f, 0.45f, 0.70f, 0.40f));
+                    drawRoundRect(sx0 - 0.5f, y + 6.0f * uiScale, sx0 + 0.5f, y + grpH - 6.0f * uiScale, 0.0f, rgba(0.32f, 0.45f, 0.70f, 0.40f * uiFade));
                 }
             }
         }
@@ -2244,7 +2248,7 @@ void UIOverlay::render(int screenW, int screenH) {
     // -------------------------------------------------------------
     // Full-Screen Super Mario Galaxy "Comet Observatory" Settings UI
     // -------------------------------------------------------------
-    if (mDrawerAnim > 0.001f) {
+    if (mDrawerAnim > 0.02f) {
         float oa = std::max(0.0f, std::min(1.0f, mDrawerAnim));
         float slideY = (1.0f - oa) * 24.0f * uiScale;
         auto sc = [&](Color c) { c.a *= oa; return c; };
@@ -3242,17 +3246,10 @@ void UIOverlay::render(int screenW, int screenH) {
         drawRoundRect(0.0f, mDeckBottomY, w, h, 0.0f, rgba(0.024f, 0.045f, 0.145f, 0.96f * oa));
 
         // ---------------------------------------------------------
-        // C. Top Observatory Command Header Controls (fixed == true)
+        // C. Top Header Bar Controls (fixed == true)
         // ---------------------------------------------------------
-        float closeBtnX = w - 34.0f * uiScale;
-        float closeBtnY = headerH * 0.5f;
-        drawCircle(closeBtnX, closeBtnY, 19.0f * uiScale, sc(rgba(0.28f, 0.68f, 0.98f, 0.55f)));
-        drawCircle(closeBtnX, closeBtnY, 17.5f * uiScale, sc(rgba(0.08f, 0.14f, 0.34f, 0.96f)));
-        drawCloseIcon(closeBtnX, closeBtnY, 9.0f * uiScale, sc(rgba(0.84f, 0.92f, 1.0f, 0.98f)));
-        pushFixedHit(closeBtnX - 24.0f * uiScale, closeBtnY - 24.0f * uiScale, closeBtnX + 24.0f * uiScale, closeBtnY + 24.0f * uiScale, HIT_CLOSE);
-
-        float doneW = 104.0f * uiScale;
-        float doneX1 = closeBtnX - 30.0f * uiScale;
+        float doneW = 116.0f * uiScale;
+        float doneX1 = w - 20.0f * uiScale;
         float doneX0 = doneX1 - doneW;
         drawGlossyBtn(doneX0, 15.0f * uiScale, doneX1, headerH - 15.0f * uiScale, 18.0f * uiScale,
                       rgba(0.42f, 0.86f, 1.0f, 0.95f), rgba(0.06f, 0.40f, 0.90f, 0.98f),
@@ -3261,14 +3258,14 @@ void UIOverlay::render(int screenW, int screenH) {
 
         if (mWarpMenuOpen) {
             float backX0 = 18.0f * uiScale;
-            float backX1 = backX0 + 132.0f * uiScale;
+            float backX1 = backX0 + 104.0f * uiScale;
             drawGlossyBtn(backX0, 15.0f * uiScale, backX1, headerH - 15.0f * uiScale, 18.0f * uiScale,
                           rgba(0.40f, 0.78f, 0.98f, 0.75f), rgba(0.10f, 0.22f, 0.48f, 0.96f),
-                          "< Observatory", rgba(0.92f, 0.96f, 1.0f, 1.0f), 0.33f);
+                          "< Back", rgba(0.92f, 0.96f, 1.0f, 1.0f), 0.33f);
             pushFixedHit(backX0, 8.0f * uiScale, backX1, headerH - 8.0f * uiScale, HIT_WARP_BACK);
 
             drawStar(backX1 + 26.0f * uiScale, headerH * 0.5f, 13.0f * uiScale, cGold, animPhase * 0.9f);
-            drawText("GALAXY WARP OBSERVATORY", backX1 + 46.0f * uiScale, headerH * 0.5f + 7.0f * uiScale, 0.46f * uiScale, cTextPrimary, 0);
+            drawText("Galaxy Warp", backX1 + 46.0f * uiScale, headerH * 0.5f + 7.0f * uiScale, 0.48f * uiScale, cTextPrimary, 0);
 
             // Top-right Launch shortcut in addition to Sidebar Launch Beacon
             float lW = 134.0f * uiScale;
@@ -3279,19 +3276,14 @@ void UIOverlay::render(int screenW, int screenH) {
                           "Launch Warp", rgba(1.0f, 0.98f, 0.84f, 1.0f), 0.33f);
             pushFixedHit(lX0, 8.0f * uiScale, lX1, headerH - 8.0f * uiScale, HIT_WARP_LAUNCH);
         } else {
-            // Orbiting Power Star emblem + COMET OBSERVATORY title
+            // Spinning Power Star emblem + Simple GalaxyMobile / GalaxyMobile+ Title + v0.7.7 underneath
             float emblemX = 38.0f * uiScale;
             float emblemY = headerH * 0.5f;
             drawCircle(emblemX, emblemY, 17.0f * uiScale, rgba(1.0f, 0.84f, 0.24f, 0.16f * oa));
             drawStar(emblemX, emblemY, 15.0f * uiScale, cGold, sinf(animPhase * 1.2f) * 0.16f);
-            drawText("COMET OBSERVATORY", emblemX + 26.0f * uiScale, headerH * 0.5f - 2.0f * uiScale, 0.46f * uiScale, cTextPrimary, 0);
-            const char* subEd = mPlusEdition ? "GalaxyMobile+  •  All-Star Observatory" : "GalaxyMobile  •  Observatory Settings";
-            drawText(subEd, emblemX + 27.0f * uiScale, headerH * 0.5f + 16.0f * uiScale, 0.26f * uiScale, mPlusEdition ? cGold : cHeader, 0);
-
-            // Version Pill Badge next to subtitle/title
-            float badgeX = emblemX + 276.0f * uiScale;
-            drawRoundRect(badgeX, 17.0f * uiScale, badgeX + 62.0f * uiScale, 39.0f * uiScale, 11.0f * uiScale, sc(rgba(0.10f, 0.22f, 0.46f, 0.92f)));
-            drawText("v0.7.7", badgeX + 31.0f * uiScale, 33.0f * uiScale, 0.29f * uiScale, cHeader, 1);
+            const char* mainTitle = mPlusEdition ? "GalaxyMobile+" : "GalaxyMobile";
+            drawText(mainTitle, emblemX + 26.0f * uiScale, headerH * 0.5f - 1.0f * uiScale, 0.50f * uiScale, cTextPrimary, 0);
+            drawText("v0.7.7", emblemX + 27.0f * uiScale, headerH * 0.5f + 17.0f * uiScale, 0.29f * uiScale, mPlusEdition ? cGold : cHeader, 0);
 
             // Support Ko-fi pill button on top right
             float donateW = 92.0f * uiScale;
