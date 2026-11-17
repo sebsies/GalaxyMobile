@@ -329,9 +329,26 @@ static u8 GX2HWFiltConv[6] = {
 
 void J3DGDSetTexLookupMode(GXTexMapID id, GXTexWrapMode wrap_s, GXTexWrapMode wrap_t, GXTexFilter min_filt, GXTexFilter mag_filt, f32 min_lod,
                            f32 max_lod, f32 lod_bias, u8 bias_clamp, u8 do_edge_lod, GXAnisotropy max_aniso) {
-    J3DGDWriteBPCmd(BP_TEX_MODE0(wrap_s, wrap_t, mag_filt == TRUE, GX2HWFiltConv[min_filt], !do_edge_lod, (u8)(32.0f * lod_bias), max_aniso,
+    // Clamp and cast through signed 8-bit so negative LOD bias cannot trigger
+    // float-to-unsigned UB on ARM64 and corrupt the BP register ID bits (24..31).
+    if (lod_bias < -4.0f)
+        lod_bias = -4.0f;
+    else if (lod_bias >= 4.0f)
+        lod_bias = 3.99f;
+    if (min_lod < 0.0f)
+        min_lod = 0.0f;
+    else if (min_lod > 10.0f)
+        min_lod = 10.0f;
+    if (max_lod < 0.0f)
+        max_lod = 0.0f;
+    else if (max_lod > 10.0f)
+        max_lod = 10.0f;
+    u8 lbias = (u8)(s8)(32.0f * lod_bias);
+    u8 lmin = (u8)(16.0f * min_lod);
+    u8 lmax = (u8)(16.0f * max_lod);
+    J3DGDWriteBPCmd(BP_TEX_MODE0(wrap_s, wrap_t, mag_filt == TRUE, GX2HWFiltConv[min_filt], !do_edge_lod, lbias, max_aniso,
                                  bias_clamp, J3DGDTexMode0Ids[id]));
-    J3DGDWriteBPCmd(BP_TEX_MODE1((u8)(16.0f * min_lod), (u8)(16.0f * max_lod), J3DGDTexMode1Ids[id]));
+    J3DGDWriteBPCmd(BP_TEX_MODE1(lmin, lmax, J3DGDTexMode1Ids[id]));
 }
 
 void J3DGDSetTexImgAttr(GXTexMapID id, u16 width, u16 height, GXTexFmt format) {
