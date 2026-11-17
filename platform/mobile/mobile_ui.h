@@ -12,6 +12,7 @@ namespace mobile_ui {
 struct Settings {
     bool showControls = true;
     bool fullscreen = false;
+    int aspectMode = 0; // 0 = 16:9 Framed, 1 = 4:3 Classic, 2 = Fullscreen (Ultrawide Hor+)
     bool showCameraCutout = true;
     int languageIndex = 0;
     int playerCharacter = 0;
@@ -126,7 +127,6 @@ private:
     // Fluid Switch Knob Animations (0.0 = OFF, 1.0 = ON)
     float mSwAnimShowControls = 1.0f;
     float mSwAnimShowDpad = 1.0f;
-    float mSwAnimFullscreen = 0.0f;
     float mSwAnimCameraCutout = 1.0f;
     int mActiveSliderKind = 0;
     float mActiveSliderX0 = 0.0f;

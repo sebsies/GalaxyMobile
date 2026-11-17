@@ -297,13 +297,14 @@ static void presentGameImage(MobileApp& a) {
 }
 
 void updateViewport(MobileApp& a) {
-    if (mobile_ui::get().settings().fullscreen) {
+    int mode = mobile_ui::get().settings().aspectMode;
+    if (mode == 2) {
         a.vpX = 0;
         a.vpY = 0;
         a.vpW = a.screenWidth;
         a.vpH = a.screenHeight;
     } else {
-        float targetAspect = 16.0f / 9.0f;
+        float targetAspect = (mode == 1) ? (4.0f / 3.0f) : (16.0f / 9.0f);
         float screenAspect = (float)a.screenWidth / (float)a.screenHeight;
         if (screenAspect > targetAspect) {
             a.vpH = a.screenHeight;
@@ -317,6 +318,20 @@ void updateViewport(MobileApp& a) {
             a.vpY = (a.screenHeight - a.vpH) / 2;
         }
     }
+}
+
+static int getDesiredTargetWidth(MobileApp& a, int targetH) {
+    int mode = mobile_ui::get().settings().aspectMode;
+    if (mode == 2) {
+        updateViewport(a);
+        float nativeAspect = (a.vpH > 0) ? ((float)a.vpW / (float)a.vpH)
+                                         : ((float)a.screenWidth / (float)a.screenHeight);
+        return (int)lroundf(targetH * nativeAspect);
+    }
+    if (mode == 1) {
+        return (int)lroundf((float)targetH * (4.0f / 3.0f));
+    }
+    return (targetH == 480) ? 854 : ((targetH * 16) / 9);
 }
 
 bool createSurface(MobileApp& a) {
@@ -344,7 +359,7 @@ bool createSurface(MobileApp& a) {
     LOGI("Window surface ready: %dx%d (GL: %s)", a.screenWidth, a.screenHeight, (const char*)glGetString(GL_RENDERER));
 
     updateViewport(a);
-    LOGI("Viewport: x=%d, y=%d, w=%d, h=%d (fullscreen=%d)", a.vpX, a.vpY, a.vpW, a.vpH, mobile_ui::get().settings().fullscreen ? 1 : 0);
+    LOGI("Viewport: x=%d, y=%d, w=%d, h=%d (aspectMode=%d)", a.vpX, a.vpY, a.vpW, a.vpH, mobile_ui::get().settings().aspectMode);
 
     // Initialize renderer and render target
     gpu::Renderer& r = gpu::renderer();
@@ -353,22 +368,16 @@ bool createSurface(MobileApp& a) {
         return false;
     }
 
-    // Allocate offscreen target (preset & aspect-matched when in fullscreen mode)
+    // Allocate offscreen target matched to preset and aspect ratio mode
     int targetH = getDesiredTargetHeight(a);
-    int targetW;
-    if (mobile_ui::get().settings().fullscreen) {
-        float nativeAspect = (a.vpH > 0) ? ((float)a.vpW / (float)a.vpH) : ((float)a.screenWidth / (float)a.screenHeight);
-        targetW = (int)lroundf(targetH * nativeAspect);
-    } else {
-        targetW = (targetH == 480) ? 854 : ((targetH * 16) / 9);
-    }
+    int targetW = getDesiredTargetWidth(a, targetH);
     if (!a.targetReady || a.efbTarget.width != targetW || a.efbTarget.height != targetH) {
         if (a.targetReady) {
             r.destroyTarget(a.efbTarget);
         }
         a.efbTarget = r.createTarget(targetW, targetH);
         a.targetReady = true;
-        LOGI("Created offscreen EfbTarget: %dx%d (fullscreen=%d)", targetW, targetH, mobile_ui::get().settings().fullscreen ? 1 : 0);
+        LOGI("Created offscreen EfbTarget: %dx%d (aspectMode=%d)", targetW, targetH, mobile_ui::get().settings().aspectMode);
     }
 
     a.windowReady = true;
@@ -727,11 +736,12 @@ void updateRightStickPointer(MobileApp& a, int64_t nowNs) {
     float dirX = rx / mag;
     float dirY = ry / mag;
 
-    // Normalized [-1, 1] pointer space is 16:9, so scale vertical speed for uniform visual motion.
+    // Scale vertical speed by the active HUD aspect ratio for uniform visual motion.
     float sens = std::max(0.5f, std::min(3.0f, mobile_ui::get().settings().rightStickSensitivity));
+    float hudAspect = port_is_4x3_aspect() ? (4.0f / 3.0f) : (16.0f / 9.0f);
     constexpr float kBaseSpeedX = 3.40f;
     float speedX = kBaseSpeedX * sens;
-    float speedY = kBaseSpeedX * (16.0f / 9.0f) * sens;
+    float speedY = kBaseSpeedX * hudAspect * sens;
     a.touchPad.pointerX = std::max(-1.0f, std::min(1.0f, a.touchPad.pointerX + dirX * curved * speedX * dt));
     a.touchPad.pointerY = std::max(-1.0f, std::min(1.0f, a.touchPad.pointerY + dirY * curved * speedY * dt));
     a.touchPad.pointerValid = 1;
@@ -857,9 +867,13 @@ int32_t onInput(android_app* app, AInputEvent* event) {
 
         updateViewport(*a);
         int ptrX = a->vpX, ptrY = a->vpY, ptrW = a->vpW, ptrH = a->vpH;
-        if (mobile_ui::get().settings().fullscreen) {
-            ptrW = (int)lroundf((float)a->screenHeight * (16.0f / 9.0f));
-            ptrX = (a->screenWidth - ptrW) / 2;
+        if (mobile_ui::get().settings().aspectMode == 2) {
+            float hudAspect = port_is_4x3_aspect() ? (4.0f / 3.0f) : (16.0f / 9.0f);
+            float dispAspect = (a->screenHeight > 0) ? ((float)a->screenWidth / (float)a->screenHeight) : hudAspect;
+            if (dispAspect > hudAspect + 0.01f) {
+                ptrW = (int)lroundf((float)a->screenHeight * hudAspect);
+                ptrX = (a->screenWidth - ptrW) / 2;
+            }
         }
         if (mobile_ui::get().handleInput(event, a->touchPad,
                                          a->screenWidth, a->screenHeight,
@@ -1259,21 +1273,14 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
             }
             gPresentedFrames.store(r.frameNumber());
 
-            // Check if offscreen target dimensions need to change (e.g. toggled fullscreen or graphics preset)
+            // Check if offscreen target dimensions need to change (e.g. aspect mode or graphics preset)
             int desiredTargetH = getDesiredTargetHeight(a);
-            int desiredTargetW;
-            if (mobile_ui::get().settings().fullscreen) {
-                updateViewport(a);
-                float nativeAspect = (a.vpH > 0) ? ((float)a.vpW / (float)a.vpH) : ((float)a.screenWidth / (float)a.screenHeight);
-                desiredTargetW = (int)lroundf(desiredTargetH * nativeAspect);
-            } else {
-                desiredTargetW = (desiredTargetH == 480) ? 854 : ((desiredTargetH * 16) / 9);
-            }
+            int desiredTargetW = getDesiredTargetWidth(a, desiredTargetH);
             if (a.targetReady && (a.efbTarget.width != desiredTargetW || a.efbTarget.height != desiredTargetH)) {
                 r.destroyTarget(a.efbTarget);
                 a.efbTarget = r.createTarget(desiredTargetW, desiredTargetH);
                 updateViewport(a);
-                LOGI("Resized offscreen EfbTarget: %dx%d (fullscreen=%d, preset=%d)", desiredTargetW, desiredTargetH, mobile_ui::get().settings().fullscreen ? 1 : 0, mobile_ui::get().settings().graphicsPreset);
+                LOGI("Resized offscreen EfbTarget: %dx%d (aspectMode=%d, preset=%d)", desiredTargetW, desiredTargetH, mobile_ui::get().settings().aspectMode, mobile_ui::get().settings().graphicsPreset);
             }
 
             // Monoscopic rendering into offscreen target
@@ -1383,7 +1390,21 @@ float port_get_display_aspect(void) {
 }
 
 int port_is_fullscreen_aspect(void) {
-    return mobile_ui::UIOverlay::get().settings().fullscreen ? 1 : 0;
+    return (mobile_ui::UIOverlay::get().settings().aspectMode == 2) ? 1 : 0;
+}
+
+int port_is_4x3_aspect(void) {
+    const auto& s = mobile_ui::UIOverlay::get().settings();
+    if (s.aspectMode == 1) {
+        return 1;
+    }
+    if (s.aspectMode == 2 && gMobile.screenHeight > 0) {
+        float dispAspect = (float)gMobile.screenWidth / (float)gMobile.screenHeight;
+        if (dispAspect < 1.55f) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int port_is_plus_edition(void) {

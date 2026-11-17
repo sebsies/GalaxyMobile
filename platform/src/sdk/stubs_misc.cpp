@@ -17,7 +17,7 @@ extern "C" {
 // ---------------------------------------------------------------------------
 // SC (system configuration)
 // ---------------------------------------------------------------------------
-u8 SCGetAspectRatio(void) { return 1; }     // 16:9
+u8 SCGetAspectRatio(void) { return port_is_4x3_aspect() ? SC_ASPECT_RATIO_4x3 : SC_ASPECT_RATIO_16x9; }
 u8 SCGetEuRgb60Mode(void) { return 1; }     // 60 Hz
 // A language the disc has texts in: the one of the `language` setting, or
 // the disc's own first one (dvd.cpp).

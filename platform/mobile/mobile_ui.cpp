@@ -125,7 +125,7 @@ enum UiHitKind {
     HIT_SEG_RIGHT_STICK_MODE,
     HIT_SEG_TILT_MODE,
     HIT_SLIDER_SENSITIVITY,
-    HIT_TOGGLE_FULLSCREEN,
+    HIT_SEG_ASPECT_MODE,
     HIT_TOGGLE_CAMERA_CUTOUT,
     HIT_SEG_RESOLUTION,
     HIT_TOGGLE_HD_UI,
@@ -389,6 +389,7 @@ GLuint compileShader(GLenum type, const char* src) {
 void Settings::load(const std::string& path) {
     FILE* f = fopen(path.c_str(), "r");
     if (!f) return;
+    bool sawAspectMode = false;
     char line[256];
     while (fgets(line, sizeof(line), f)) {
         char key[64];
@@ -396,6 +397,7 @@ void Settings::load(const std::string& path) {
         if (sscanf(line, "%63[^=]=%f", key, &val) == 2) {
             if (!strcmp(key, "show_controls")) showControls = (val > 0.5f);
             else if (!strcmp(key, "fullscreen")) fullscreen = (val > 0.5f);
+            else if (!strcmp(key, "aspect_mode")) { aspectMode = std::max(0, std::min(2, (int)(val + 0.5f))); sawAspectMode = true; }
             else if (!strcmp(key, "opacity")) opacity = std::max(0.1f, std::min(1.0f, val));
             else if (!strcmp(key, "scale")) scale = std::max(0.6f, std::min(1.6f, val));
             else if (!strcmp(key, "dynamic_stick")) dynamicStick = (val > 0.5f);
@@ -428,15 +430,21 @@ void Settings::load(const std::string& path) {
         }
     }
     fclose(f);
-    LOGI("Loaded settings: show=%d, full=%d, op=%.2f, scale=%.2f, dpad=%d, skip=%d, infHp=%d, infPow=%d, hdUi=%d",
-         showControls, fullscreen, opacity, scale, showDpad, modSkipCutscenes, modInfiniteHealth, modInfinitePowerup, hdUiTextures);
+    if (!sawAspectMode) {
+        aspectMode = fullscreen ? 2 : 0;
+    } else {
+        fullscreen = (aspectMode == 2);
+    }
+    LOGI("Loaded settings: show=%d, aspect=%d, op=%.2f, scale=%.2f, dpad=%d, skip=%d, infHp=%d, infPow=%d, hdUi=%d",
+         showControls, aspectMode, opacity, scale, showDpad, modSkipCutscenes, modInfiniteHealth, modInfinitePowerup, hdUiTextures);
 }
 
 void Settings::save(const std::string& path) const {
     FILE* f = fopen(path.c_str(), "w");
     if (!f) return;
     fprintf(f, "show_controls=%d\n", showControls ? 1 : 0);
-    fprintf(f, "fullscreen=%d\n", fullscreen ? 1 : 0);
+    fprintf(f, "fullscreen=%d\n", (aspectMode == 2) ? 1 : 0);
+    fprintf(f, "aspect_mode=%d\n", aspectMode);
     fprintf(f, "opacity=%.2f\n", opacity);
     fprintf(f, "scale=%.2f\n", scale);
     fprintf(f, "dynamic_stick=%d\n", dynamicStick ? 1 : 0);
@@ -479,7 +487,6 @@ UIOverlay::UIOverlay() {
     mTabTargetH = 0.0f;
     mSwAnimShowControls = 1.0f;
     mSwAnimShowDpad = 1.0f;
-    mSwAnimFullscreen = 0.0f;
     mSwAnimCameraCutout = 1.0f;
     mSwAnimHdUi = 1.0f;
     mSwAnimSkipCutscenes = 0.0f;
@@ -507,7 +514,6 @@ void UIOverlay::setSavePath(const std::string& path) {
     }
     mSwAnimShowControls = mSettings.showControls ? 1.0f : 0.0f;
     mSwAnimShowDpad = mSettings.showDpad ? 1.0f : 0.0f;
-    mSwAnimFullscreen = mSettings.fullscreen ? 1.0f : 0.0f;
     mSwAnimCameraCutout = mSettings.showCameraCutout ? 1.0f : 0.0f;
     port_set_camera_cutout(mSettings.showCameraCutout ? 1 : 0);
     port_set_game_language(mSettings.languageIndex);
@@ -543,7 +549,6 @@ bool UIOverlay::needsRedraw() {
     };
     if (switchActive(mSwAnimShowControls, mSettings.showControls) ||
         switchActive(mSwAnimShowDpad, mSettings.showDpad) ||
-        switchActive(mSwAnimFullscreen, mSettings.fullscreen) ||
         switchActive(mSwAnimCameraCutout, mSettings.showCameraCutout) ||
         switchActive(mSwAnimHdUi, mSettings.hdUiTextures) ||
         switchActive(mSwAnimSkipCutscenes, mSettings.modSkipCutscenes) ||
@@ -1111,8 +1116,9 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                 saveNow = true;
                 break;
-            case HIT_TOGGLE_FULLSCREEN:
-                mSettings.fullscreen = !mSettings.fullscreen;
+            case HIT_SEG_ASPECT_MODE:
+                mSettings.aspectMode = std::max(0, std::min(2, hb.arg0));
+                mSettings.fullscreen = (mSettings.aspectMode == 2);
                 port_play_ui_se(PORT_UI_SE_TICK);
                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                 saveNow = true;
@@ -1752,7 +1758,6 @@ void UIOverlay::render(int screenW, int screenH) {
     };
     updateSwAnim(mSwAnimShowControls, mSettings.showControls);
     updateSwAnim(mSwAnimShowDpad, mSettings.showDpad);
-    updateSwAnim(mSwAnimFullscreen, mSettings.fullscreen);
     updateSwAnim(mSwAnimCameraCutout, mSettings.showCameraCutout);
     updateSwAnim(mSwAnimHdUi, mSettings.hdUiTextures);
     updateSwAnim(mSwAnimSkipCutscenes, mSettings.modSkipCutscenes);
@@ -2789,24 +2794,37 @@ void UIOverlay::render(int screenW, int screenH) {
                 // =====================================================
                 // Tab 1: Display & FPS
                 // =====================================================
-                placeCard(0, 136.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                placeCard(0, 158.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
                     drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
                     drawSectionTitle(cX0, y, "DISPLAY & VIEWPORT", cHeader, true);
 
                     float r1Y = y + 34.0f * uiScale;
-                    drawText("Native Ultrawide (Hor+)", cX0 + 14.0f * uiScale, r1Y + 18.0f * uiScale, 0.36f * uiScale, cTextPrimary, 0);
-                    drawText("Expand horizontal FOV to fill screen", cX0 + 14.0f * uiScale, r1Y + 34.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
-                    drawM3Switch(cX1 - swW - 14.0f * uiScale, r1Y + 8.0f * uiScale, swW, swH, mSwAnimFullscreen);
-                    pushDeckHit(cX0 + 8.0f * uiScale, r1Y, cX1 - 8.0f * uiScale, r1Y + 44.0f * uiScale, HIT_TOGGLE_FULLSCREEN);
+                    drawText("Aspect Ratio", cX0 + 14.0f * uiScale, r1Y + 14.0f * uiScale, 0.34f * uiScale, cTextPrimary, 0);
+                    float grpW = cw - 28.0f * uiScale;
+                    static const char* kAspectOpts[3] = { "4:3", "16:9", "Fullscreen" };
+                    static const int kAspectBySeg[3] = { 1, 0, 2 };
+                    static const int kSegByAspect[3] = { 1, 0, 2 };
+                    int activeSeg = (mSettings.aspectMode >= 0 && mSettings.aspectMode < 3) ? kSegByAspect[mSettings.aspectMode] : 1;
+                    float segY = r1Y + 18.0f * uiScale;
+                    drawSegmentedGroup(cX0 + 14.0f * uiScale, segY, grpW, 30.0f * uiScale, kAspectOpts, 3, activeSeg);
+                    for (int s = 0; s < 3; s++) {
+                        float sx0 = cX0 + 14.0f * uiScale + s * (grpW / 3.0f);
+                        pushDeckHit(sx0, segY - 4.0f * uiScale, sx0 + grpW / 3.0f, segY + 34.0f * uiScale, HIT_SEG_ASPECT_MODE, kAspectBySeg[s]);
+                    }
+                    const char* aspectDesc = (mSettings.aspectMode == 1)
+                        ? "Classic 4:3 view with unscaled 4:3 game HUD"
+                        : ((mSettings.aspectMode == 2)
+                            ? "Ultrawide Hor+ 3D FOV with safe-framed HUD"
+                            : "Standard 16:9 widescreen with framed HUD");
+                    drawText(aspectDesc, cX0 + 14.0f * uiScale, segY + 42.0f * uiScale, 0.24f * uiScale, cTextSecondary, 0);
 
-                    drawRoundRect(cX0 + 14.0f * uiScale, y + 80.0f * uiScale, cX1 - 14.0f * uiScale, y + 81.0f * uiScale, 0.5f, cDivider);
+                    drawRoundRect(cX0 + 14.0f * uiScale, y + 102.0f * uiScale, cX1 - 14.0f * uiScale, y + 103.0f * uiScale, 0.5f, cDivider);
 
-                    float r2Y = y + 82.0f * uiScale;
+                    float r2Y = y + 105.0f * uiScale;
                     drawText("Show Camera Cutout", cX0 + 14.0f * uiScale, r2Y + 18.0f * uiScale, 0.36f * uiScale, cTextPrimary, 0);
                     drawText("Extend display into camera punch-hole", cX0 + 14.0f * uiScale, r2Y + 34.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
                     drawM3Switch(cX1 - swW - 14.0f * uiScale, r2Y + 8.0f * uiScale, swW, swH, mSwAnimCameraCutout);
                     pushDeckHit(cX0 + 8.0f * uiScale, r2Y, cX1 - 8.0f * uiScale, r2Y + 46.0f * uiScale, HIT_TOGGLE_CAMERA_CUTOUT);
-                    (void)cw;
                 });
 
                 placeCard(0, 180.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
@@ -2830,31 +2848,49 @@ void UIOverlay::render(int screenW, int screenH) {
                     drawRoundRect(cX0 + 14.0f * uiScale, boxY, cX1 - 14.0f * uiScale, boxY + boxH, 12.0f * uiScale, sc(rgba(0.08f, 0.14f, 0.34f, 0.95f)));
 
                     const char* resChip = "1080p FHD • Recommended";
-                    const char* resSub = "Internal 1920x1080 render target. Optimal balance.";
+                    const char* resSub = (mSettings.aspectMode == 1)
+                        ? "Internal 1440x1080 (4:3) target. Optimal balance."
+                        : ((mSettings.aspectMode == 2)
+                            ? "1080p height matched to full screen. Optimal balance."
+                            : "Internal 1920x1080 render target. Optimal balance.");
                     Color badgeBg = sc(rgba(0.10f, 0.28f, 0.44f, 0.90f));
                     Color badgeTxt = sc(rgba(0.45f, 0.88f, 1.0f, 1.0f));
                     Color badgeDot = cHeader;
 
                     if (mSettings.graphicsPreset == 4) {
                         resChip = "480p SD • Wii Native";
-                        resSub = "Internal 854x480 target. Maximum battery & speed.";
+                        resSub = (mSettings.aspectMode == 1)
+                            ? "Internal 640x480 (4:3) target. Maximum battery & speed."
+                            : ((mSettings.aspectMode == 2)
+                                ? "480p height matched to full screen. Maximum speed."
+                                : "Internal 854x480 target. Maximum battery & speed.");
                         badgeBg = sc(rgba(0.14f, 0.24f, 0.40f, 0.90f));
                         badgeTxt = sc(rgba(0.72f, 0.88f, 1.0f, 1.0f));
                     } else if (mSettings.graphicsPreset == 0) {
                         resChip = "720p HD • Power Saver";
-                        resSub = "Internal 1280x720 target. Cooler battery operation.";
+                        resSub = (mSettings.aspectMode == 1)
+                            ? "Internal 960x720 (4:3) target. Cooler battery operation."
+                            : ((mSettings.aspectMode == 2)
+                                ? "720p height matched to full screen. Cooler battery."
+                                : "Internal 1280x720 target. Cooler battery operation.");
                         badgeBg = sc(rgba(0.10f, 0.34f, 0.22f, 0.90f));
                         badgeTxt = sc(rgba(0.55f, 0.96f, 0.65f, 1.0f));
                         badgeDot = sc(rgba(0.290f, 0.871f, 0.502f, 1.0f));
                     } else if (mSettings.graphicsPreset == 1) {
                         resChip = "900p HD+ • Performance";
-                        resSub = "Internal 1600x900 target. High fluidity.";
+                        resSub = (mSettings.aspectMode == 1)
+                            ? "Internal 1200x900 (4:3) target. High fluidity."
+                            : ((mSettings.aspectMode == 2)
+                                ? "900p height matched to full screen. High fluidity."
+                                : "Internal 1600x900 target. High fluidity.");
                         badgeBg = sc(rgba(0.36f, 0.28f, 0.10f, 0.90f));
                         badgeTxt = sc(rgba(1.0f, 0.88f, 0.42f, 1.0f));
                         badgeDot = cGold;
                     } else if (mSettings.graphicsPreset == 3) {
                         resChip = "Native Display • Ultra Fidelity";
-                        resSub = "Full QHD+ native device pixels. Maximum crispness.";
+                        resSub = (mSettings.aspectMode == 1)
+                            ? "Full 4:3 native height pixels. Maximum crispness."
+                            : "Full QHD+ native device pixels. Maximum crispness.";
                         badgeBg = sc(rgba(0.34f, 0.16f, 0.44f, 0.90f));
                         badgeTxt = sc(rgba(0.92f, 0.68f, 1.0f, 1.0f));
                         badgeDot = sc(rgba(0.85f, 0.45f, 0.98f, 1.0f));
@@ -3492,8 +3528,10 @@ void UIOverlay::render(int screenW, int screenH) {
                                                     : (mSettings.hdUiTextures ? "HUD: 3D All-Stars HD" : "HUD: Wii Classic");
                 drawText(heroLine, navX0 + 10.0f * uiScale, teleTop + 80.0f * uiScale, 0.25f * uiScale, cGold, 0);
 
+                const char* viewLabel = (mSettings.aspectMode == 2) ? "View: Ultrawide Hor+"
+                                      : ((mSettings.aspectMode == 1) ? "View: 4:3 Classic" : "View: 16:9 Framed");
                 const char* netLine = (port_net_is_connected() != 0) ? "Netplay: Connected"
-                                    : (port_net_get_role() == 1 ? "Netplay: Hosting" : (mSettings.fullscreen ? "View: Ultrawide Hor+" : "View: 16:9 Framed"));
+                                    : (port_net_get_role() == 1 ? "Netplay: Hosting" : viewLabel);
                 drawText(netLine, navX0 + 10.0f * uiScale, teleTop + 98.0f * uiScale, 0.24f * uiScale, cTextSecondary, 0);
             }
         }

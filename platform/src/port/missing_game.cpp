@@ -45,6 +45,7 @@ namespace nw4r {
 
 extern "C" {
 __attribute__((weak)) int port_is_fullscreen_aspect(void) { return 0; }
+__attribute__((weak)) int port_is_4x3_aspect(void) { return 0; }
 __attribute__((weak)) float port_get_display_aspect(void) { return 16.0f / 9.0f; }
 __attribute__((weak)) int port_is_plus_edition(void) { return 0; }
 __attribute__((weak)) int port_is_early_luigi_unlocked(void) { return 0; }
