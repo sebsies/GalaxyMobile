@@ -145,6 +145,7 @@ enum UiHitKind {
     HIT_TOGGLE_HAPTICS,
     HIT_SLIDER_LANGUAGE,
     HIT_OPEN_INSTALLER,
+    HIT_CHECK_UPDATES,
     HIT_INSTALL_PLUS,
     HIT_SHARE_LOG,
     HIT_EXPORT_SAVE,
@@ -973,6 +974,11 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                 return;
             case HIT_DONATE:
                 port_open_url("https://ko-fi.com/sebsies");
+                port_play_ui_se(PORT_UI_SE_DECIDE);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                return;
+            case HIT_CHECK_UPDATES:
+                port_open_url("https://github.com/sebsies/GalaxyMobile/releases/latest");
                 port_play_ui_se(PORT_UI_SE_DECIDE);
                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                 return;
@@ -3300,6 +3306,31 @@ void UIOverlay::render(int screenW, int screenH) {
                 // =====================================================
                 // System Tab: Plus (Tab 4) & Vanilla (Tab 2)
                 // =====================================================
+                auto drawVersionCard = [&](int col) {
+                    placeCard(col, 134.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                        drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBgAlt, mPlusEdition ? cCardBorderGold : cCardBorder);
+                        drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale,
+                                       mPlusEdition ? "GalaxyMobile+ v0.7.8" : "GalaxyMobile v0.7.8",
+                                       mPlusEdition ? sc(rgba(0.38f, 0.28f, 0.08f, 0.95f)) : sc(rgba(0.10f, 0.28f, 0.46f, 0.92f)),
+                                       mPlusEdition ? sc(rgba(1.0f, 0.90f, 0.42f, 1.0f)) : sc(rgba(0.45f, 0.88f, 1.0f, 1.0f)),
+                                       mPlusEdition ? cGold : cHeader);
+                        drawText(mPlusEdition ? "All-Star Edition • Native ARM64 • GLES3 / Vulkan"
+                                              : "Vanilla Edition • Native ARM64 • GLES3 / Vulkan",
+                                 cX0 + 16.0f * uiScale, y + 52.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
+                        drawText(mPlusEdition ? "Mods, Power-Ups, Warp & Netplay run live in-engine."
+                                              : "Tuned for Android 11+ Snapdragon & Dimensity devices.",
+                                 cX0 + 16.0f * uiScale, y + 69.0f * uiScale, 0.23f * uiScale, sc(rgba(0.60f, 0.72f, 0.90f, 0.85f)), 0);
+                        float btnY = y + 84.0f * uiScale;
+                        drawGlossyBtn(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + 36.0f * uiScale, 14.0f * uiScale,
+                                      mPlusEdition ? rgba(1.0f, 0.86f, 0.30f, 0.92f) : rgba(0.32f, 0.78f, 0.99f, 0.88f),
+                                      mPlusEdition ? rgba(0.76f, 0.48f, 0.04f, 0.98f) : rgba(0.06f, 0.38f, 0.86f, 0.98f),
+                                      "CHECK FOR UPDATES",
+                                      mPlusEdition ? rgba(1.0f, 0.99f, 0.90f, 1.0f) : rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.31f);
+                        pushDeckHit(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + 36.0f * uiScale, HIT_CHECK_UPDATES);
+                        (void)cw;
+                    });
+                };
+
                 if (!mPlusEdition) {
                     placeCard(0, 130.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
                         drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
@@ -3340,28 +3371,12 @@ void UIOverlay::render(int screenW, int screenH) {
 
                     placeCard(0, 92.0f * uiScale, drawHapticsCard);
                     placeCard(1, 102.0f * uiScale, drawLangSliderCard);
-
-                    placeCard(1, 88.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
-                        drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBgAlt, cCardBorder);
-                        drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "GalaxyMobile v0.7.8", sc(rgba(0.10f, 0.28f, 0.46f, 0.92f)), sc(rgba(0.45f, 0.88f, 1.0f, 1.0f)), cHeader);
-                        drawText("Vanilla Edition • Native ARM64 • GLES3 / Vulkan", cX0 + 16.0f * uiScale, y + 54.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
-                        drawText("Tuned for Android 11+ Snapdragon & Dimensity devices.", cX0 + 16.0f * uiScale, y + 72.0f * uiScale, 0.24f * uiScale, sc(rgba(0.60f, 0.72f, 0.90f, 0.85f)), 0);
-                        (void)cw;
-                    });
-
+                    drawVersionCard(1);
                     drawDonateAndLogCards(1);
                 } else {
                     placeCard(0, 92.0f * uiScale, drawHapticsCard);
                     placeCard(0, 102.0f * uiScale, drawLangSliderCard);
-
-                    placeCard(0, 96.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
-                        drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBgAlt, cCardBorderGold);
-                        drawStatusChip(cX0 + 16.0f * uiScale, y + 14.0f * uiScale, "GalaxyMobile+ v0.7.8", sc(rgba(0.38f, 0.28f, 0.08f, 0.95f)), sc(rgba(1.0f, 0.90f, 0.42f, 1.0f)), cGold);
-                        drawText("All-Star Edition • Native ARM64 • GLES3 / Vulkan", cX0 + 16.0f * uiScale, y + 54.0f * uiScale, 0.26f * uiScale, cTextSecondary, 0);
-                        drawText("Mods, Power-Ups, Warp & Netplay run live in-engine.", cX0 + 16.0f * uiScale, y + 72.0f * uiScale, 0.24f * uiScale, sc(rgba(0.60f, 0.72f, 0.90f, 0.85f)), 0);
-                        (void)cw;
-                    });
-
+                    drawVersionCard(0);
                     drawDonateAndLogCards(1);
                 }
             }
