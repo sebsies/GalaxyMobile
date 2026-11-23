@@ -83,9 +83,10 @@ public:
     bool isSettingsOpen() const { return mSettingsOpen || mDrawerAnim > 0.01f; }
     void closeSettings(bool playCloseSe = true);
     void openSettings();
+    void openInstallerView(int mode); // 1 = Game Setup/Cooker, 2 = Riivolution Mod Studio
     void setPointer(float x, float y);
     void setFps(float fps);
-    void invalidateStatusCache() { mLastStatusProbeNs = 0; }
+    void invalidateStatusCache() { mLastStatusProbeNs = 0; mLastCookerPollNs = 0; mDirty = true; }
     Settings& settings() { return mSettings; }
     void setPlusEdition(bool plus) { mPlusEdition = plus; }
     bool isPlusEdition() const { return mPlusEdition; }
@@ -168,6 +169,14 @@ private:
     float mWarpTouchStartY = 0.0f;
     float mWarpTouchStartX = 0.0f;
     float mWarpScrollStartOffset = 0.0f;
+
+    // Unified In-Settings GalaxyInstaller & Riivolution Mod Cooker View
+    int mInstallerMode = 0;            // 0 = closed, 1 = Game Data Cooker, 2 = Riivolution Mod Studio
+    bool mCookIncludeMovies = true;
+    int mCookSelectedPackIdx = 0;
+    int mCookOptionChoices[24] = {};
+    std::string mCookLastInspectKey;
+    int64_t mLastCookerPollNs = 0;
 
     // Virtual Stick State
     int mStickPointerId = -1;

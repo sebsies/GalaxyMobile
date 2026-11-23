@@ -288,4 +288,46 @@ public class AppInstaller {
             }
         }).start();
     }
+
+    public static void triggerInstallerService(
+            Activity activity, String action, String arg1, String arg2, boolean flag,
+            String packId, String optionsJson) {
+        if (activity == null) return;
+        try {
+            Intent svc = new Intent(activity, InstallerService.class);
+            svc.putExtra(InstallerService.EXTRA_ACTION, action != null ? action : InstallerService.ACTION_SCAN);
+            if (arg1 != null && !arg1.isEmpty()) {
+                svc.putExtra(InstallerService.EXTRA_SOURCE_PATH, arg1);
+                svc.putExtra(InstallerService.EXTRA_MOD_ID, arg1);
+            }
+            if (arg2 != null && !arg2.isEmpty()) {
+                svc.putExtra(InstallerService.EXTRA_SOURCE_LABEL, arg2);
+                svc.putExtra(InstallerService.EXTRA_MODE, arg2);
+            }
+            svc.putExtra(InstallerService.EXTRA_WITH_MOVIES, flag);
+            if (packId != null && !packId.isEmpty()) {
+                svc.putExtra(InstallerService.EXTRA_PACK_ID, packId);
+            }
+            if (optionsJson != null && !optionsJson.isEmpty()) {
+                svc.putExtra(InstallerService.EXTRA_OPTIONS_JSON, optionsJson);
+            }
+            activity.startService(svc);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to start InstallerService", e);
+        }
+    }
+
+    public static void openSystemPicker(Activity activity, String pickerAction) {
+        if (activity == null) return;
+        activity.runOnUiThread(() -> {
+            try {
+                Intent intent = new Intent(activity, PickerBridgeActivity.class);
+                intent.putExtra(PickerBridgeActivity.EXTRA_ACTION, pickerAction != null ? pickerAction : PickerBridgeActivity.ACT_PICK_DISC_FILE);
+                activity.startActivity(intent);
+                activity.overridePendingTransition(0, 0);
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to launch PickerBridgeActivity", e);
+            }
+        });
+    }
 }

@@ -63,6 +63,18 @@
             android:exported="false"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:configChanges="density|keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|uiMode" />
+
+        <activity
+            android:name="com.galaxy.installer.PickerBridgeActivity"
+            android:process=":installer"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:configChanges="density|keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|uiMode" />
+
+        <service
+            android:name="com.galaxy.installer.InstallerService"
+            android:process=":installer"
+            android:exported="false" />
         <provider
             android:name="com.galaxy.installer.GalaxyFileProvider"
             android:authorities="com.galaxy.mobile.plus.fileprovider"

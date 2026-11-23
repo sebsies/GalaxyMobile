@@ -157,7 +157,21 @@ enum UiHitKind {
     HIT_NET_HOST_TOGGLE,
     HIT_NET_REFRESH,
     HIT_NET_JOIN_HOST,
-    HIT_NET_DIRECT_CONNECT
+    HIT_NET_DIRECT_CONNECT,
+    HIT_INST_BACK,
+    HIT_INST_MODE,
+    HIT_INST_GRANT_STORAGE,
+    HIT_INST_PICK_FILE,
+    HIT_INST_PICK_FOLDER,
+    HIT_INST_SCAN,
+    HIT_INST_SELECT_CANDIDATE,
+    HIT_INST_TOGGLE_MOVIES,
+    HIT_INST_START_GAME,
+    HIT_INST_SELECT_PACK,
+    HIT_INST_CYCLE_OPT,
+    HIT_INST_START_MOD,
+    HIT_INST_CANCEL_MOD,
+    HIT_INST_DELETE_MOD
 };
 
 struct Color {
@@ -532,6 +546,9 @@ bool UIOverlay::needsRedraw() {
     if (mWarpMenuOpen && fabsf(mWarpScrollY - mWarpScrollTarget) > 0.5f) {
         return true;
     }
+    if (mSettingsOpen && mInstallerMode != 0) {
+        return true;
+    }
     if (fabsf(mTabIndicatorY - mTabTargetY) > 0.5f || fabsf(mTabIndicatorH - mTabTargetH) > 0.5f) {
         return true;
     }
@@ -567,6 +584,7 @@ void UIOverlay::closeSettings(bool playCloseSe) {
     }
     mSettingsOpen = false;
     mWarpMenuOpen = false;
+    mInstallerMode = 0;
     mActiveSliderKind = 0;
     mDirty = true;
     if (!mSavePath.empty()) {
@@ -580,6 +598,20 @@ void UIOverlay::openSettings() {
     }
     mSettingsOpen = true;
     mLastStatusProbeNs = 0;
+    mDirty = true;
+}
+
+void UIOverlay::openInstallerView(int mode) {
+    if (!mSettingsOpen) {
+        port_play_ui_se(PORT_UI_SE_OPEN);
+    }
+    mSettingsOpen = true;
+    mWarpMenuOpen = false;
+    mInstallerMode = (mode == 2) ? 2 : 1;
+    mDrawerScrollY = 0.0f;
+    mDrawerScrollTarget = 0.0f;
+    mLastStatusProbeNs = 0;
+    mLastCookerPollNs = 0;
     mDirty = true;
 }
 
@@ -1352,6 +1384,141 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                 saveNow = true;
                 break;
+            case HIT_INST_BACK:
+                mInstallerMode = 0;
+                mDrawerScrollY = 0.0f;
+                mDrawerScrollTarget = 0.0f;
+                mLastStatusProbeNs = 0;
+                port_play_ui_se(PORT_UI_SE_CANCEL);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_INST_MODE:
+                mInstallerMode = (hb.arg0 == 2) ? 2 : 1;
+                mDrawerScrollY = 0.0f;
+                mDrawerScrollTarget = 0.0f;
+                mLastCookerPollNs = 0;
+                port_cooker_scan(mInstallerMode == 2 ? "mod" : "game");
+                port_play_ui_se(PORT_UI_SE_TAB);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_INST_GRANT_STORAGE:
+                port_cooker_pick("grant_storage");
+                port_play_ui_se(PORT_UI_SE_DECIDE);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_INST_PICK_FILE:
+                port_cooker_pick(mInstallerMode == 2 ? "pick_mod_file" : "pick_disc_file");
+                port_play_ui_se(PORT_UI_SE_DECIDE);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_INST_PICK_FOLDER:
+                port_cooker_pick(mInstallerMode == 2 ? "pick_mod_folder" : "pick_disc_folder");
+                port_play_ui_se(PORT_UI_SE_DECIDE);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_INST_SCAN:
+                port_cooker_scan(mInstallerMode == 2 ? "mod" : "game");
+                mLastCookerPollNs = 0;
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_INST_SELECT_CANDIDATE: {
+                PortCookerCandidate items[16];
+                int n = port_cooker_get_candidates(items, 16);
+                if (hb.arg0 >= 0 && hb.arg0 < n) {
+                    if (mInstallerMode == 2 || items[hb.arg0].isMod) {
+                        mInstallerMode = 2;
+                        port_cooker_inspect_mod(items[hb.arg0].path, items[hb.arg0].label);
+                    } else {
+                        port_cooker_select_source(items[hb.arg0].path, items[hb.arg0].label, "game");
+                    }
+                    mLastCookerPollNs = 0;
+                    port_play_ui_se(PORT_UI_SE_DECIDE);
+                    mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                }
+                break;
+            }
+            case HIT_INST_TOGGLE_MOVIES:
+                mCookIncludeMovies = !mCookIncludeMovies;
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_INST_START_GAME: {
+                PortCookerStatus st{};
+                port_cooker_get_status(&st);
+                if (st.sourcePath[0] && strcmp(st.state, "running") != 0) {
+                    port_cooker_start_game(st.sourcePath, mCookIncludeMovies ? 1 : 0);
+                    mLastCookerPollNs = 0;
+                    port_play_ui_se(PORT_UI_SE_DECIDE);
+                    mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                }
+                break;
+            }
+            case HIT_INST_SELECT_PACK: {
+                mCookSelectedPackIdx = hb.arg0;
+                PortRiivOpt opts[24];
+                int on = port_cooker_get_riiv_opts(mCookSelectedPackIdx, opts, 24);
+                for (int oi = 0; oi < on && oi < 24; oi++) {
+                    mCookOptionChoices[oi] = opts[oi].defaultIdx;
+                }
+                port_play_ui_se(PORT_UI_SE_TICK);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            }
+            case HIT_INST_CYCLE_OPT: {
+                PortRiivOpt opts[24];
+                int on = port_cooker_get_riiv_opts(mCookSelectedPackIdx, opts, 24);
+                if (hb.arg0 >= 0 && hb.arg0 < on && opts[hb.arg0].choiceCount > 0) {
+                    mCookOptionChoices[hb.arg0] = (mCookOptionChoices[hb.arg0] + 1) % opts[hb.arg0].choiceCount;
+                    port_play_ui_se(PORT_UI_SE_TICK);
+                    mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                }
+                break;
+            }
+            case HIT_INST_START_MOD: {
+                PortRiivPack packs[8];
+                int pn = port_cooker_get_riiv_packs(packs, 8);
+                int pidx = (mCookSelectedPackIdx >= 0 && mCookSelectedPackIdx < pn) ? mCookSelectedPackIdx : 0;
+                const char* packId = (pn > 0) ? packs[pidx].id : "";
+                PortRiivOpt opts[24];
+                int on = port_cooker_get_riiv_opts(pidx, opts, 24);
+                std::string json = "{";
+                if (packId[0]) {
+                    json += "\"";
+                    json += packId;
+                    json += "\":{";
+                    for (int oi = 0; oi < on; oi++) {
+                        if (oi > 0) json += ",";
+                        char entryBuf[128];
+                        snprintf(entryBuf, sizeof(entryBuf), "\"%s\":%d", opts[oi].key, mCookOptionChoices[oi]);
+                        json += entryBuf;
+                    }
+                    json += "}";
+                }
+                json += "}";
+                port_cooker_start_mod(packId, json.c_str());
+                mLastCookerPollNs = 0;
+                port_play_ui_se(PORT_UI_SE_DECIDE);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            }
+            case HIT_INST_CANCEL_MOD:
+                port_cooker_cancel_mod();
+                mLastCookerPollNs = 0;
+                port_play_ui_se(PORT_UI_SE_CANCEL);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_INST_DELETE_MOD: {
+                PortModInfo info{};
+                if (port_mods_get(hb.arg0, &info)) {
+                    port_cooker_delete_mod(info.id);
+                    port_mods_reload();
+                    mLastStatusProbeNs = 0;
+                    port_play_ui_se(PORT_UI_SE_CANCEL);
+                    mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                }
+                break;
+            }
             default:
                 break;
             }
@@ -1801,15 +1968,41 @@ void UIOverlay::render(int screenW, int screenH) {
     int numTabs = mPlusEdition ? 5 : 3;
     if (mSettingsTab < 0 || mSettingsTab >= numTabs) mSettingsTab = 0;
 
-    if (mSettingsOpen && (mSettingsTab == (numTabs - 1) || (mPlusEdition && mSettingsTab == 2))) {
+    if (mSettingsOpen && (mInstallerMode != 0 || mSettingsTab == (numTabs - 1) || (mPlusEdition && mSettingsTab == 2))) {
         if (mLastStatusProbeNs == 0 || (now - mLastStatusProbeNs) >= 2000000000LL) {
             mCachedHasSave = (port_has_save_data() != 0);
             port_mods_reload();
+            mCachedHasData = (port_has_game_data() != 0);
             if (!mPlusEdition) {
-                mCachedHasData = (port_has_game_data() != 0);
                 mCachedPlusInstalled = (port_is_plus_installed() != 0);
             }
             mLastStatusProbeNs = now;
+        }
+    }
+
+    PortCookerStatus cookSt{};
+    bool hasCookerStatus = false;
+    if (mSettingsOpen && mInstallerMode != 0) {
+        hasCookerStatus = (port_cooker_get_status(&cookSt) != 0);
+        if (strcmp(cookSt.state, "running") == 0 || strcmp(cookSt.state, "inspecting") == 0) {
+            mDirty = true;
+            if ((now - mLastCookerPollNs) >= 250000000LL) {
+                mLastCookerPollNs = now;
+            }
+        }
+        if (strcmp(cookSt.state, "options") == 0) {
+            std::string inspectKey = std::string(cookSt.sourcePath) + "|" + cookSt.packId;
+            if (inspectKey != mCookLastInspectKey) {
+                mCookLastInspectKey = inspectKey;
+                mCookSelectedPackIdx = 0;
+                PortRiivOpt opts[24];
+                int on = port_cooker_get_riiv_opts(0, opts, 24);
+                for (int oi = 0; oi < on && oi < 24; oi++) {
+                    mCookOptionChoices[oi] = opts[oi].defaultIdx;
+                }
+            }
+        } else {
+            mCookLastInspectKey.clear();
         }
     }
 
@@ -1820,6 +2013,11 @@ void UIOverlay::render(int screenW, int screenH) {
         float domeStep = 34.0f * uiScale;
         mTabTargetY = sideTopY + 14.0f * uiScale + mWarpCategoryIndex * domeStep;
         mTabTargetH = 30.0f * uiScale;
+    } else if (mInstallerMode != 0) {
+        float tabStep = 53.0f * uiScale;
+        int idx = (mInstallerMode == 2) ? 1 : 0;
+        mTabTargetY = sideTopY + 14.0f * uiScale + idx * tabStep;
+        mTabTargetH = 46.0f * uiScale;
     } else {
         float tabStep = 53.0f * uiScale;
         mTabTargetY = sideTopY + 14.0f * uiScale + mSettingsTab * tabStep;
@@ -3488,11 +3686,353 @@ void UIOverlay::render(int screenW, int screenH) {
                     drawDonateAndLogCards(1);
                 } else {
                     drawRiivolutionModsCard(0);
+                    placeCard(0, 126.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                        drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
+                        drawSectionTitle(cX0, y, "GAME STORAGE & SETUP COOKER", cHeader, true);
+                        drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale,
+                                       mCachedHasData ? "Ready (/sdcard/GalaxyData)" : "Missing - Setup Required",
+                                       mCachedHasData ? sc(rgba(0.10f, 0.34f, 0.22f, 0.90f)) : sc(rgba(0.36f, 0.28f, 0.10f, 0.90f)),
+                                       mCachedHasData ? sc(rgba(0.55f, 0.96f, 0.65f, 1.0f)) : sc(rgba(1.0f, 0.88f, 0.42f, 1.0f)),
+                                       mCachedHasData ? sc(rgba(0.290f, 0.871f, 0.502f, 1.0f)) : cGold);
+                        float btnY = y + 78.0f * uiScale;
+                        drawGlossyBtn(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + 36.0f * uiScale, 14.0f * uiScale,
+                                      rgba(0.32f, 0.78f, 0.99f, 0.85f), rgba(0.06f, 0.38f, 0.86f, 0.98f),
+                                      "OPEN GAME INSTALLER & COOKER", rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.31f);
+                        pushDeckHit(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + 36.0f * uiScale, HIT_OPEN_INSTALLER);
+                        (void)cw;
+                    });
                     placeCard(0, 92.0f * uiScale, drawHapticsCard);
-                    placeCard(0, 102.0f * uiScale, drawLangSliderCard);
+                    placeCard(1, 102.0f * uiScale, drawLangSliderCard);
                     drawVersionCard(0);
                     drawDonateAndLogCards(1);
                 }
+            }
+
+            if (mInstallerMode != 0) {
+                // Reset column heights and render the cohesive Cosmic Observatory Installer Deck
+                colY[0] = 0.0f;
+                colY[1] = 0.0f;
+                mSettingsHits.erase(
+                    std::remove_if(mSettingsHits.begin(), mSettingsHits.end(),
+                                   [](const UiHitbox& h) { return !h.fixed; }),
+                    mSettingsHits.end());
+            }
+            if (mInstallerMode != 0) {
+                bool isBusy = (strcmp(cookSt.state, "running") == 0 || strcmp(cookSt.state, "inspecting") == 0);
+                bool isOptions = (strcmp(cookSt.state, "options") == 0);
+                bool isDone = (strcmp(cookSt.state, "done") == 0);
+                bool isErr = (strcmp(cookSt.state, "error") == 0);
+
+                if (!cookSt.storageGranted) {
+                    placeCard(0, 126.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                        drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBgAlt, cCardBorderGold);
+                        drawSectionTitle(cX0, y, "STORAGE ACCESS REQUIRED", cGold, true);
+                        drawText("Allow 'All files access' so GalaxyMobile can read your", cX0 + 14.0f * uiScale, y + 40.0f * uiScale, 0.25f * uiScale, cTextPrimary, 0);
+                        drawText("game disc, Riivolution mods, and save to /sdcard/GalaxyData.", cX0 + 14.0f * uiScale, y + 57.0f * uiScale, 0.24f * uiScale, cTextSecondary, 0);
+                        float bY = y + 74.0f * uiScale;
+                        drawGlossyBtn(cX0 + 14.0f * uiScale, bY, cX1 - 14.0f * uiScale, bY + 38.0f * uiScale, 14.0f * uiScale,
+                                      rgba(1.0f, 0.86f, 0.30f, 0.95f), rgba(0.76f, 0.48f, 0.04f, 0.98f),
+                                      "ALLOW STORAGE ACCESS", rgba(1.0f, 0.99f, 0.90f, 1.0f), 0.32f);
+                        pushDeckHit(cX0 + 14.0f * uiScale, bY, cX1 - 14.0f * uiScale, bY + 38.0f * uiScale, HIT_INST_GRANT_STORAGE);
+                        (void)cw;
+                    });
+                }
+
+                PortCookerCandidate allCand[16];
+                int totalCand = hasCookerStatus ? port_cooker_get_candidates(allCand, 16) : 0;
+                int filteredIdx[6];
+                int filteredCount = 0;
+                for (int ci = 0; ci < totalCand && filteredCount < 5; ci++) {
+                    if ((mInstallerMode == 2 && allCand[ci].isMod) || (mInstallerMode == 1 && !allCand[ci].isMod)) {
+                        filteredIdx[filteredCount++] = ci;
+                    }
+                }
+
+                if (mInstallerMode == 1) {
+                    // =====================================================
+                    // Observatory Game Setup & Disc Cooker
+                    // =====================================================
+                    float candRowH = 34.0f * uiScale;
+                    float srcCardH = (176.0f + (filteredCount > 0 ? (26.0f + filteredCount * candRowH) : 0.0f)) * uiScale;
+                    placeCard(0, srcCardH, [&](float cX0, float cX1, float cw, float y, float ch) {
+                        drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
+                        drawSectionTitle(cX0, y, "GAME DATA SOURCE (PC-LESS)", cHeader, true);
+                        bool hasSrc = (cookSt.sourcePath[0] != 0 && strcmp(cookSt.mode, "mod") != 0);
+                        drawStatusChip(cX0 + 14.0f * uiScale, y + 34.0f * uiScale,
+                                       hasSrc ? (cookSt.sourceLabel[0] ? cookSt.sourceLabel : "Selected Source") : "No Disc or Folder Selected",
+                                       hasSrc ? sc(rgba(0.10f, 0.34f, 0.22f, 0.90f)) : sc(rgba(0.24f, 0.20f, 0.12f, 0.90f)),
+                                       hasSrc ? sc(rgba(0.55f, 0.96f, 0.65f, 1.0f)) : cGold,
+                                       hasSrc ? sc(rgba(0.290f, 0.871f, 0.502f, 1.0f)) : cGold);
+
+                        float bY1 = y + 70.0f * uiScale;
+                        drawGlossyBtn(cX0 + 14.0f * uiScale, bY1, cX1 - 14.0f * uiScale, bY1 + 38.0f * uiScale, 14.0f * uiScale,
+                                      rgba(0.32f, 0.78f, 0.99f, 0.88f), rgba(0.06f, 0.38f, 0.86f, 0.98f),
+                                      "SELECT DISC (.RVZ / .WBFS / .ISO / .ZIP)", rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.29f);
+                        if (!isBusy) pushDeckHit(cX0 + 14.0f * uiScale, bY1, cX1 - 14.0f * uiScale, bY1 + 38.0f * uiScale, HIT_INST_PICK_FILE);
+
+                        float bY2 = y + 116.0f * uiScale;
+                        float halfW = (cw - 36.0f * uiScale) * 0.5f;
+                        drawGlossyBtn(cX0 + 14.0f * uiScale, bY2, cX0 + 14.0f * uiScale + halfW, bY2 + 36.0f * uiScale, 13.0f * uiScale,
+                                      rgba(0.32f, 0.60f, 0.92f, 0.65f), rgba(0.09f, 0.17f, 0.38f, 0.95f),
+                                      "SELECT FOLDER", rgba(0.92f, 0.96f, 1.0f, 1.0f), 0.28f);
+                        drawGlossyBtn(cX1 - 14.0f * uiScale - halfW, bY2, cX1 - 14.0f * uiScale, bY2 + 36.0f * uiScale, 13.0f * uiScale,
+                                      rgba(0.32f, 0.60f, 0.92f, 0.65f), rgba(0.09f, 0.17f, 0.38f, 0.95f),
+                                      "SCAN DOWNLOADS", rgba(0.92f, 0.96f, 1.0f, 1.0f), 0.28f);
+                        if (!isBusy) {
+                            pushDeckHit(cX0 + 14.0f * uiScale, bY2, cX0 + 14.0f * uiScale + halfW, bY2 + 36.0f * uiScale, HIT_INST_PICK_FOLDER);
+                            pushDeckHit(cX1 - 14.0f * uiScale - halfW, bY2, cX1 - 14.0f * uiScale, bY2 + 36.0f * uiScale, HIT_INST_SCAN);
+                        }
+
+                        if (filteredCount > 0) {
+                            float cy = y + 166.0f * uiScale;
+                            drawText("DETECTED ON DEVICE (TAP TO SELECT):", cX0 + 14.0f * uiScale, cy + 10.0f * uiScale, 0.22f * uiScale, cGold, 0);
+                            cy += 18.0f * uiScale;
+                            for (int k = 0; k < filteredCount; k++) {
+                                int idx = filteredIdx[k];
+                                float ry = cy + k * candRowH;
+                                bool isSel = (strcmp(cookSt.sourcePath, allCand[idx].path) == 0);
+                                drawRoundRect(cX0 + 12.0f * uiScale, ry + 2.0f * uiScale, cX1 - 12.0f * uiScale, ry + candRowH - 2.0f * uiScale,
+                                              10.0f * uiScale, isSel ? sc(rgba(0.10f, 0.30f, 0.56f, 0.95f)) : sc(rgba(0.09f, 0.15f, 0.28f, 0.80f)));
+                                char lblBuf[64];
+                                snprintf(lblBuf, sizeof(lblBuf), "%.34s", allCand[idx].label);
+                                drawText(lblBuf, cX0 + 20.0f * uiScale, ry + 21.0f * uiScale, 0.27f * uiScale, isSel ? cGold : cTextPrimary, 0);
+                                if (!isBusy) pushDeckHit(cX0 + 12.0f * uiScale, ry, cX1 - 12.0f * uiScale, ry + candRowH, HIT_INST_SELECT_CANDIDATE, idx);
+                            }
+                        }
+                    });
+
+                    placeCard(1, 224.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                        drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, isDone ? cCardBorderGold : cCardBorder);
+                        drawSectionTitle(cX0, y, "CONVERSION & COOKER PROGRESS", isDone ? cGold : cHeader, true);
+
+                        float swRowY = y + 32.0f * uiScale;
+                        drawText("Include Cutscene Movies (~2.3 GB)", cX0 + 14.0f * uiScale, swRowY + 18.0f * uiScale, 0.32f * uiScale, cTextPrimary, 0);
+                        drawText("Uncheck to save storage on mobile", cX0 + 14.0f * uiScale, swRowY + 34.0f * uiScale, 0.23f * uiScale, cTextSecondary, 0);
+                        drawM3Switch(cX1 - swW - 14.0f * uiScale, swRowY + 6.0f * uiScale, swW, swH, mCookIncludeMovies ? 1.0f : 0.0f);
+                        if (!isBusy) pushDeckHit(cX0 + 8.0f * uiScale, swRowY, cX1 - 8.0f * uiScale, swRowY + 42.0f * uiScale, HIT_INST_TOGGLE_MOVIES);
+
+                        float pBarY = y + 86.0f * uiScale;
+                        float barX0 = cX0 + 14.0f * uiScale;
+                        float barX1 = cX1 - 14.0f * uiScale;
+                        float pctFrac = isDone ? 1.0f : std::max(0.0f, std::min(1.0f, cookSt.percent / 100.0f));
+                        drawRoundRect(barX0, pBarY, barX1, pBarY + 10.0f * uiScale, 5.0f * uiScale, sc(rgba(0.10f, 0.16f, 0.34f, 0.96f)));
+                        if (pctFrac > 0.01f) {
+                            drawRoundRect(barX0, pBarY, barX0 + (barX1 - barX0) * pctFrac, pBarY + 10.0f * uiScale, 5.0f * uiScale,
+                                          isDone ? sc(rgba(0.32f, 0.94f, 0.58f, 1.0f)) : sc(rgba(0.22f, 0.80f, 1.0f, 1.0f)));
+                        }
+                        char stBuf[128];
+                        snprintf(stBuf, sizeof(stBuf), "%.46s", cookSt.status[0] ? cookSt.status : "Ready to cook.");
+                        drawText(stBuf, cX0 + 14.0f * uiScale, pBarY + 28.0f * uiScale, 0.26f * uiScale, isErr ? rgba(1.0f, 0.45f, 0.45f, oa) : (isDone ? cGold : cTextPrimary), 0);
+
+                        float actY = y + 132.0f * uiScale;
+                        const char* btnTxt = isBusy ? "COOKING GAME DATA..." : (isDone ? "RE-COOK GAME DATA" : "START COOKING GAME DATA");
+                        drawGlossyBtn(cX0 + 14.0f * uiScale, actY, cX1 - 14.0f * uiScale, actY + 40.0f * uiScale, 15.0f * uiScale,
+                                      isBusy ? rgba(0.42f, 0.50f, 0.65f, 0.55f) : (isDone ? rgba(0.45f, 0.96f, 0.65f, 0.95f) : rgba(1.0f, 0.86f, 0.30f, 0.95f)),
+                                      isBusy ? rgba(0.14f, 0.18f, 0.28f, 0.85f) : (isDone ? rgba(0.11f, 0.52f, 0.28f, 0.98f) : rgba(0.10f, 0.42f, 0.90f, 0.98f)),
+                                      btnTxt, rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.32f);
+                        if (!isBusy && cookSt.sourcePath[0]) {
+                            pushDeckHit(cX0 + 14.0f * uiScale, actY, cX1 - 14.0f * uiScale, actY + 40.0f * uiScale, HIT_INST_START_GAME);
+                        }
+                        drawText(mCachedHasData ? "Target: /sdcard/GalaxyData (Ready to play!)" : "Target: /sdcard/GalaxyData",
+                                 cX0 + 14.0f * uiScale, y + 196.0f * uiScale, 0.24f * uiScale, mCachedHasData ? sc(rgba(0.48f, 0.95f, 0.64f, 1.0f)) : cTextSecondary, 0);
+                        (void)cw;
+                    });
+                } else {
+                    // =====================================================
+                    // Observatory Riivolution Mod Studio (Mode 2)
+                    // =====================================================
+                    if (isOptions) {
+                        PortRiivPack packs[8];
+                        int packCount = port_cooker_get_riiv_packs(packs, 8);
+                        if (mCookSelectedPackIdx < 0 || mCookSelectedPackIdx >= packCount) mCookSelectedPackIdx = 0;
+                        PortRiivOpt opts[24];
+                        int optCount = (packCount > 0) ? port_cooker_get_riiv_opts(mCookSelectedPackIdx, opts, 24) : 0;
+                        int shownOpts = std::min(optCount, 8);
+                        int memCount = (packCount > 0) ? packs[mCookSelectedPackIdx].ppcPatches : cookSt.ppcPatches;
+
+                        float optRowH = 44.0f * uiScale;
+                        float cfgH = (126.0f + (packCount > 1 ? 40.0f : 0.0f) + (memCount > 0 ? 24.0f : 0.0f) + shownOpts * optRowH) * uiScale;
+                        placeCard(0, cfgH, [&](float cX0, float cX1, float cw, float y, float ch) {
+                            drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBgAlt, cCardBorderGold);
+                            char hdrBuf[96];
+                            snprintf(hdrBuf, sizeof(hdrBuf), "RIIVOLUTION: %.24s", packCount > 0 ? packs[mCookSelectedPackIdx].name : cookSt.packName);
+                            drawSectionTitle(cX0, y, hdrBuf, cGold, true);
+
+                            float cy = y + 36.0f * uiScale;
+                            if (packCount > 1) {
+                                float pw = (cw - 28.0f * uiScale - (packCount - 1) * 6.0f * uiScale) / (float)std::min(packCount, 4);
+                                for (int pi = 0; pi < std::min(packCount, 4); pi++) {
+                                    float px0 = cX0 + 14.0f * uiScale + pi * (pw + 6.0f * uiScale);
+                                    bool sel = (pi == mCookSelectedPackIdx);
+                                    drawGlossyBtn(px0, cy, px0 + pw, cy + 30.0f * uiScale, 10.0f * uiScale,
+                                                  sel ? rgba(1.0f, 0.86f, 0.32f, 0.95f) : rgba(0.32f, 0.54f, 0.85f, 0.45f),
+                                                  sel ? rgba(0.10f, 0.42f, 0.90f, 0.98f) : rgba(0.08f, 0.14f, 0.30f, 0.90f),
+                                                  packs[pi].id, rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.25f);
+                                    pushDeckHit(px0, cy, px0 + pw, cy + 30.0f * uiScale, HIT_INST_SELECT_PACK, pi);
+                                }
+                                cy += 40.0f * uiScale;
+                            }
+
+                            if (memCount > 0) {
+                                char mBuf[96];
+                                snprintf(mBuf, sizeof(mBuf), "Note: %d Wii PPC <memory> patches skipped on ARM64; assets active.", memCount);
+                                drawText(mBuf, cX0 + 14.0f * uiScale, cy + 12.0f * uiScale, 0.22f * uiScale, cGold, 0);
+                                cy += 24.0f * uiScale;
+                            }
+
+                            for (int oi = 0; oi < shownOpts; oi++) {
+                                float ry = cy + oi * optRowH;
+                                drawRoundRect(cX0 + 12.0f * uiScale, ry + 2.0f * uiScale, cX1 - 12.0f * uiScale, ry + optRowH - 2.0f * uiScale,
+                                              10.0f * uiScale, sc(rgba(0.09f, 0.16f, 0.30f, 0.82f)));
+                                char oname[48];
+                                snprintf(oname, sizeof(oname), "%.26s", opts[oi].name);
+                                drawText(oname, cX0 + 18.0f * uiScale, ry + 25.0f * uiScale, 0.28f * uiScale, cTextPrimary, 0);
+
+                                int cidx = std::max(0, std::min(opts[oi].choiceCount - 1, mCookOptionChoices[oi]));
+                                const char* cname = (opts[oi].choiceCount > 0) ? opts[oi].choices[cidx] : "Default";
+                                char chLbl[48];
+                                snprintf(chLbl, sizeof(chLbl), "< %.16s >", cname);
+                                float pw = 136.0f * uiScale;
+                                drawGlossyBtn(cX1 - 16.0f * uiScale - pw, ry + 6.0f * uiScale, cX1 - 16.0f * uiScale, ry + optRowH - 6.0f * uiScale,
+                                              11.0f * uiScale, rgba(0.32f, 0.80f, 0.99f, 0.82f), rgba(0.08f, 0.32f, 0.72f, 0.96f),
+                                              chLbl, rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.25f);
+                                pushDeckHit(cX0 + 12.0f * uiScale, ry, cX1 - 12.0f * uiScale, ry + optRowH, HIT_INST_CYCLE_OPT, oi);
+                            }
+
+                            float btnY = y + ch - 48.0f * uiScale;
+                            float bW = (cw - 36.0f * uiScale) * 0.58f;
+                            drawGlossyBtn(cX0 + 14.0f * uiScale, btnY, cX0 + 14.0f * uiScale + bW, btnY + 38.0f * uiScale, 14.0f * uiScale,
+                                          rgba(0.45f, 0.95f, 0.65f, 0.95f), rgba(0.11f, 0.52f, 0.28f, 0.98f),
+                                          "COOK & INSTALL MOD", rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.31f);
+                            pushDeckHit(cX0 + 14.0f * uiScale, btnY, cX0 + 14.0f * uiScale + bW, btnY + 38.0f * uiScale, HIT_INST_START_MOD);
+
+                            float cW = cw - 36.0f * uiScale - bW;
+                            drawGlossyBtn(cX1 - 14.0f * uiScale - cW, btnY, cX1 - 14.0f * uiScale, btnY + 38.0f * uiScale, 14.0f * uiScale,
+                                          rgba(0.85f, 0.36f, 0.40f, 0.78f), rgba(0.38f, 0.12f, 0.18f, 0.94f),
+                                          "CANCEL", rgba(1.0f, 0.92f, 0.92f, 1.0f), 0.29f);
+                            pushDeckHit(cX1 - 14.0f * uiScale - cW, btnY, cX1 - 14.0f * uiScale, btnY + 38.0f * uiScale, HIT_INST_CANCEL_MOD);
+                        });
+                    } else {
+                        float candRowH = 34.0f * uiScale;
+                        float modSrcH = (166.0f + (filteredCount > 0 ? (26.0f + filteredCount * candRowH) : 16.0f)) * uiScale;
+                        placeCard(0, modSrcH, [&](float cX0, float cX1, float cw, float y, float ch) {
+                            drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorderGold);
+                            drawSectionTitle(cX0, y, "INSTALL RIIVOLUTION MOD", cGold, true);
+                            drawText("Pick a .zip archive or extracted riivolution/ folder", cX0 + 14.0f * uiScale, y + 38.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
+
+                            float bY1 = y + 54.0f * uiScale;
+                            float halfW = (cw - 36.0f * uiScale) * 0.5f;
+                            drawGlossyBtn(cX0 + 14.0f * uiScale, bY1, cX0 + 14.0f * uiScale + halfW, bY1 + 38.0f * uiScale, 14.0f * uiScale,
+                                          rgba(0.32f, 0.78f, 0.99f, 0.88f), rgba(0.06f, 0.38f, 0.86f, 0.98f),
+                                          "SELECT MOD .ZIP", rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.29f);
+                            drawGlossyBtn(cX1 - 14.0f * uiScale - halfW, bY1, cX1 - 14.0f * uiScale, bY1 + 38.0f * uiScale, 14.0f * uiScale,
+                                          rgba(1.0f, 0.86f, 0.30f, 0.90f), rgba(0.76f, 0.48f, 0.04f, 0.96f),
+                                          "SELECT MOD FOLDER", rgba(1.0f, 0.99f, 0.90f, 1.0f), 0.29f);
+                            if (!isBusy) {
+                                pushDeckHit(cX0 + 14.0f * uiScale, bY1, cX0 + 14.0f * uiScale + halfW, bY1 + 38.0f * uiScale, HIT_INST_PICK_FILE);
+                                pushDeckHit(cX1 - 14.0f * uiScale - halfW, bY1, cX1 - 14.0f * uiScale, bY1 + 38.0f * uiScale, HIT_INST_PICK_FOLDER);
+                            }
+
+                            float bY2 = y + 100.0f * uiScale;
+                            drawGlossyBtn(cX0 + 14.0f * uiScale, bY2, cX1 - 14.0f * uiScale, bY2 + 34.0f * uiScale, 13.0f * uiScale,
+                                          rgba(0.32f, 0.60f, 0.92f, 0.65f), rgba(0.09f, 0.17f, 0.38f, 0.95f),
+                                          "SCAN /sdcard/Riivolution & DOWNLOADS", rgba(0.92f, 0.96f, 1.0f, 1.0f), 0.27f);
+                            if (!isBusy) pushDeckHit(cX0 + 14.0f * uiScale, bY2, cX1 - 14.0f * uiScale, bY2 + 34.0f * uiScale, HIT_INST_SCAN);
+
+                            if (filteredCount > 0) {
+                                float cy = y + 148.0f * uiScale;
+                                drawText("DETECTED MODS (TAP TO INSTALL):", cX0 + 14.0f * uiScale, cy + 10.0f * uiScale, 0.22f * uiScale, cGold, 0);
+                                cy += 18.0f * uiScale;
+                                for (int k = 0; k < filteredCount; k++) {
+                                    int idx = filteredIdx[k];
+                                    float ry = cy + k * candRowH;
+                                    drawRoundRect(cX0 + 12.0f * uiScale, ry + 2.0f * uiScale, cX1 - 12.0f * uiScale, ry + candRowH - 2.0f * uiScale,
+                                                  10.0f * uiScale, sc(rgba(0.09f, 0.15f, 0.28f, 0.82f)));
+                                    char lblBuf[64];
+                                    snprintf(lblBuf, sizeof(lblBuf), "%.34s", allCand[idx].label);
+                                    drawText(lblBuf, cX0 + 20.0f * uiScale, ry + 21.0f * uiScale, 0.27f * uiScale, cTextPrimary, 0);
+                                    if (!isBusy) pushDeckHit(cX0 + 12.0f * uiScale, ry, cX1 - 12.0f * uiScale, ry + candRowH, HIT_INST_SELECT_CANDIDATE, idx);
+                                }
+                            } else {
+                                drawText("Tip: Drop packs in /sdcard/Riivolution/ or Downloads.", cX0 + 14.0f * uiScale, y + 158.0f * uiScale, 0.22f * uiScale, cTextSecondary, 0);
+                            }
+                        });
+                    }
+
+                    // Progress + Installed Mods management card on Col 1
+                    int modCount = port_mods_count();
+                    int shownMods = std::min(modCount, 5);
+                    float modRowH = 42.0f * uiScale;
+                    float modProgH = (118.0f + shownMods * modRowH) * uiScale;
+                    placeCard(1, modProgH, [&](float cX0, float cX1, float cw, float y, float ch) {
+                        drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, isDone ? cCardBorderGold : cCardBorder);
+                        drawSectionTitle(cX0, y, "MOD COOKER & INSTALLED MODS", cHeader, true);
+
+                        float barX0 = cX0 + 14.0f * uiScale;
+                        float barX1 = cX1 - 14.0f * uiScale;
+                        float barY = y + 36.0f * uiScale;
+                        float pctFrac = isDone ? 1.0f : std::max(0.0f, std::min(1.0f, cookSt.percent / 100.0f));
+                        drawRoundRect(barX0, barY, barX1, barY + 9.0f * uiScale, 4.5f * uiScale, sc(rgba(0.10f, 0.16f, 0.34f, 0.96f)));
+                        if (pctFrac > 0.01f) {
+                            drawRoundRect(barX0, barY, barX0 + (barX1 - barX0) * pctFrac, barY + 9.0f * uiScale, 4.5f * uiScale,
+                                          isDone ? sc(rgba(0.32f, 0.94f, 0.58f, 1.0f)) : sc(rgba(0.22f, 0.80f, 1.0f, 1.0f)));
+                        }
+                        char stBuf[128];
+                        snprintf(stBuf, sizeof(stBuf), "%.46s", cookSt.status[0] ? cookSt.status : "Ready.");
+                        drawText(stBuf, cX0 + 14.0f * uiScale, barY + 26.0f * uiScale, 0.25f * uiScale, isErr ? rgba(1.0f, 0.45f, 0.45f, oa) : cTextPrimary, 0);
+
+                        float cy = y + 84.0f * uiScale;
+                        if (shownMods == 0) {
+                            drawText("No cooked Riivolution mods yet.", cX0 + 14.0f * uiScale, cy + 8.0f * uiScale, 0.25f * uiScale, cTextSecondary, 0);
+                        } else {
+                            for (int mi = 0; mi < shownMods; mi++) {
+                                PortModInfo info{};
+                                if (!port_mods_get(mi, &info)) continue;
+                                float ry = cy + mi * modRowH;
+                                drawRoundRect(cX0 + 10.0f * uiScale, ry + 2.0f * uiScale, cX1 - 10.0f * uiScale, ry + modRowH - 2.0f * uiScale,
+                                              10.0f * uiScale, sc(rgba(0.10f, 0.16f, 0.28f, 0.78f)));
+                                char tbuf[48];
+                                snprintf(tbuf, sizeof(tbuf), "%.20s", info.name);
+                                drawText(tbuf, cX0 + 18.0f * uiScale, ry + 18.0f * uiScale, 0.28f * uiScale, cTextPrimary, 0);
+                                char sbuf[64];
+                                snprintf(sbuf, sizeof(sbuf), "%d files (%d new)", info.fileCount, info.createdCount);
+                                drawText(sbuf, cX0 + 18.0f * uiScale, ry + 33.0f * uiScale, 0.21f * uiScale, cTextSecondary, 0);
+
+                                float delW = 30.0f * uiScale;
+                                float delX1 = cX1 - 14.0f * uiScale;
+                                float delX0 = delX1 - delW;
+                                float swX = delX0 - swW - 8.0f * uiScale;
+                                drawM3Switch(swX, ry + 7.0f * uiScale, swW, swH, info.enabled ? 1.0f : 0.0f);
+                                pushDeckHit(cX0 + 10.0f * uiScale, ry, swX + swW + 2.0f * uiScale, ry + modRowH, HIT_TOGGLE_MOD, mi);
+
+                                drawGlossyBtn(delX0, ry + 7.0f * uiScale, delX1, ry + modRowH - 7.0f * uiScale, 8.0f * uiScale,
+                                              rgba(0.95f, 0.42f, 0.46f, 0.72f), rgba(0.42f, 0.12f, 0.18f, 0.92f),
+                                              "X", rgba(1.0f, 0.92f, 0.92f, 1.0f), 0.26f);
+                                if (!isBusy) pushDeckHit(delX0, ry + 4.0f * uiScale, delX1, ry + modRowH - 4.0f * uiScale, HIT_INST_DELETE_MOD, mi);
+                            }
+                        }
+                        (void)cw;
+                    });
+                }
+
+                // Live Console Log Card (Column 1)
+                char logLines[8][160];
+                int logN = hasCookerStatus ? port_cooker_get_log_lines(logLines, 7) : 0;
+                placeCard(1, (48.0f + std::max(2, logN) * 18.0f) * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
+                    drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, sc(rgba(0.032f, 0.056f, 0.160f, 0.95f)), cCardBorder);
+                    drawSectionTitle(cX0, y, "ENGINE CONSOLE", cHeader, false);
+                    float ly = y + 38.0f * uiScale;
+                    if (logN == 0) {
+                        drawText("[Ready] Select a source or mod to begin.", cX0 + 14.0f * uiScale, ly, 0.23f * uiScale, cTextSecondary, 0);
+                    } else {
+                        for (int li = 0; li < logN; li++) {
+                            char truncBuf[72];
+                            snprintf(truncBuf, sizeof(truncBuf), "%.56s", logLines[li]);
+                            drawText(truncBuf, cX0 + 14.0f * uiScale, ly + li * 17.0f * uiScale, 0.22f * uiScale, cTextSecondary, 0);
+                        }
+                    }
+                    (void)cw;
+                });
             }
 
             float totalContentH = (twoCol ? std::max(colY[0], colY[1]) : colY[0]) + 8.0f * uiScale;
@@ -3547,6 +4087,17 @@ void UIOverlay::render(int screenW, int screenH) {
                           rgba(1.0f, 0.88f, 0.32f, 0.96f), rgba(0.14f, 0.44f, 0.92f, 0.98f),
                           "Launch Warp", rgba(1.0f, 0.98f, 0.84f, 1.0f), 0.33f);
             pushFixedHit(lX0, 8.0f * uiScale, lX1, headerH - 8.0f * uiScale, HIT_WARP_LAUNCH);
+        } else if (mInstallerMode != 0) {
+            float backX0 = 18.0f * uiScale;
+            float backX1 = backX0 + 114.0f * uiScale;
+            drawGlossyBtn(backX0, 15.0f * uiScale, backX1, headerH - 15.0f * uiScale, 18.0f * uiScale,
+                          rgba(0.40f, 0.78f, 0.98f, 0.75f), rgba(0.10f, 0.22f, 0.48f, 0.96f),
+                          "< Settings", rgba(0.92f, 0.96f, 1.0f, 1.0f), 0.32f);
+            pushFixedHit(backX0, 8.0f * uiScale, backX1, headerH - 8.0f * uiScale, HIT_INST_BACK);
+
+            drawStar(backX1 + 26.0f * uiScale, headerH * 0.5f, 13.0f * uiScale, cGold, animPhase * 0.9f);
+            drawText(mInstallerMode == 2 ? "Riivolution Mod Studio" : "GalaxyInstaller Cooker",
+                     backX1 + 46.0f * uiScale, headerH * 0.5f + 7.0f * uiScale, 0.46f * uiScale, cTextPrimary, 0);
         } else {
             // Spinning Power Star emblem + Simple GalaxyMobile / GalaxyMobile+ Title + v0.7.8 underneath
             float emblemX = 38.0f * uiScale;
@@ -3606,6 +4157,28 @@ void UIOverlay::render(int screenW, int screenH) {
                               btnLbl, rgba(1.0f, 0.98f, 0.84f, 1.0f), 0.30f);
                 pushFixedHit(navX0 + 6.0f * uiScale, launchTop + 42.0f * uiScale, navX1 - 6.0f * uiScale, railBotY - 18.0f * uiScale, HIT_WARP_LAUNCH);
             }
+        } else if (mInstallerMode != 0) {
+            const char* instTitles[2] = { "Game Setup", "Riivolution" };
+            const char* instSubs[2]   = { "Disc / Folder Cooker", "XML Mods & Options" };
+            for (int t = 0; t < 2; t++) {
+                float ty = railTopY + 14.0f * uiScale + t * (53.0f * uiScale);
+                float th = 46.0f * uiScale;
+                bool isSel = (mInstallerMode == (t + 1));
+                if (isSel) {
+                    drawStar(navX0 + 20.0f * uiScale, ty + th * 0.5f, 8.2f * uiScale, cGold, sinf(animPhase * 1.6f) * 0.14f);
+                } else {
+                    drawSparkle(navX0 + 20.0f * uiScale, ty + th * 0.5f, 6.2f * uiScale, sc(rgba(0.45f, 0.72f, 0.98f, 0.70f)), 0.0f);
+                }
+                drawText(instTitles[t], navX0 + 36.0f * uiScale, ty + 21.0f * uiScale, 0.34f * uiScale, isSel ? cTextPrimary : sc(rgba(0.82f, 0.88f, 0.98f, 0.88f)), 0);
+                drawText(instSubs[t], navX0 + 36.0f * uiScale, ty + 36.0f * uiScale, 0.22f * uiScale, isSel ? rgba(0.84f, 0.94f, 1.0f, 0.95f * oa) : cTextSecondary, 0);
+                pushFixedHit(navX0, ty, navX1, ty + th, HIT_INST_MODE, t + 1);
+            }
+
+            float backBtnY = railTopY + 14.0f * uiScale + 2 * (53.0f * uiScale) + 12.0f * uiScale;
+            drawGlossyBtn(navX0, backBtnY, navX1, backBtnY + 40.0f * uiScale, 13.0f * uiScale,
+                          rgba(0.32f, 0.62f, 0.95f, 0.58f), rgba(0.08f, 0.16f, 0.36f, 0.92f),
+                          "< Settings Menu", rgba(0.90f, 0.95f, 1.0f, 1.0f), 0.30f);
+            pushFixedHit(navX0, backBtnY, navX1, backBtnY + 40.0f * uiScale, HIT_INST_BACK);
         } else {
             const char* tabTitles[5];
             const char* tabSubs[5];

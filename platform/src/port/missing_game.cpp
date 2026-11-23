@@ -78,6 +78,15 @@ __attribute__((weak)) int port_mods_count(void) { return 0; }
 __attribute__((weak)) int port_mods_get(int index, struct PortModInfo* outInfo) { (void)index; (void)outInfo; return 0; }
 __attribute__((weak)) int port_mods_set_enabled(const char* modId, int enabled) { (void)modId; (void)enabled; return 0; }
 __attribute__((weak)) int port_mods_has_pending_changes(void) { return 0; }
+__attribute__((weak)) void port_cooker_scan(const char* mode) { (void)mode; }
+__attribute__((weak)) void port_cooker_pick(const char* pickerAction) { (void)pickerAction; }
+__attribute__((weak)) void port_cooker_select_source(const char* path, const char* label, const char* mode) { (void)path; (void)label; (void)mode; }
+__attribute__((weak)) void port_cooker_start_game(const char* sourcePath, int withMovies) { (void)sourcePath; (void)withMovies; }
+__attribute__((weak)) void port_cooker_inspect_mod(const char* sourcePath, const char* label) { (void)sourcePath; (void)label; }
+__attribute__((weak)) void port_cooker_start_mod(const char* packId, const char* optionsJson) { (void)packId; (void)optionsJson; }
+__attribute__((weak)) void port_cooker_cancel_mod(void) {}
+__attribute__((weak)) void port_cooker_delete_mod(const char* modId) { (void)modId; }
+__attribute__((weak)) int port_cooker_is_running(void) { return 0; }
 __attribute__((weak)) void port_open_url(const char* url) { (void)url; }
 __attribute__((weak)) int port_is_plus_installed(void) { return 0; }
 __attribute__((weak)) void port_install_plus(void) {}

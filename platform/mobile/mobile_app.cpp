@@ -1157,7 +1157,8 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
     }
     if (a.dataRoot.empty()) {
         promptStoragePermissionIfMissing(app->activity);
-        mobile_ui::get().openSettings();
+        mobile_ui::get().openInstallerView(1);
+        port_cooker_scan("game");
     }
 
     bool running = true;
@@ -1201,8 +1202,8 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
             }
         }
 
-        // Boot game once window and data are available
-        if (!a.gameBooted) {
+        // Boot game once window and data are available (wait if cooker is actively writing files)
+        if (!a.gameBooted && !port_cooker_is_running()) {
             if (a.dataRoot.empty()) {
                 a.dataRoot = findGameData(ext);
             }
@@ -1593,77 +1594,332 @@ int port_has_game_data(void) {
     return 0;
 }
 
-static void launchInstallerActivity(const char* mode) {
-    if (!gMobile.android || !gMobile.android->activity) {
-        LOGE("launchInstallerActivity: Android activity not initialized");
-        return;
+namespace {
+std::string cookerDirPath() {
+    if (gMobile.android && gMobile.android->activity && gMobile.android->activity->internalDataPath) {
+        return std::string(gMobile.android->activity->internalDataPath) + "/cooker";
     }
+    return "";
+}
+
+std::string trimCookerLine(const std::string& s) {
+    size_t a = 0;
+    while (a < s.size() && (s[a] == '\r' || s[a] == '\n' || s[a] == ' ' || s[a] == '\t')) a++;
+    size_t b = s.size();
+    while (b > a && (s[b - 1] == '\r' || s[b - 1] == '\n' || s[b - 1] == ' ' || s[b - 1] == '\t')) b--;
+    return s.substr(a, b - a);
+}
+
+void callJavaInstallerService(const char* action, const char* arg1, const char* arg2,
+                              bool flag, const char* packId, const char* optionsJson) {
+    if (!gMobile.android || !gMobile.android->activity) return;
     ANativeActivity* activity = gMobile.android->activity;
-    if (!activity->vm || !activity->clazz) {
-        LOGE("launchInstallerActivity: VM or activity clazz is null");
-        return;
-    }
+    if (!activity->vm || !activity->clazz) return;
     JNIEnv* env = nullptr;
     bool attached = false;
     if (activity->vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
-        if (activity->vm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
-            attached = true;
-        }
+        if (activity->vm->AttachCurrentThread(&env, nullptr) == JNI_OK) attached = true;
     }
-    if (!env) {
-        LOGE("launchInstallerActivity: failed to get JNIEnv");
-        return;
-    }
+    if (!env) return;
 
     jclass actClass = env->GetObjectClass(activity->clazz);
-    jmethodID getPackageNameMethod = env->GetMethodID(actClass, "getPackageName", "()Ljava/lang/String;");
-    jstring pkgName = (jstring)env->CallObjectMethod(activity->clazz, getPackageNameMethod);
-
-    jclass intentClass = env->FindClass("android/content/Intent");
-    jmethodID intentCtor = env->GetMethodID(intentClass, "<init>", "()V");
-    jobject intent = env->NewObject(intentClass, intentCtor);
-
-    jmethodID setClassNameMethod = env->GetMethodID(intentClass, "setClassName", "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;");
-    jstring clsName = env->NewStringUTF("com.galaxy.installer.InstallerActivity");
-    env->CallObjectMethod(intent, setClassNameMethod, pkgName, clsName);
-
-    if (mode && mode[0]) {
-        jmethodID putExtraMethod = env->GetMethodID(intentClass, "putExtra", "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;");
-        jstring kMode = env->NewStringUTF("mode");
-        jstring vMode = env->NewStringUTF(mode);
-        env->CallObjectMethod(intent, putExtraMethod, kMode, vMode);
-        env->DeleteLocalRef(kMode);
-        env->DeleteLocalRef(vMode);
-    }
-
-    jmethodID startActivityMethod = env->GetMethodID(actClass, "startActivity", "(Landroid/content/Intent;)V");
-    env->CallVoidMethod(activity->clazz, startActivityMethod, intent);
-
-    if (env->ExceptionCheck()) {
-        LOGE("launchInstallerActivity: Exception occurred while starting InstallerActivity");
-        env->ExceptionDescribe();
-        env->ExceptionClear();
+    jmethodID getCl = env->GetMethodID(actClass, "getClassLoader", "()Ljava/lang/ClassLoader;");
+    jobject cl = env->CallObjectMethod(activity->clazz, getCl);
+    jclass clClass = env->FindClass("java/lang/ClassLoader");
+    jmethodID loadCls = env->GetMethodID(clClass, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+    jstring clsName = env->NewStringUTF("com.galaxy.installer.AppInstaller");
+    jclass appCls = (jclass)env->CallObjectMethod(cl, loadCls, clsName);
+    if (!env->ExceptionCheck() && appCls) {
+        jmethodID m = env->GetStaticMethodID(
+            appCls, "triggerInstallerService",
+            "(Landroid/app/Activity;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ZLjava/lang/String;Ljava/lang/String;)V");
+        if (m) {
+            jstring jAct = env->NewStringUTF(action ? action : "scan");
+            jstring jA1 = env->NewStringUTF(arg1 ? arg1 : "");
+            jstring jA2 = env->NewStringUTF(arg2 ? arg2 : "");
+            jstring jPack = env->NewStringUTF(packId ? packId : "");
+            jstring jOpts = env->NewStringUTF(optionsJson ? optionsJson : "");
+            env->CallStaticVoidMethod(appCls, m, activity->clazz, jAct, jA1, jA2,
+                                      flag ? JNI_TRUE : JNI_FALSE, jPack, jOpts);
+            env->DeleteLocalRef(jAct);
+            env->DeleteLocalRef(jA1);
+            env->DeleteLocalRef(jA2);
+            env->DeleteLocalRef(jPack);
+            env->DeleteLocalRef(jOpts);
+        }
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        env->DeleteLocalRef(appCls);
     } else {
-        LOGI("launchInstallerActivity: successfully launched InstallerActivity (mode=%s)", mode ? mode : "default");
+        env->ExceptionClear();
     }
-
     env->DeleteLocalRef(clsName);
-    env->DeleteLocalRef(pkgName);
-    env->DeleteLocalRef(intent);
-    env->DeleteLocalRef(intentClass);
+    env->DeleteLocalRef(clClass);
+    env->DeleteLocalRef(cl);
     env->DeleteLocalRef(actClass);
-
-    if (attached) {
-        activity->vm->DetachCurrentThread();
-    }
+    if (attached) activity->vm->DetachCurrentThread();
 }
 
+void callJavaSystemPicker(const char* pickerAction) {
+    if (!gMobile.android || !gMobile.android->activity) return;
+    ANativeActivity* activity = gMobile.android->activity;
+    if (!activity->vm || !activity->clazz) return;
+    JNIEnv* env = nullptr;
+    bool attached = false;
+    if (activity->vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
+        if (activity->vm->AttachCurrentThread(&env, nullptr) == JNI_OK) attached = true;
+    }
+    if (!env) return;
+
+    jclass actClass = env->GetObjectClass(activity->clazz);
+    jmethodID getCl = env->GetMethodID(actClass, "getClassLoader", "()Ljava/lang/ClassLoader;");
+    jobject cl = env->CallObjectMethod(activity->clazz, getCl);
+    jclass clClass = env->FindClass("java/lang/ClassLoader");
+    jmethodID loadCls = env->GetMethodID(clClass, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+    jstring clsName = env->NewStringUTF("com.galaxy.installer.AppInstaller");
+    jclass appCls = (jclass)env->CallObjectMethod(cl, loadCls, clsName);
+    if (!env->ExceptionCheck() && appCls) {
+        jmethodID m = env->GetStaticMethodID(
+            appCls, "openSystemPicker", "(Landroid/app/Activity;Ljava/lang/String;)V");
+        if (m) {
+            jstring jAct = env->NewStringUTF(pickerAction ? pickerAction : "pick_disc_file");
+            env->CallStaticVoidMethod(appCls, m, activity->clazz, jAct);
+            env->DeleteLocalRef(jAct);
+        }
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        env->DeleteLocalRef(appCls);
+    } else {
+        env->ExceptionClear();
+    }
+    env->DeleteLocalRef(clsName);
+    env->DeleteLocalRef(clClass);
+    env->DeleteLocalRef(cl);
+    env->DeleteLocalRef(actClass);
+    if (attached) activity->vm->DetachCurrentThread();
+}
+}  // namespace
+
 void port_open_installer(void) {
-    launchInstallerActivity(nullptr);
+    mobile_ui::get().openInstallerView(1);
+    port_cooker_scan("game");
 }
 
 void port_open_mod_installer(void) {
-    launchInstallerActivity("riivolution");
+    mobile_ui::get().openInstallerView(2);
+    port_cooker_scan("mod");
+}
+
+void port_cooker_scan(const char* mode) {
+    callJavaInstallerService("scan", "", mode ? mode : "game", false, "", "");
+}
+
+void port_cooker_pick(const char* pickerAction) {
+    callJavaSystemPicker(pickerAction);
+}
+
+void port_cooker_select_source(const char* path, const char* label, const char* mode) {
+    callJavaInstallerService("select_source", path ? path : "", mode ? mode : "game", false, "", "");
+    (void)label;
+}
+
+void port_cooker_start_game(const char* sourcePath, int withMovies) {
+    callJavaInstallerService("start_game_cook", sourcePath ? sourcePath : "", "game", withMovies != 0, "", "");
+}
+
+void port_cooker_inspect_mod(const char* sourcePath, const char* label) {
+    callJavaInstallerService("inspect_mod", sourcePath ? sourcePath : "", label ? label : "", false, "", "");
+}
+
+void port_cooker_start_mod(const char* packId, const char* optionsJson) {
+    callJavaInstallerService("start_mod_cook", "", "mod", false, packId ? packId : "", optionsJson ? optionsJson : "{}");
+}
+
+void port_cooker_cancel_mod(void) {
+    callJavaInstallerService("cancel_mod", "", "mod", false, "", "");
+}
+
+void port_cooker_delete_mod(const char* modId) {
+    callJavaInstallerService("delete_mod", modId ? modId : "", "mod", false, "", "");
+}
+
+int port_cooker_get_status(PortCookerStatus* outStatus) {
+    if (!outStatus) return 0;
+    memset(outStatus, 0, sizeof(*outStatus));
+    snprintf(outStatus->state, sizeof(outStatus->state), "idle");
+    snprintf(outStatus->mode, sizeof(outStatus->mode), "game");
+    snprintf(outStatus->status, sizeof(outStatus->status), "Ready to prepare game data.");
+    outStatus->storageGranted = 1;
+
+    std::string dir = cookerDirPath();
+    if (dir.empty()) return 0;
+    FILE* f = fopen((dir + "/status.ini").c_str(), "rb");
+    if (!f) return 0;
+
+    char buf[1024];
+    while (fgets(buf, sizeof(buf), f)) {
+        std::string line = trimCookerLine(buf);
+        size_t eq = line.find('=');
+        if (eq == std::string::npos || eq == 0) continue;
+        std::string k = line.substr(0, eq);
+        std::string v = line.substr(eq + 1);
+        if (k == "state") snprintf(outStatus->state, sizeof(outStatus->state), "%s", v.c_str());
+        else if (k == "mode") snprintf(outStatus->mode, sizeof(outStatus->mode), "%s", v.c_str());
+        else if (k == "percent") outStatus->percent = atoi(v.c_str());
+        else if (k == "storage_granted") outStatus->storageGranted = atoi(v.c_str());
+        else if (k == "status") snprintf(outStatus->status, sizeof(outStatus->status), "%s", v.c_str());
+        else if (k == "source_path") snprintf(outStatus->sourcePath, sizeof(outStatus->sourcePath), "%s", v.c_str());
+        else if (k == "source_label") snprintf(outStatus->sourceLabel, sizeof(outStatus->sourceLabel), "%s", v.c_str());
+        else if (k == "pack_id") snprintf(outStatus->packId, sizeof(outStatus->packId), "%s", v.c_str());
+        else if (k == "pack_name") snprintf(outStatus->packName, sizeof(outStatus->packName), "%s", v.c_str());
+        else if (k == "ppc_patches") outStatus->ppcPatches = atoi(v.c_str());
+        else if (k == "error") snprintf(outStatus->error, sizeof(outStatus->error), "%s", v.c_str());
+    }
+    fclose(f);
+    return 1;
+}
+
+int port_cooker_is_running(void) {
+    PortCookerStatus st{};
+    if (!port_cooker_get_status(&st)) return 0;
+    return (strcmp(st.state, "running") == 0 || strcmp(st.state, "inspecting") == 0) ? 1 : 0;
+}
+
+int port_cooker_get_candidates(PortCookerCandidate* outItems, int maxItems) {
+    if (!outItems || maxItems <= 0) return 0;
+    std::string dir = cookerDirPath();
+    if (dir.empty()) return 0;
+    FILE* f = fopen((dir + "/detected.ini").c_str(), "rb");
+    if (!f) return 0;
+
+    int count = 0;
+    char buf[1024];
+    while (count < maxItems && fgets(buf, sizeof(buf), f)) {
+        std::string line = trimCookerLine(buf);
+        size_t p1 = line.find('|');
+        if (p1 == std::string::npos) continue;
+        size_t p2 = line.find('|', p1 + 1);
+        if (p2 == std::string::npos) continue;
+        std::string kind = line.substr(0, p1);
+        std::string path = line.substr(p1 + 1, p2 - p1 - 1);
+        std::string lbl = line.substr(p2 + 1);
+        memset(&outItems[count], 0, sizeof(outItems[count]));
+        outItems[count].isMod = (kind == "mod") ? 1 : 0;
+        snprintf(outItems[count].path, sizeof(outItems[count].path), "%s", path.c_str());
+        snprintf(outItems[count].label, sizeof(outItems[count].label), "%s", lbl.c_str());
+        count++;
+    }
+    fclose(f);
+    return count;
+}
+
+int port_cooker_get_log_lines(char outLines[][160], int maxLines) {
+    if (!outLines || maxLines <= 0) return 0;
+    std::string dir = cookerDirPath();
+    if (dir.empty()) return 0;
+    FILE* f = fopen((dir + "/log.txt").c_str(), "rb");
+    if (!f) return 0;
+
+    std::vector<std::string> all;
+    char buf[512];
+    while (fgets(buf, sizeof(buf), f)) {
+        std::string s = trimCookerLine(buf);
+        if (!s.empty()) all.push_back(std::move(s));
+    }
+    fclose(f);
+
+    int start = (int)all.size() > maxLines ? ((int)all.size() - maxLines) : 0;
+    int count = 0;
+    for (int i = start; i < (int)all.size() && count < maxLines; i++) {
+        snprintf(outLines[count], 160, "%s", all[i].c_str());
+        count++;
+    }
+    return count;
+}
+
+int port_cooker_get_riiv_packs(PortRiivPack* outPacks, int maxPacks) {
+    if (!outPacks || maxPacks <= 0) return 0;
+    std::string dir = cookerDirPath();
+    if (dir.empty()) return 0;
+    FILE* f = fopen((dir + "/mod_options.ini").c_str(), "rb");
+    if (!f) return 0;
+
+    int count = 0;
+    char buf[1024];
+    while (count < maxPacks && fgets(buf, sizeof(buf), f)) {
+        std::string line = trimCookerLine(buf);
+        if (line.rfind("pack|", 0) != 0) continue;
+        // pack|idx|id|name|compat|mem
+        std::vector<std::string> parts;
+        size_t pos = 0;
+        while (pos <= line.size()) {
+            size_t nxt = line.find('|', pos);
+            if (nxt == std::string::npos) {
+                parts.push_back(line.substr(pos));
+                break;
+            }
+            parts.push_back(line.substr(pos, nxt - pos));
+            pos = nxt + 1;
+        }
+        if (parts.size() >= 6) {
+            memset(&outPacks[count], 0, sizeof(outPacks[count]));
+            snprintf(outPacks[count].id, sizeof(outPacks[count].id), "%s", parts[2].c_str());
+            snprintf(outPacks[count].name, sizeof(outPacks[count].name), "%s", parts[3].c_str());
+            outPacks[count].compatible = atoi(parts[4].c_str());
+            outPacks[count].ppcPatches = atoi(parts[5].c_str());
+            count++;
+        }
+    }
+    fclose(f);
+    return count;
+}
+
+int port_cooker_get_riiv_opts(int packIdx, PortRiivOpt* outOpts, int maxOpts) {
+    if (!outOpts || maxOpts <= 0) return 0;
+    std::string dir = cookerDirPath();
+    if (dir.empty()) return 0;
+    FILE* f = fopen((dir + "/mod_options.ini").c_str(), "rb");
+    if (!f) return 0;
+
+    int count = 0;
+    char buf[2048];
+    while (count < maxOpts && fgets(buf, sizeof(buf), f)) {
+        std::string line = trimCookerLine(buf);
+        if (line.rfind("opt|", 0) != 0) continue;
+        // opt|packIdx|key|name|defaultIdx|c0;;c1;;...
+        std::vector<std::string> parts;
+        size_t pos = 0;
+        while (pos <= line.size()) {
+            size_t nxt = line.find('|', pos);
+            if (nxt == std::string::npos) {
+                parts.push_back(line.substr(pos));
+                break;
+            }
+            parts.push_back(line.substr(pos, nxt - pos));
+            pos = nxt + 1;
+        }
+        if (parts.size() >= 6 && atoi(parts[1].c_str()) == packIdx) {
+            PortRiivOpt& o = outOpts[count];
+            memset(&o, 0, sizeof(o));
+            o.packIdx = packIdx;
+            snprintf(o.key, sizeof(o.key), "%s", parts[2].c_str());
+            snprintf(o.name, sizeof(o.name), "%s", parts[3].c_str());
+            o.defaultIdx = atoi(parts[4].c_str());
+            const std::string& chStr = parts[5];
+            size_t cpos = 0;
+            while (o.choiceCount < 12 && cpos <= chStr.size()) {
+                size_t nxt = chStr.find(";;", cpos);
+                std::string tok = (nxt == std::string::npos) ? chStr.substr(cpos) : chStr.substr(cpos, nxt - cpos);
+                if (!tok.empty()) {
+                    snprintf(o.choices[o.choiceCount], 64, "%s", tok.c_str());
+                    o.choiceCount++;
+                }
+                if (nxt == std::string::npos) break;
+                cpos = nxt + 2;
+            }
+            count++;
+        }
+    }
+    fclose(f);
+    return count;
 }
 
 void port_open_url(const char* url) {

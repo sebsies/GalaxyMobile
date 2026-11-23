@@ -217,6 +217,60 @@ int port_mods_get_active_save(char* outSaveId, size_t maxLen, int* outCloneVanil
 int port_dvd_resolve_sys_file(const char* name, char* outPath, size_t maxLen);
 void port_open_mod_installer(void);
 
+// ---------------------------------------------------------------------------
+// Built-in In-Settings GalaxyInstaller & Cooker IPC (mobile_app.cpp)
+// ---------------------------------------------------------------------------
+typedef struct PortCookerStatus {
+    char state[24];
+    char mode[16];
+    int percent;
+    int storageGranted;
+    char status[160];
+    char sourcePath[512];
+    char sourceLabel[128];
+    char packId[64];
+    char packName[96];
+    int ppcPatches;
+    char error[160];
+} PortCookerStatus;
+
+typedef struct PortCookerCandidate {
+    int isMod;
+    char path[512];
+    char label[128];
+} PortCookerCandidate;
+
+typedef struct PortRiivPack {
+    char id[64];
+    char name[96];
+    int compatible;
+    int ppcPatches;
+} PortRiivPack;
+
+typedef struct PortRiivOpt {
+    int packIdx;
+    char key[64];
+    char name[96];
+    int defaultIdx;
+    int choiceCount;
+    char choices[12][64];
+} PortRiivOpt;
+
+void port_cooker_scan(const char* mode);
+void port_cooker_pick(const char* pickerAction);
+void port_cooker_select_source(const char* path, const char* label, const char* mode);
+void port_cooker_start_game(const char* sourcePath, int withMovies);
+void port_cooker_inspect_mod(const char* sourcePath, const char* label);
+void port_cooker_start_mod(const char* packId, const char* optionsJson);
+void port_cooker_cancel_mod(void);
+void port_cooker_delete_mod(const char* modId);
+int port_cooker_get_status(PortCookerStatus* outStatus);
+int port_cooker_get_candidates(PortCookerCandidate* outItems, int maxItems);
+int port_cooker_get_log_lines(char outLines[][160], int maxLines);
+int port_cooker_get_riiv_packs(PortRiivPack* outPacks, int maxPacks);
+int port_cooker_get_riiv_opts(int packIdx, PortRiivOpt* outOpts, int maxOpts);
+int port_cooker_is_running(void);
+
 
 // Frame-time statistics (platform/src/port/perf.cpp), logged every 10 s.
 void port_perf_frame_begin(void);      // the game thread starts a frame
