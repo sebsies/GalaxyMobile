@@ -22,7 +22,13 @@ std::mutex sLock;  // the stream, the resampler and the WAV file
 AAudioStream* sStream = nullptr;
 int64_t sLastOpenFailNs = 0;
 std::atomic<bool> sDisconnected{false};
+std::atomic<int64_t> sLastCallbackNs{0};
 int32_t sDeviceRate = 0;
+u32 sLastSourceRate = 32000;
+bool sAppPaused = false;
+int64_t sNormalMixerUntilNs = 0;
+int64_t sPrevDisconnectNs = 0;
+int sRecentDisconnects = 0;
 std::vector<s16> sLR, sOut;
 
 // Stereo resampling with 4-point cubic (Catmull-Rom) interpolation, across
@@ -141,6 +147,7 @@ void writeWavHeader(FILE* f, u32 frames, u32 rate) {
 // AAudio's real-time thread: copies queued frames out, silence when there
 // are none.
 aaudio_data_callback_result_t dataCallback(AAudioStream*, void*, void* audioData, int32_t numFrames) {
+    sLastCallbackNs.store(port_host_time_ns(), std::memory_order_relaxed);
     s16* out = (s16*)audioData;
     u32 r = sRingRead.load(std::memory_order_relaxed);
     u32 avail = sRingWrite.load(std::memory_order_acquire) - r;
@@ -166,12 +173,11 @@ aaudio_data_callback_result_t dataCallback(AAudioStream*, void*, void* audioData
 // The output device went away or changed: port_audio_submit reopens the
 // stream (the callback may not do it itself).
 void errorCallback(AAudioStream*, void*, aaudio_result_t error) {
-    if (error == AAUDIO_ERROR_DISCONNECTED) {
-        sDisconnected = true;
-    }
+    port_log("audio: AAudio error callback: %s", AAudio_convertResultToText(error));
+    sDisconnected.store(true, std::memory_order_release);
 }
 
-bool openStream(u32 rate) {
+bool openStreamWithMode(u32 rate, aaudio_performance_mode_t perfMode) {
     AAudioStreamBuilder* b = nullptr;
     if (AAudio_createStreamBuilder(&b) != AAUDIO_OK) return false;
     AAudioStreamBuilder_setFormat(b, AAUDIO_FORMAT_PCM_I16);
@@ -179,15 +185,18 @@ bool openStream(u32 rate) {
     // The device's own rate (48 kHz on the Quest): asking for the game's
     // 32 kHz moves AAudio off its fast path, to 20 ms bursts.
     (void)rate;
-    AAudioStreamBuilder_setPerformanceMode(b, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
+    AAudioStreamBuilder_setPerformanceMode(b, perfMode);
     AAudioStreamBuilder_setSharingMode(b, AAUDIO_SHARING_MODE_SHARED);
     AAudioStreamBuilder_setUsage(b, AAUDIO_USAGE_GAME);
+#if defined(__ANDROID_API__) && __ANDROID_API__ >= 29
+    AAudioStreamBuilder_setAllowedCapturePolicy(b, AAUDIO_ALLOW_CAPTURE_BY_ALL);
+#endif
     AAudioStreamBuilder_setDataCallback(b, dataCallback, nullptr);
     AAudioStreamBuilder_setErrorCallback(b, errorCallback, nullptr);
     aaudio_result_t r = AAudioStreamBuilder_openStream(b, &sStream);
     AAudioStreamBuilder_delete(b);
-    if (r != AAUDIO_OK) {
-        port_log("audio: AAudio open failed: %s", AAudio_convertResultToText(r));
+    if (r != AAUDIO_OK || !sStream) {
+        port_log("audio: AAudio open failed (mode %d): %s", (int)perfMode, AAudio_convertResultToText(r));
         sStream = nullptr;
         return false;
     }
@@ -204,9 +213,75 @@ bool openStream(u32 rate) {
     }
     sRingRead.store(sRingWrite.load());
     sResampler = Resampler();
-    AAudioStream_requestStart(sStream);
-    port_log("audio: AAudio %d Hz (source %u Hz), burst %d frames, buffer %d frames", sDeviceRate, rate, burst, AAudioStream_getBufferSizeInFrames(sStream));
+    sDisconnected.store(false, std::memory_order_relaxed);
+    sLastCallbackNs.store(port_host_time_ns(), std::memory_order_relaxed);
+    aaudio_result_t sr = AAudioStream_requestStart(sStream);
+    if (sr != AAUDIO_OK) {
+        port_log("audio: AAudio requestStart failed (mode %d): %s", (int)perfMode, AAudio_convertResultToText(sr));
+        AAudioStream_close(sStream);
+        sStream = nullptr;
+        return false;
+    }
+    port_log("audio: AAudio %d Hz (source %u Hz), mode %d, burst %d frames, buffer %d frames", sDeviceRate, rate, (int)AAudioStream_getPerformanceMode(sStream), burst, AAudioStream_getBufferSizeInFrames(sStream));
     return true;
+}
+
+bool openStream(u32 rate) {
+    int64_t nowNs = port_host_time_ns();
+    bool preferNormal = (sNormalMixerUntilNs > nowNs);
+    if (!preferNormal && openStreamWithMode(rate, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY)) {
+        return true;
+    }
+    return openStreamWithMode(rate, AAUDIO_PERFORMANCE_MODE_NONE);
+}
+
+void reconcileStreamLocked(u32 rate) {
+    int64_t nowNs = port_host_time_ns();
+    if (sStream) {
+        bool broken = sDisconnected.exchange(false, std::memory_order_acquire);
+        aaudio_stream_state_t st = AAudioStream_getState(sStream);
+        if (st == AAUDIO_STREAM_STATE_DISCONNECTED || st == AAUDIO_STREAM_STATE_CLOSING ||
+            st == AAUDIO_STREAM_STATE_CLOSED || st == AAUDIO_STREAM_STATE_UNINITIALIZED) {
+            broken = true;
+        } else if (!sAppPaused && (st == AAUDIO_STREAM_STATE_STOPPED || st == AAUDIO_STREAM_STATE_STOPPING ||
+                                   st == AAUDIO_STREAM_STATE_PAUSED)) {
+            broken = true;
+        } else if (!sAppPaused && st == AAUDIO_STREAM_STATE_STARTED) {
+            int64_t lastCb = sLastCallbackNs.load(std::memory_order_relaxed);
+            if (lastCb > 0 && (nowNs - lastCb) > 350000000ll) {
+                port_log("audio: AAudio callback stalled (%lld ms), reopening", (long long)((nowNs - lastCb) / 1000000ll));
+                broken = true;
+            }
+        }
+        if (broken) {
+            port_log("audio: closing broken/disconnected stream (state=%s)", AAudio_convertStreamStateToText(st));
+            AAudioStream_close(sStream);
+            sStream = nullptr;
+            sRingRead.store(sRingWrite.load(std::memory_order_relaxed), std::memory_order_release);
+            if (sPrevDisconnectNs > 0 && (nowNs - sPrevDisconnectNs) < 5000000000ll) {
+                sRecentDisconnects++;
+                if (sRecentDisconnects >= 2) {
+                    // Rapid disconnects (e.g. MediaProjection screen recorder rejecting MMAP/LOW_LATENCY)
+                    // switch cleanly to AudioFlinger standard shared mixer.
+                    sNormalMixerUntilNs = nowNs + 60000000000ll;
+                    port_log("audio: switching to standard mixer mode for capture compatibility");
+                }
+            } else {
+                sRecentDisconnects = 1;
+            }
+            sPrevDisconnectNs = nowNs;
+            sLastOpenFailNs = 0;
+        }
+    }
+    if (!sStream && !sAppPaused) {
+        if (sLastOpenFailNs == 0 || (nowNs - sLastOpenFailNs) >= 500000000ll) {
+            if (openStream(rate)) {
+                sLastOpenFailNs = 0;
+            } else {
+                sLastOpenFailNs = nowNs;
+            }
+        }
+    }
 }
 
 }  // namespace
@@ -239,21 +314,8 @@ extern "C" void port_audio_submit(const s16* rightLeft, u32 frames, u32 rate) {
         }
     }
 
-    if (sStream && sDisconnected.exchange(false)) {
-        port_log("audio: output device disconnected, reopening");
-        AAudioStream_close(sStream);
-        sStream = nullptr;
-    }
-    if (!sStream) {
-        int64_t nowNs = port_host_time_ns();
-        if (sLastOpenFailNs == 0 || (nowNs - sLastOpenFailNs) >= 1000000000ll) {
-            if (openStream(rate)) {
-                sLastOpenFailNs = 0;
-            } else {
-                sLastOpenFailNs = nowNs;
-            }
-        }
-    }
+    sLastSourceRate = rate;
+    reconcileStreamLocked(rate);
     if (!sStream) return;
 
     const s16* out = sLR.data();
@@ -294,6 +356,7 @@ extern "C" int port_audio_underruns(void) { return sUnderruns.load(); }
 // timer).
 extern "C" int64_t port_audio_queued_ns(void) {
     std::lock_guard<std::mutex> lock(sLock);
+    reconcileStreamLocked(sLastSourceRate);
     if (!sStream || sDeviceRate <= 0) return (sLastOpenFailNs != 0) ? -1 : 0;
     u32 queued = sRingWrite.load(std::memory_order_relaxed) - sRingRead.load(std::memory_order_acquire);
     return (int64_t)queued * 1000000000ll / sDeviceRate;
@@ -301,17 +364,41 @@ extern "C" int64_t port_audio_queued_ns(void) {
 
 extern "C" void port_audio_set_paused(int paused) {
     std::lock_guard<std::mutex> lock(sLock);
-    if (!sStream) return;
-    if (paused) {
+    sAppPaused = (paused != 0);
+    if (!sStream) {
+        if (!sAppPaused) {
+            sLastOpenFailNs = 0;
+            reconcileStreamLocked(sLastSourceRate);
+        }
+        return;
+    }
+    if (sAppPaused) {
         AAudioStream_requestPause(sStream);
     } else {
-        if (sDisconnected.exchange(false)) {
+        sLastOpenFailNs = 0;
+        aaudio_stream_state_t st = AAudioStream_getState(sStream);
+        if (st == AAUDIO_STREAM_STATE_PAUSING) {
+            aaudio_stream_state_t nextSt = st;
+            AAudioStream_waitForStateChange(sStream, st, &nextSt, 50000000ll);
+            st = nextSt;
+        }
+        if (sDisconnected.exchange(false, std::memory_order_acquire) ||
+            st == AAUDIO_STREAM_STATE_DISCONNECTED || st == AAUDIO_STREAM_STATE_CLOSING ||
+            st == AAUDIO_STREAM_STATE_CLOSED || st == AAUDIO_STREAM_STATE_STOPPED ||
+            st == AAUDIO_STREAM_STATE_STOPPING) {
             AAudioStream_close(sStream);
             sStream = nullptr;
-            sLastOpenFailNs = 0;
-        } else {
+            reconcileStreamLocked(sLastSourceRate);
+        } else if (st != AAUDIO_STREAM_STATE_STARTED && st != AAUDIO_STREAM_STATE_STARTING) {
             sRingRead.store(sRingWrite.load(std::memory_order_relaxed), std::memory_order_release);
-            AAudioStream_requestStart(sStream);
+            sLastCallbackNs.store(port_host_time_ns(), std::memory_order_relaxed);
+            if (AAudioStream_requestStart(sStream) != AAUDIO_OK) {
+                AAudioStream_close(sStream);
+                sStream = nullptr;
+                reconcileStreamLocked(sLastSourceRate);
+            }
+        } else {
+            sLastCallbackNs.store(port_host_time_ns(), std::memory_order_relaxed);
         }
     }
 }

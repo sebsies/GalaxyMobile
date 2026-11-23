@@ -29,6 +29,8 @@
         android:debuggable="true"
         android:extractNativeLibs="true"
         android:largeHeap="true"
+        android:allowAudioPlaybackCapture="true"
+        android:allowBackup="false">
         android:allowBackup="false">
 
         <activity
