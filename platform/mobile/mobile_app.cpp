@@ -1040,6 +1040,11 @@ void onAppCmd(android_app* app, int32_t cmd) {
         port_set_paused(0);
         port_audio_set_paused(0);
         mobile_ui::get().invalidateStatusCache();
+        if (!a->dataRoot.empty()) {
+            port_mods_set_root(a->dataRoot.c_str());
+        } else {
+            port_mods_set_root("/sdcard/GalaxyData");
+        }
         if (a->tiltSensorEnabled) {
             a->displayRotation = queryDisplayRotation(a->android);
         }
@@ -1145,6 +1150,11 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
 
     // Search for game data files
     a.dataRoot = findGameData(ext);
+    if (!a.dataRoot.empty()) {
+        port_mods_set_root(a.dataRoot.c_str());
+    } else {
+        port_mods_set_root("/sdcard/GalaxyData");
+    }
     if (a.dataRoot.empty()) {
         promptStoragePermissionIfMissing(app->activity);
         mobile_ui::get().openSettings();
@@ -1583,14 +1593,14 @@ int port_has_game_data(void) {
     return 0;
 }
 
-void port_open_installer(void) {
+static void launchInstallerActivity(const char* mode) {
     if (!gMobile.android || !gMobile.android->activity) {
-        LOGE("port_open_installer: Android activity not initialized");
+        LOGE("launchInstallerActivity: Android activity not initialized");
         return;
     }
     ANativeActivity* activity = gMobile.android->activity;
     if (!activity->vm || !activity->clazz) {
-        LOGE("port_open_installer: VM or activity clazz is null");
+        LOGE("launchInstallerActivity: VM or activity clazz is null");
         return;
     }
     JNIEnv* env = nullptr;
@@ -1601,7 +1611,7 @@ void port_open_installer(void) {
         }
     }
     if (!env) {
-        LOGE("port_open_installer: failed to get JNIEnv");
+        LOGE("launchInstallerActivity: failed to get JNIEnv");
         return;
     }
 
@@ -1617,15 +1627,24 @@ void port_open_installer(void) {
     jstring clsName = env->NewStringUTF("com.galaxy.installer.InstallerActivity");
     env->CallObjectMethod(intent, setClassNameMethod, pkgName, clsName);
 
+    if (mode && mode[0]) {
+        jmethodID putExtraMethod = env->GetMethodID(intentClass, "putExtra", "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;");
+        jstring kMode = env->NewStringUTF("mode");
+        jstring vMode = env->NewStringUTF(mode);
+        env->CallObjectMethod(intent, putExtraMethod, kMode, vMode);
+        env->DeleteLocalRef(kMode);
+        env->DeleteLocalRef(vMode);
+    }
+
     jmethodID startActivityMethod = env->GetMethodID(actClass, "startActivity", "(Landroid/content/Intent;)V");
     env->CallVoidMethod(activity->clazz, startActivityMethod, intent);
 
     if (env->ExceptionCheck()) {
-        LOGE("port_open_installer: Exception occurred while starting InstallerActivity");
+        LOGE("launchInstallerActivity: Exception occurred while starting InstallerActivity");
         env->ExceptionDescribe();
         env->ExceptionClear();
     } else {
-        LOGI("port_open_installer: successfully launched InstallerActivity");
+        LOGI("launchInstallerActivity: successfully launched InstallerActivity (mode=%s)", mode ? mode : "default");
     }
 
     env->DeleteLocalRef(clsName);
@@ -1637,6 +1656,14 @@ void port_open_installer(void) {
     if (attached) {
         activity->vm->DetachCurrentThread();
     }
+}
+
+void port_open_installer(void) {
+    launchInstallerActivity(nullptr);
+}
+
+void port_open_mod_installer(void) {
+    launchInstallerActivity("riivolution");
 }
 
 void port_open_url(const char* url) {

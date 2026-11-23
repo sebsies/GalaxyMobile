@@ -5,8 +5,10 @@
 // files on the host.  Reads run on a worker thread and complete through the
 // DVD interrupt, like the real drive.
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -15,9 +17,11 @@
 
 #include <condition_variable>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "port/heap_routing.h"
@@ -41,16 +45,158 @@ struct FstEntry {
     u32 next;    // dirs: index after the last child
     std::string hostPath;
     std::string hdPath;
+    std::string modPath;
     std::string activePath;
     s64 size = -1;
     s64 hdSize = -1;
+    s64 modSize = -1;
     int fd = -1;
     u64 lastUseTick = 0;
 };
 
 static std::vector<FstEntry> sFst;
 static std::string sDataRoot;
+static std::string sModsRoot;
 static u32 sCurrentDir = 0;
+
+struct InstalledMod {
+    std::string id;
+    std::string name;
+    std::string saveId;
+    bool cloneSave = true;
+    bool enabled = false;
+    bool activeAtBoot = false;
+    int fileCount = 0;
+    int createdCount = 0;
+    int ppcPatchCount = 0;
+};
+
+static std::mutex sModsMutex;
+static std::vector<InstalledMod> sConfiguredMods;
+static std::vector<InstalledMod> sActiveBootMods;
+static bool sModsBootSnapshotted = false;
+
+static std::string trimStr(const std::string& s) {
+    size_t a = 0;
+    while (a < s.size() && (s[a] == ' ' || s[a] == '\t' || s[a] == '\r' || s[a] == '\n')) a++;
+    size_t b = s.size();
+    while (b > a && (s[b - 1] == ' ' || s[b - 1] == '\t' || s[b - 1] == '\r' || s[b - 1] == '\n')) b--;
+    return s.substr(a, b - a);
+}
+
+static bool dirExists(const std::string& path) {
+    struct stat st;
+    return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+static bool fileExists(const std::string& path) {
+    struct stat st;
+    return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+}
+
+static InstalledMod readModIni(const std::string& modsDir, const std::string& modId, bool enabled) {
+    InstalledMod m;
+    m.id = modId;
+    m.name = modId;
+    m.enabled = enabled;
+    FILE* f = fopen((modsDir + "/" + modId + "/mod.ini").c_str(), "rb");
+    if (!f) return m;
+    char line[512];
+    while (fgets(line, sizeof(line), f)) {
+        std::string s = trimStr(line);
+        size_t eq = s.find('=');
+        if (eq == std::string::npos || eq == 0) continue;
+        std::string k = trimStr(s.substr(0, eq));
+        std::string v = trimStr(s.substr(eq + 1));
+        if (k == "name" && !v.empty()) m.name = v;
+        else if (k == "save_id") m.saveId = v;
+        else if (k == "clone_save") m.cloneSave = (v != "0" && strcasecmp(v.c_str(), "false") != 0);
+        else if (k == "file_count") m.fileCount = atoi(v.c_str());
+        else if (k == "created_count") m.createdCount = atoi(v.c_str());
+        else if (k == "ppc_patches") m.ppcPatchCount = atoi(v.c_str());
+    }
+    fclose(f);
+    return m;
+}
+
+static void reloadModsLocked() {
+    std::string root = !sModsRoot.empty() ? sModsRoot : sDataRoot;
+    sConfiguredMods.clear();
+    if (root.empty()) return;
+    std::string modsDir = root + "/mods";
+    std::string cfgPath = modsDir + "/mods_config.ini";
+
+    auto wasActiveAtBoot = [](const std::string& id) -> bool {
+        for (const auto& b : sActiveBootMods) {
+            if (b.id == id) return true;
+        }
+        return false;
+    };
+
+    std::vector<std::string> seen;
+    FILE* f = fopen(cfgPath.c_str(), "rb");
+    if (f) {
+        char line[512];
+        while (fgets(line, sizeof(line), f)) {
+            std::string s = trimStr(line);
+            if (s.empty() || s[0] == '#') continue;
+            size_t bar = s.find('|');
+            if (bar == std::string::npos || bar == 0) continue;
+            std::string state = trimStr(s.substr(0, bar));
+            std::string modId = trimStr(s.substr(bar + 1));
+            if (modId.empty() || !dirExists(modsDir + "/" + modId)) continue;
+            bool dup = false;
+            for (const auto& x : seen) {
+                if (x == modId) { dup = true; break; }
+            }
+            if (dup) continue;
+            seen.push_back(modId);
+            InstalledMod m = readModIni(modsDir, modId, strcasecmp(state.c_str(), "enabled") == 0);
+            m.activeAtBoot = wasActiveAtBoot(modId);
+            sConfiguredMods.push_back(std::move(m));
+        }
+        fclose(f);
+    }
+
+    DIR* dir = opendir(modsDir.c_str());
+    if (dir) {
+        struct dirent* ent;
+        while ((ent = readdir(dir)) != nullptr) {
+            if (ent->d_name[0] == '.') continue;
+            std::string modId = ent->d_name;
+            bool known = false;
+            for (const auto& x : seen) {
+                if (x == modId) { known = true; break; }
+            }
+            if (known) continue;
+            std::string modPath = modsDir + "/" + modId;
+            if (!dirExists(modPath)) continue;
+            if (!dirExists(modPath + "/files") && !dirExists(modPath + "/sys")) continue;
+            seen.push_back(modId);
+            InstalledMod m = readModIni(modsDir, modId, false);
+            m.activeAtBoot = wasActiveAtBoot(modId);
+            sConfiguredMods.push_back(std::move(m));
+        }
+        closedir(dir);
+    }
+}
+
+static bool writeModsConfigLocked() {
+    std::string root = !sModsRoot.empty() ? sModsRoot : sDataRoot;
+    if (root.empty()) return false;
+    std::string modsDir = root + "/mods";
+    mkdir(modsDir.c_str(), 0755);
+    std::string cfgPath = modsDir + "/mods_config.ini";
+    FILE* f = fopen(cfgPath.c_str(), "wb");
+    if (!f) return false;
+    fprintf(f, "# GalaxyMobile Riivolution Mods Config\n");
+    fprintf(f, "# Order from top to bottom = highest to lowest priority\n");
+    for (const auto& m : sConfiguredMods) {
+        fprintf(f, "%s|%s\n", m.enabled ? "enabled" : "disabled", m.id.c_str());
+    }
+    fclose(f);
+    return true;
+}
 
 static u32 be32(const u8* p) { return ((u32)p[0] << 24) | ((u32)p[1] << 16) | ((u32)p[2] << 8) | p[3]; }
 
@@ -157,6 +303,22 @@ extern "C" const PortDisc* port_dvd_disc(void) { return sDisc; }
 extern "C" void port_dvd_set_root(const char* root) {
     PortHostAllocScope scope;
     sDataRoot = root;
+    {
+        std::lock_guard<std::mutex> lk(sModsMutex);
+        if (root && root[0]) sModsRoot = root;
+        reloadModsLocked();
+        sActiveBootMods.clear();
+        for (auto& m : sConfiguredMods) {
+            if (m.enabled) {
+                m.activeAtBoot = true;
+                sActiveBootMods.push_back(m);
+            }
+        }
+        sModsBootSnapshotted = true;
+        if (!sActiveBootMods.empty()) {
+            port_log("mods: %zu Riivolution mod(s) enabled for boot", sActiveBootMods.size());
+        }
+    }
     sDisc = port_dvd_identify(root);
     sLanguageCount = 0;
     if (sDisc) {
@@ -171,6 +333,94 @@ extern "C" void port_dvd_set_root(const char* root) {
     if (const char* name = getenv("PETARI_LANGUAGE")) {
         port_language_set(name);
     }
+}
+
+extern "C" void port_mods_set_root(const char* dataRoot) {
+    PortHostAllocScope scope;
+    std::lock_guard<std::mutex> lk(sModsMutex);
+    if (dataRoot && dataRoot[0]) {
+        sModsRoot = dataRoot;
+    }
+    reloadModsLocked();
+}
+
+extern "C" void port_mods_reload(void) {
+    PortHostAllocScope scope;
+    std::lock_guard<std::mutex> lk(sModsMutex);
+    reloadModsLocked();
+}
+
+extern "C" int port_mods_count(void) {
+    std::lock_guard<std::mutex> lk(sModsMutex);
+    return (int)sConfiguredMods.size();
+}
+
+extern "C" int port_mods_get(int index, PortModInfo* outInfo) {
+    std::lock_guard<std::mutex> lk(sModsMutex);
+    if (!outInfo || index < 0 || index >= (int)sConfiguredMods.size()) return 0;
+    const InstalledMod& m = sConfiguredMods[index];
+    memset(outInfo, 0, sizeof(*outInfo));
+    snprintf(outInfo->id, sizeof(outInfo->id), "%s", m.id.c_str());
+    snprintf(outInfo->name, sizeof(outInfo->name), "%s", m.name.c_str());
+    snprintf(outInfo->saveId, sizeof(outInfo->saveId), "%s", m.saveId.c_str());
+    outInfo->enabled = m.enabled ? 1 : 0;
+    outInfo->activeAtBoot = m.activeAtBoot ? 1 : 0;
+    outInfo->fileCount = m.fileCount;
+    outInfo->createdCount = m.createdCount;
+    outInfo->ppcPatchCount = m.ppcPatchCount;
+    return 1;
+}
+
+extern "C" int port_mods_set_enabled(const char* modId, int enabled) {
+    PortHostAllocScope scope;
+    if (!modId || !modId[0]) return 0;
+    std::lock_guard<std::mutex> lk(sModsMutex);
+    for (auto& m : sConfiguredMods) {
+        if (m.id == modId) {
+            m.enabled = (enabled != 0);
+            return writeModsConfigLocked() ? 1 : 0;
+        }
+    }
+    return 0;
+}
+
+extern "C" int port_mods_has_pending_changes(void) {
+    std::lock_guard<std::mutex> lk(sModsMutex);
+    if (!sModsBootSnapshotted) return 0;
+    for (const auto& m : sConfiguredMods) {
+        if (m.enabled != m.activeAtBoot) return 1;
+    }
+    return 0;
+}
+
+extern "C" int port_mods_get_active_save(char* outSaveId, size_t maxLen, int* outCloneVanilla) {
+    std::lock_guard<std::mutex> lk(sModsMutex);
+    for (const auto& m : sActiveBootMods) {
+        if (!m.saveId.empty()) {
+            if (outSaveId && maxLen > 0) snprintf(outSaveId, maxLen, "%s", m.saveId.c_str());
+            if (outCloneVanilla) *outCloneVanilla = m.cloneSave ? 1 : 0;
+            return 1;
+        }
+    }
+    if (outSaveId && maxLen > 0) outSaveId[0] = 0;
+    return 0;
+}
+
+extern "C" int port_dvd_resolve_sys_file(const char* name, char* outPath, size_t maxLen) {
+    PortHostAllocScope scope;
+    if (!name || !name[0] || !outPath || maxLen == 0) return 0;
+    outPath[0] = 0;
+    std::lock_guard<std::mutex> lk(sModsMutex);
+    std::string root = !sModsRoot.empty() ? sModsRoot : sDataRoot;
+    if (root.empty()) return 0;
+    for (const auto& m : sActiveBootMods) {
+        std::string cand = root + "/mods/" + m.id + "/sys/" + name;
+        if (fileExists(cand)) {
+            snprintf(outPath, maxLen, "%s", cand.c_str());
+            return 1;
+        }
+    }
+    return 0;
 }
 
 extern "C" int port_language_count(void) { return sLanguageCount; }
@@ -275,6 +525,148 @@ extern "C" int port_language_start(void) {
 
 extern "C" const char* port_dvd_root(void) { return sDataRoot.c_str(); }
 
+struct FstTreeNode {
+    bool isDir = false;
+    std::string name;
+    std::string hostPath;
+    std::string hdPath;
+    std::string modPath;
+    s64 hdSize = -1;
+    s64 modSize = -1;
+    std::vector<std::unique_ptr<FstTreeNode>> children;
+};
+
+static FstTreeNode* findChildNode(FstTreeNode* parent, const char* name) {
+    for (const auto& ch : parent->children) {
+        if (strcasecmp(ch->name.c_str(), name) == 0) {
+            return ch.get();
+        }
+    }
+    return nullptr;
+}
+
+static void overlayModDirectory(FstTreeNode* parentNode, const std::string& hostDirPath,
+                                int& replacedCount, int& createdCount) {
+    DIR* dir = opendir(hostDirPath.c_str());
+    if (!dir) return;
+    struct dirent* ent;
+    while ((ent = readdir(dir)) != nullptr) {
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+        std::string childHost = hostDirPath + "/" + ent->d_name;
+        struct stat st;
+        if (stat(childHost.c_str(), &st) != 0) continue;
+        FstTreeNode* match = findChildNode(parentNode, ent->d_name);
+        if (S_ISDIR(st.st_mode)) {
+            if (!match) {
+                auto node = std::make_unique<FstTreeNode>();
+                node->isDir = true;
+                node->name = ent->d_name;
+                match = node.get();
+                parentNode->children.push_back(std::move(node));
+            }
+            if (match->isDir) {
+                overlayModDirectory(match, childHost, replacedCount, createdCount);
+            }
+        } else if (S_ISREG(st.st_mode)) {
+            if (match && !match->isDir) {
+                if (match->modPath.empty()) {
+                    match->modPath = childHost;
+                    match->modSize = (s64)st.st_size;
+                    replacedCount++;
+                }
+            } else if (!match) {
+                auto node = std::make_unique<FstTreeNode>();
+                node->isDir = false;
+                node->name = ent->d_name;
+                node->hostPath = childHost;
+                node->modPath = childHost;
+                node->modSize = (s64)st.st_size;
+                parentNode->children.push_back(std::move(node));
+                createdCount++;
+            }
+        }
+    }
+    closedir(dir);
+}
+
+static void flattenFstTree(const FstTreeNode* node, u32 parentIdx, std::vector<FstEntry>& out) {
+    u32 myIdx = (u32)out.size();
+    out.emplace_back();
+    out[myIdx].isDir = node->isDir;
+    out[myIdx].name = node->name;
+    out[myIdx].parent = parentIdx;
+    out[myIdx].hostPath = node->hostPath;
+    out[myIdx].hdPath = node->hdPath;
+    out[myIdx].modPath = node->modPath;
+    out[myIdx].activePath = !node->modPath.empty() ? node->modPath : node->hostPath;
+    out[myIdx].hdSize = node->hdSize;
+    out[myIdx].modSize = node->modSize;
+    if (node->isDir) {
+        for (const auto& ch : node->children) {
+            flattenFstTree(ch.get(), myIdx, out);
+        }
+        out[myIdx].next = (u32)out.size();
+    } else {
+        out[myIdx].next = myIdx + 1;
+    }
+}
+
+static void applyBootModsToFst() {
+    std::vector<InstalledMod> bootMods;
+    std::string root;
+    {
+        std::lock_guard<std::mutex> lk(sModsMutex);
+        bootMods = sActiveBootMods;
+        root = !sModsRoot.empty() ? sModsRoot : sDataRoot;
+    }
+    if (bootMods.empty() || sFst.empty()) return;
+
+    auto treeRoot = std::make_unique<FstTreeNode>();
+    treeRoot->isDir = true;
+    treeRoot->name = sFst[0].name;
+
+    std::vector<std::pair<u32, FstTreeNode*>> stack;
+    stack.push_back({sFst[0].next, treeRoot.get()});
+    for (u32 i = 1; i < (u32)sFst.size(); i++) {
+        while (stack.size() > 1 && i >= stack.back().first) {
+            stack.pop_back();
+        }
+        const FstEntry& fe = sFst[i];
+        auto node = std::make_unique<FstTreeNode>();
+        node->isDir = fe.isDir;
+        node->name = fe.name;
+        node->hostPath = fe.hostPath;
+        node->hdPath = fe.hdPath;
+        node->hdSize = fe.hdSize;
+        FstTreeNode* raw = node.get();
+        stack.back().second->children.push_back(std::move(node));
+        if (fe.isDir) {
+            stack.push_back({fe.next, raw});
+        }
+    }
+
+    int totalReplaced = 0;
+    int totalCreated = 0;
+    for (const auto& mod : bootMods) {
+        std::string modFiles = root + "/mods/" + mod.id + "/files";
+        if (!dirExists(modFiles)) continue;
+        int rep = 0, cre = 0;
+        overlayModDirectory(treeRoot.get(), modFiles, rep, cre);
+        totalReplaced += rep;
+        totalCreated += cre;
+        port_log("mods: [Riivolution] mounted '%s' (%d replaced, %d created)", mod.name.c_str(), rep, cre);
+    }
+
+    if (totalReplaced > 0 || totalCreated > 0) {
+        std::vector<FstEntry> rebuilt;
+        rebuilt.reserve(sFst.size() + (size_t)totalCreated + 32);
+        flattenFstTree(treeRoot.get(), 0, rebuilt);
+        sFst.swap(rebuilt);
+        port_log("mods: FST overlay rebuilt -> %zu entries (%d replaced, %d new)",
+                 sFst.size(), totalReplaced, totalCreated);
+    }
+}
+
 static bool loadFst() {
     PortHostAllocScope scope;
     std::vector<u8> data = readFst(sDataRoot);
@@ -321,7 +713,8 @@ static bool loadFst() {
             }
         }
     }
-    port_log("dvd: fst loaded, %u entries, root %s", count, sDataRoot.c_str());
+    applyBootModsToFst();
+    port_log("dvd: fst loaded, %zu entries, root %s", sFst.size(), sDataRoot.c_str());
     return true;
 }
 
@@ -331,6 +724,9 @@ static s64 entrySize(u32 entry) {
     PortHostAllocScope scope;
     std::lock_guard<std::mutex> lk(sFstMutex);
     FstEntry& fe = sFst[entry];
+    if (!fe.modPath.empty()) {
+        return fe.modSize;
+    }
     if (port_is_hd_ui_enabled() && !fe.hdPath.empty()) {
         return fe.hdSize;
     }
@@ -417,7 +813,9 @@ static int openEntry(u32 entry) {
     PortHostAllocScope scope;
     std::lock_guard<std::mutex> lk(sFstMutex);
     FstEntry& fe = sFst[entry];
-    const std::string& neededPath = (port_is_hd_ui_enabled() && !fe.hdPath.empty()) ? fe.hdPath : fe.hostPath;
+    const std::string& neededPath =
+        !fe.modPath.empty() ? fe.modPath
+                            : ((port_is_hd_ui_enabled() && !fe.hdPath.empty()) ? fe.hdPath : fe.hostPath);
     if (fe.fd >= 0 && fe.activePath != neededPath) {
         close(fe.fd);
         fe.fd = -1;
@@ -445,7 +843,9 @@ static int openEntry(u32 entry) {
         } else {
             sOpenFdCount++;
             fe.lastUseTick = ++sFdAccessSeq;
-            if (!fe.hdPath.empty() && neededPath == fe.hdPath) {
+            if (!fe.modPath.empty() && neededPath == fe.modPath) {
+                port_log("dvd: [Riivolution] loaded %s", neededPath.c_str());
+            } else if (!fe.hdPath.empty() && neededPath == fe.hdPath) {
                 port_log("dvd: [Plus HD] loaded %s", neededPath.c_str());
             }
         }

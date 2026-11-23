@@ -129,6 +129,51 @@
             android:layout_marginBottom="16dp"
             android:background="@color/surface_border" />
 
+        <!-- Riivolution Mod Support Section -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/section_mods"
+            android:textColor="@color/text_primary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnInstallMod"
+                android:layout_width="0dp"
+                android:layout_height="46dp"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                android:text="@string/btn_install_mod"
+                android:backgroundTint="@color/surface_card"
+                android:textColor="@color/primary_accent"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btnManageMods"
+                android:layout_width="0dp"
+                android:layout_height="46dp"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                android:text="@string/btn_manage_mods"
+                android:backgroundTint="@color/surface_card"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="16dp"
+            android:background="@color/surface_border" />
+
         <!-- Step 2 Card: Conversion Options -->
         <TextView
             android:layout_width="wrap_content"

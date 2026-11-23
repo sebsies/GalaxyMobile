@@ -18,4 +18,7 @@
     <string name="status_cooking">Cooking game data... Please keep app open.</string>
     <string name="status_done">All game files cooked successfully! Ready to play.</string>
     <string name="status_error">An error occurred during cooking.</string>
+    <string name="section_mods">Riivolution Mods (Custom Levels, Models &amp; Audio)</string>
+    <string name="btn_install_mod">Install Riivolution Mod (.zip / Folder)</string>
+    <string name="btn_manage_mods">Manage Installed Mods</string>
 </resources>

@@ -193,6 +193,30 @@ int port_take_character_change_request(void);
 void port_play_ui_se(int seType);
 int port_take_ui_se_request(void);
 
+// ---------------------------------------------------------------------------
+// Riivolution Mod Overlay & Management (platform/src/dvd/dvd.cpp)
+// ---------------------------------------------------------------------------
+typedef struct PortModInfo {
+    char id[64];
+    char name[96];
+    char saveId[64];
+    int enabled;
+    int activeAtBoot;
+    int fileCount;
+    int createdCount;
+    int ppcPatchCount;
+} PortModInfo;
+
+void port_mods_set_root(const char* dataRoot);
+void port_mods_reload(void);
+int port_mods_count(void);
+int port_mods_get(int index, PortModInfo* outInfo);
+int port_mods_set_enabled(const char* modId, int enabled);
+int port_mods_has_pending_changes(void);
+int port_mods_get_active_save(char* outSaveId, size_t maxLen, int* outCloneVanilla);
+int port_dvd_resolve_sys_file(const char* name, char* outPath, size_t maxLen);
+void port_open_mod_installer(void);
+
 
 // Frame-time statistics (platform/src/port/perf.cpp), logged every 10 s.
 void port_perf_frame_begin(void);      // the game thread starts a frame

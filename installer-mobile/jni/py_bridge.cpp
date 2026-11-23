@@ -178,8 +178,12 @@ Java_com_galaxy_installer_CookerEngine_extractDisc(
 }
 
 // ---------------------------------------------------------------------------
-// JNI Method: runCooker(pythonHome, scriptsDir, inputDir, outputDir, withMovies, Callback)
+// Shared embedded Python initialization & helpers
 // ---------------------------------------------------------------------------
+static std::mutex sPyMutex;
+static std::wstring sPyHome;
+static bool sPyInited = false;
+
 static std::string escapePyLiteral(const char* raw) {
     std::string out;
     if (!raw) return out;
@@ -194,30 +198,7 @@ static std::string escapePyLiteral(const char* raw) {
     return out;
 }
 
-extern "C" JNIEXPORT jint JNICALL
-Java_com_galaxy_installer_CookerEngine_runCooker(
-        JNIEnv *env, jclass clazz,
-        jstring jPythonHome, jstring jScriptsDir,
-        jstring jInputDir, jstring jOutputDir,
-        jboolean jWithMovies, jobject jCallback) {
-
-    static std::mutex sPyMutex;
-    static std::wstring sPyHome;
-    static bool sPyInited = false;
-    std::lock_guard<std::mutex> lock(sPyMutex);
-
-    const char* pythonHome = env->GetStringUTFChars(jPythonHome, nullptr);
-    const char* scriptsDir = env->GetStringUTFChars(jScriptsDir, nullptr);
-    const char* inputDir = env->GetStringUTFChars(jInputDir, nullptr);
-    const char* outputDir = env->GetStringUTFChars(jOutputDir, nullptr);
-    bool withMovies = (bool)jWithMovies;
-
-    gCallbackGlobal = env->NewGlobalRef(jCallback);
-    jclass cbClass = env->GetObjectClass(jCallback);
-    gOnLogMethod = env->GetMethodID(cbClass, "onLog", "(Ljava/lang/String;)V");
-    gOnProgressMethod = env->GetMethodID(cbClass, "onProgress", "(ILjava/lang/String;)V");
-    env->DeleteLocalRef(cbClass);
-
+static void ensurePythonInitializedLocked(const char* pythonHome, const char* scriptsDir) {
     if (!sPyInited) {
         sendLogToJava("[Native] Initializing embedded Python engine...");
         Py_DontWriteBytecodeFlag = 1;
@@ -234,17 +215,10 @@ Java_com_galaxy_installer_CookerEngine_runCooker(
         PyEval_SaveThread();
         sPyInited = true;
         sendLogToJava("[Native] Python engine initialized.");
-    } else {
-        sendLogToJava("[Native] Reusing initialized Python engine.");
     }
 
     PyGILState_STATE gstate = PyGILState_Ensure();
-
     std::string escScripts = escapePyLiteral(scriptsDir);
-    std::string escInput = escapePyLiteral(inputDir);
-    std::string escOutput = escapePyLiteral(outputDir);
-
-    // Setup sys.path and log redirection in Python
     std::string setupScript =
         "import sys, os, android_bridge\n"
         "_scripts_dir = '" + escScripts + "'\n"
@@ -259,8 +233,55 @@ Java_com_galaxy_installer_CookerEngine_runCooker(
         "        pass\n"
         "sys.stdout = OutputLogger()\n"
         "sys.stderr = OutputLogger()\n";
-
     PyRun_SimpleString(setupScript.c_str());
+    PyGILState_Release(gstate);
+}
+
+static void logAndClearPyError() {
+    PyObject *ptype = nullptr, *pvalue = nullptr, *ptraceback = nullptr;
+    PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+    if (pvalue) {
+        PyObject *pStr = PyObject_Str(pvalue);
+        if (pStr) {
+            const char *errText = PyUnicode_AsUTF8(pStr);
+            if (errText) {
+                sendLogToJava(("[Python Error] " + std::string(errText)).c_str());
+            }
+            Py_DECREF(pStr);
+        }
+        Py_DECREF(pvalue);
+    }
+    if (ptype) Py_DECREF(ptype);
+    if (ptraceback) Py_DECREF(ptraceback);
+    PyErr_Clear();
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_galaxy_installer_CookerEngine_runCooker(
+        JNIEnv *env, jclass clazz,
+        jstring jPythonHome, jstring jScriptsDir,
+        jstring jInputDir, jstring jOutputDir,
+        jboolean jWithMovies, jobject jCallback) {
+
+    std::lock_guard<std::mutex> lock(sPyMutex);
+
+    const char* pythonHome = env->GetStringUTFChars(jPythonHome, nullptr);
+    const char* scriptsDir = env->GetStringUTFChars(jScriptsDir, nullptr);
+    const char* inputDir = env->GetStringUTFChars(jInputDir, nullptr);
+    const char* outputDir = env->GetStringUTFChars(jOutputDir, nullptr);
+    bool withMovies = (bool)jWithMovies;
+
+    gCallbackGlobal = env->NewGlobalRef(jCallback);
+    jclass cbClass = env->GetObjectClass(jCallback);
+    gOnLogMethod = env->GetMethodID(cbClass, "onLog", "(Ljava/lang/String;)V");
+    gOnProgressMethod = env->GetMethodID(cbClass, "onProgress", "(ILjava/lang/String;)V");
+    env->DeleteLocalRef(cbClass);
+
+    ensurePythonInitializedLocked(pythonHome, scriptsDir);
+
+    PyGILState_STATE gstate = PyGILState_Ensure();
+    std::string escInput = escapePyLiteral(inputDir);
+    std::string escOutput = escapePyLiteral(outputDir);
 
     // Execute cook.py conversion
     std::string runScript =
@@ -288,22 +309,7 @@ Java_com_galaxy_installer_CookerEngine_runCooker(
     sendLogToJava("[Native] Invoking cook.convert()...");
     int result = PyRun_SimpleString(runScript.c_str());
     if (result != 0) {
-        PyObject *ptype = nullptr, *pvalue = nullptr, *ptraceback = nullptr;
-        PyErr_Fetch(&ptype, &pvalue, &ptraceback);
-        if (pvalue) {
-            PyObject *pStr = PyObject_Str(pvalue);
-            if (pStr) {
-                const char *errText = PyUnicode_AsUTF8(pStr);
-                if (errText) {
-                    sendLogToJava(("[Python Error] " + std::string(errText)).c_str());
-                }
-                Py_DECREF(pStr);
-            }
-            Py_DECREF(pvalue);
-        }
-        if (ptype) Py_DECREF(ptype);
-        if (ptraceback) Py_DECREF(ptraceback);
-        PyErr_Clear();
+        logAndClearPyError();
     }
 
     PyGILState_Release(gstate);
@@ -312,6 +318,145 @@ Java_com_galaxy_installer_CookerEngine_runCooker(
     env->ReleaseStringUTFChars(jScriptsDir, scriptsDir);
     env->ReleaseStringUTFChars(jInputDir, inputDir);
     env->ReleaseStringUTFChars(jOutputDir, outputDir);
+    env->DeleteGlobalRef(gCallbackGlobal);
+    gCallbackGlobal = nullptr;
+
+    return result;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_galaxy_installer_CookerEngine_inspectRiivolution(
+        JNIEnv *env, jclass clazz,
+        jstring jPythonHome, jstring jScriptsDir, jstring jInputDir) {
+
+    std::lock_guard<std::mutex> lock(sPyMutex);
+
+    const char* pythonHome = env->GetStringUTFChars(jPythonHome, nullptr);
+    const char* scriptsDir = env->GetStringUTFChars(jScriptsDir, nullptr);
+    const char* inputDir = env->GetStringUTFChars(jInputDir, nullptr);
+
+    ensurePythonInitializedLocked(pythonHome, scriptsDir);
+
+    PyGILState_STATE gstate = PyGILState_Ensure();
+    std::string resultJson = "{\"packs\":[]}";
+
+    PyObject* pModName = PyUnicode_FromString("riivolution");
+    PyObject* pMod = PyImport_Import(pModName);
+    Py_DECREF(pModName);
+    if (pMod) {
+        PyObject* pReload = PyImport_ReloadModule(pMod);
+        if (pReload) {
+            Py_DECREF(pMod);
+            pMod = pReload;
+        }
+        PyObject* pFunc = PyObject_GetAttrString(pMod, "inspect_source");
+        if (pFunc && PyCallable_Check(pFunc)) {
+            PyObject* pArgs = Py_BuildValue("(s)", inputDir);
+            PyObject* pRes = PyObject_CallObject(pFunc, pArgs);
+            Py_DECREF(pArgs);
+            if (pRes) {
+                PyObject* pJsonMod = PyImport_ImportModule("json");
+                if (pJsonMod) {
+                    PyObject* pDumps = PyObject_GetAttrString(pJsonMod, "dumps");
+                    if (pDumps) {
+                        PyObject* pJsonStr = PyObject_CallFunctionObjArgs(pDumps, pRes, nullptr);
+                        if (pJsonStr) {
+                            const char* utf = PyUnicode_AsUTF8(pJsonStr);
+                            if (utf) resultJson = utf;
+                            Py_DECREF(pJsonStr);
+                        }
+                        Py_DECREF(pDumps);
+                    }
+                    Py_DECREF(pJsonMod);
+                }
+                Py_DECREF(pRes);
+            } else {
+                PyErr_Clear();
+            }
+            Py_DECREF(pFunc);
+        } else {
+            Py_XDECREF(pFunc);
+            PyErr_Clear();
+        }
+        Py_DECREF(pMod);
+    } else {
+        PyErr_Clear();
+    }
+
+    PyGILState_Release(gstate);
+    env->ReleaseStringUTFChars(jPythonHome, pythonHome);
+    env->ReleaseStringUTFChars(jScriptsDir, scriptsDir);
+    env->ReleaseStringUTFChars(jInputDir, inputDir);
+    return env->NewStringUTF(resultJson.c_str());
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_galaxy_installer_CookerEngine_runRiivolutionCooker(
+        JNIEnv *env, jclass clazz,
+        jstring jPythonHome, jstring jScriptsDir,
+        jstring jInputDir, jstring jOutputDir,
+        jstring jPackId, jstring jOptionsJson, jobject jCallback) {
+
+    std::lock_guard<std::mutex> lock(sPyMutex);
+
+    const char* pythonHome = env->GetStringUTFChars(jPythonHome, nullptr);
+    const char* scriptsDir = env->GetStringUTFChars(jScriptsDir, nullptr);
+    const char* inputDir = env->GetStringUTFChars(jInputDir, nullptr);
+    const char* outputDir = env->GetStringUTFChars(jOutputDir, nullptr);
+    const char* packId = jPackId ? env->GetStringUTFChars(jPackId, nullptr) : "";
+    const char* optionsJson = jOptionsJson ? env->GetStringUTFChars(jOptionsJson, nullptr) : "{}";
+
+    gCallbackGlobal = env->NewGlobalRef(jCallback);
+    jclass cbClass = env->GetObjectClass(jCallback);
+    gOnLogMethod = env->GetMethodID(cbClass, "onLog", "(Ljava/lang/String;)V");
+    gOnProgressMethod = env->GetMethodID(cbClass, "onProgress", "(ILjava/lang/String;)V");
+    env->DeleteLocalRef(cbClass);
+
+    ensurePythonInitializedLocked(pythonHome, scriptsDir);
+
+    PyGILState_STATE gstate = PyGILState_Ensure();
+    std::string escInput = escapePyLiteral(inputDir);
+    std::string escOutput = escapePyLiteral(outputDir);
+    std::string escPackId = escapePyLiteral(packId);
+    std::string escOpts = escapePyLiteral(optionsJson);
+
+    std::string runScript =
+        "import importlib, riivolution, android_bridge, traceback\n"
+        "importlib.reload(riivolution)\n"
+        "def on_progress(done, total):\n"
+        "    pct = int(done * 100 / total) if total > 0 else 0\n"
+        "    android_bridge.progress_bridge(pct, f'Cooking mod files: {done}/{total} ({pct}%)')\n"
+        "try:\n"
+        "    print('[Riivolution] Preparing mod overlay...')\n"
+        "    _pid = '" + escPackId + "' or None\n"
+        "    _opts = '" + escOpts + "' or '{}'\n"
+        "    res = riivolution.install_from_dir(\n"
+        "        source_dir='" + escInput + "',\n"
+        "        out_data_dir='" + escOutput + "',\n"
+        "        pack_id=_pid,\n"
+        "        options_json=_opts,\n"
+        "        progress=on_progress\n"
+        "    )\n"
+        "    for item in res:\n"
+        "        print(f\"[Riivolution] Installed '{item['name']}' ({item['files_cooked']} files, {item['created_files']} new)\")\n"
+        "except BaseException as e:\n"
+        "    print('[ERROR] ' + str(e))\n"
+        "    traceback.print_exc()\n"
+        "    raise\n";
+
+    int result = PyRun_SimpleString(runScript.c_str());
+    if (result != 0) {
+        logAndClearPyError();
+    }
+
+    PyGILState_Release(gstate);
+
+    env->ReleaseStringUTFChars(jPythonHome, pythonHome);
+    env->ReleaseStringUTFChars(jScriptsDir, scriptsDir);
+    env->ReleaseStringUTFChars(jInputDir, inputDir);
+    env->ReleaseStringUTFChars(jOutputDir, outputDir);
+    if (jPackId) env->ReleaseStringUTFChars(jPackId, packId);
+    if (jOptionsJson) env->ReleaseStringUTFChars(jOptionsJson, optionsJson);
     env->DeleteGlobalRef(gCallbackGlobal);
     gCallbackGlobal = nullptr;
 

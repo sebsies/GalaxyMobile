@@ -42,6 +42,8 @@ public class CookerEngine {
     }
 
     public static native int runCooker(String pythonHome, String scriptsDir, String inputDir, String outputDir, boolean withMovies, CookerCallback callback);
+    public static native String inspectRiivolution(String pythonHome, String scriptsDir, String inputDir);
+    public static native int runRiivolutionCooker(String pythonHome, String scriptsDir, String inputDir, String outputDir, String packId, String optionsJson, CookerCallback callback);
     public static native boolean isWiiDisc(String filePath);
     public static native int extractDisc(String imagePath, String outDir, boolean includeMovies, CookerCallback callback);
 

@@ -317,6 +317,14 @@ def convert(data_dir, out_dir, jobs=None, only=None, no_audio=False,
             if found_data:
                 args.data_dir = found_data
             else:
+                try:
+                    import riivolution
+                    if riivolution.is_riivolution_pack(args.data_dir):
+                        print('[Cooker] Riivolution mod pack detected! Switching to Riivolution mod cooker...')
+                        riivolution.install_from_dir(args.data_dir, args.out_dir, progress=progress)
+                        return 0
+                except Exception as re_err:
+                    raise RuntimeError(f"Riivolution mod cooking failed: {re_err}") from re_err
                 raise FileNotFoundError(f"{args.data_dir} holds no sys/fst.bin: extraction directory may be empty or incomplete")
 
     os.makedirs(os.path.join(args.out_dir, 'sys'), exist_ok=True)

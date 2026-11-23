@@ -25,7 +25,13 @@ alignas(32) unsigned char GalaxyIDBCSV[kTableMax];
 }
 
 static void load(const std::string& root, const char* name, unsigned char* dst, size_t capacity) {
-    std::string path = root + "/sys/" + name;
+    char modSysPath[1024] = {};
+    std::string path = (port_dvd_resolve_sys_file(name, modSysPath, sizeof(modSysPath)) && modSysPath[0])
+                           ? std::string(modSysPath)
+                           : (root + "/sys/" + name);
+    if (modSysPath[0]) {
+        port_log("dol_data: [Riivolution] loading mod override %s", path.c_str());
+    }
     FILE* f = fopen(path.c_str(), "rb");
     if (!f) {
         port_fatal("%s is missing: convert the game's files again with tools/cook/cook.py, which now also takes data from the "

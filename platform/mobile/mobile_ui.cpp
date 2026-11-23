@@ -145,6 +145,8 @@ enum UiHitKind {
     HIT_TOGGLE_HAPTICS,
     HIT_SLIDER_LANGUAGE,
     HIT_OPEN_INSTALLER,
+    HIT_OPEN_MOD_INSTALLER,
+    HIT_TOGGLE_MOD,
     HIT_CHECK_UPDATES,
     HIT_INSTALL_PLUS,
     HIT_SHARE_LOG,
@@ -1250,6 +1252,22 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                 port_play_ui_se(PORT_UI_SE_DECIDE);
                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                 break;
+            case HIT_OPEN_MOD_INSTALLER:
+                mLastStatusProbeNs = 0;
+                port_open_mod_installer();
+                port_play_ui_se(PORT_UI_SE_DECIDE);
+                mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                break;
+            case HIT_TOGGLE_MOD: {
+                PortModInfo info{};
+                if (port_mods_get(hb.arg0, &info)) {
+                    port_mods_set_enabled(info.id, info.enabled ? 0 : 1);
+                    mLastStatusProbeNs = 0;
+                    port_play_ui_se(PORT_UI_SE_TICK);
+                    mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
+                }
+                break;
+            }
             case HIT_INSTALL_PLUS:
                 mLastStatusProbeNs = 0;
                 port_install_plus();
@@ -1786,6 +1804,7 @@ void UIOverlay::render(int screenW, int screenH) {
     if (mSettingsOpen && mSettingsTab == (numTabs - 1)) {
         if (mLastStatusProbeNs == 0 || (now - mLastStatusProbeNs) >= 2000000000LL) {
             mCachedHasSave = (port_has_save_data() != 0);
+            port_mods_reload();
             if (!mPlusEdition) {
                 mCachedHasData = (port_has_game_data() != 0);
                 mCachedPlusInstalled = (port_is_plus_installed() != 0);
@@ -3349,6 +3368,80 @@ void UIOverlay::render(int screenW, int screenH) {
                     });
                 };
 
+                auto drawRiivolutionModsCard = [&](int col) {
+                    int totalMods = port_mods_count();
+                    int shownMods = std::min(totalMods, 5);
+                    bool pendingRestart = (port_mods_has_pending_changes() != 0);
+                    int enabledCount = 0;
+                    for (int mi = 0; mi < totalMods; mi++) {
+                        PortModInfo info{};
+                        if (port_mods_get(mi, &info) && info.enabled) enabledCount++;
+                    }
+                    float rowH = 44.0f * uiScale;
+                    float baseH = (totalMods > 0 ? 120.0f : 124.0f) * uiScale;
+                    if (pendingRestart) baseH += 22.0f * uiScale;
+                    float cardH = baseH + shownMods * rowH;
+
+                    placeCard(col, cardH, [&](float cX0, float cX1, float cw, float y, float ch) {
+                        drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, enabledCount > 0 ? cCardBorderGold : cCardBorder);
+                        drawSectionTitle(cX0, y, "RIIVOLUTION MODS", enabledCount > 0 ? cGold : cHeader, enabledCount > 0);
+                        char chipBuf[64];
+                        if (totalMods == 0) {
+                            snprintf(chipBuf, sizeof(chipBuf), "None Installed");
+                        } else {
+                            snprintf(chipBuf, sizeof(chipBuf), "%d Active / %d Installed", enabledCount, totalMods);
+                        }
+                        drawStatusChip(cX0 + 14.0f * uiScale, y + 34.0f * uiScale, chipBuf,
+                                       enabledCount > 0 ? sc(rgba(0.10f, 0.34f, 0.22f, 0.90f)) : sc(rgba(0.18f, 0.22f, 0.32f, 0.90f)),
+                                       enabledCount > 0 ? sc(rgba(0.55f, 0.96f, 0.65f, 1.0f)) : cTextSecondary,
+                                       enabledCount > 0 ? sc(rgba(0.290f, 0.871f, 0.502f, 1.0f)) : cHeader);
+
+                        float curY = y + 66.0f * uiScale;
+                        if (totalMods == 0) {
+                            drawText("Install Riivolution .zip or /sdcard/Riivolution packs",
+                                     cX0 + 14.0f * uiScale, curY + 6.0f * uiScale, 0.24f * uiScale, cTextSecondary, 0);
+                            curY += 14.0f * uiScale;
+                        } else {
+                            for (int mi = 0; mi < shownMods; mi++) {
+                                PortModInfo info{};
+                                if (!port_mods_get(mi, &info)) continue;
+                                float ry = curY + mi * rowH;
+                                drawRoundRect(cX0 + 10.0f * uiScale, ry + 2.0f * uiScale,
+                                              cX1 - 10.0f * uiScale, ry + rowH - 2.0f * uiScale,
+                                              10.0f * uiScale, sc(rgba(0.10f, 0.16f, 0.28f, 0.72f)));
+                                char titleBuf[64];
+                                snprintf(titleBuf, sizeof(titleBuf), "%.24s", info.name);
+                                drawText(titleBuf, cX0 + 18.0f * uiScale, ry + 18.0f * uiScale, 0.31f * uiScale, cTextPrimary, 0);
+                                char subBuf[96];
+                                if (info.ppcPatchCount > 0) {
+                                    snprintf(subBuf, sizeof(subBuf), "%d files • %d PPC ASM skipped", info.fileCount, info.ppcPatchCount);
+                                } else {
+                                    snprintf(subBuf, sizeof(subBuf), "%d files • %d new%s", info.fileCount, info.createdCount,
+                                             info.saveId[0] ? " • Mod Save" : "");
+                                }
+                                drawText(subBuf, cX0 + 18.0f * uiScale, ry + 34.0f * uiScale, 0.22f * uiScale, cTextSecondary, 0);
+                                drawM3Switch(cX1 - swW - 18.0f * uiScale, ry + 8.0f * uiScale, swW, swH, info.enabled ? 1.0f : 0.0f);
+                                pushDeckHit(cX0 + 10.0f * uiScale, ry, cX1 - 10.0f * uiScale, ry + rowH, HIT_TOGGLE_MOD, mi);
+                            }
+                            curY += shownMods * rowH + 6.0f * uiScale;
+                        }
+
+                        if (pendingRestart) {
+                            drawText("Restart app to apply mod changes on next boot!",
+                                     cX0 + 14.0f * uiScale, curY + 8.0f * uiScale, 0.24f * uiScale, cGold, 0);
+                            curY += 20.0f * uiScale;
+                        }
+
+                        float btnY = curY + 2.0f * uiScale;
+                        drawGlossyBtn(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + 36.0f * uiScale, 14.0f * uiScale,
+                                      rgba(0.32f, 0.78f, 0.99f, 0.88f), rgba(0.06f, 0.38f, 0.86f, 0.98f),
+                                      totalMods > 0 ? "INSTALL / MANAGE MODS" : "INSTALL RIIVOLUTION MOD",
+                                      rgba(1.0f, 1.0f, 1.0f, 1.0f), 0.30f);
+                        pushDeckHit(cX0 + 14.0f * uiScale, btnY, cX1 - 14.0f * uiScale, btnY + 36.0f * uiScale, HIT_OPEN_MOD_INSTALLER);
+                        (void)cw;
+                    });
+                };
+
                 if (!mPlusEdition) {
                     placeCard(0, 130.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
                         drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
@@ -3387,11 +3480,13 @@ void UIOverlay::render(int screenW, int screenH) {
                         (void)cw;
                     });
 
+                    drawRiivolutionModsCard(0);
                     placeCard(0, 92.0f * uiScale, drawHapticsCard);
                     placeCard(1, 102.0f * uiScale, drawLangSliderCard);
                     drawVersionCard(1);
                     drawDonateAndLogCards(1);
                 } else {
+                    drawRiivolutionModsCard(0);
                     placeCard(0, 92.0f * uiScale, drawHapticsCard);
                     placeCard(0, 102.0f * uiScale, drawLangSliderCard);
                     drawVersionCard(0);

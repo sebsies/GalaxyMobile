@@ -71,6 +71,13 @@ __attribute__((weak)) void port_set_spin_unlocked(int unlocked) { (void)unlocked
 __attribute__((weak)) int port_is_spin_unlocked(void) { return 0; }
 __attribute__((weak)) int port_has_game_data(void) { return 0; }
 __attribute__((weak)) void port_open_installer(void) {}
+__attribute__((weak)) void port_open_mod_installer(void) {}
+__attribute__((weak)) void port_mods_set_root(const char* dataRoot) { (void)dataRoot; }
+__attribute__((weak)) void port_mods_reload(void) {}
+__attribute__((weak)) int port_mods_count(void) { return 0; }
+__attribute__((weak)) int port_mods_get(int index, struct PortModInfo* outInfo) { (void)index; (void)outInfo; return 0; }
+__attribute__((weak)) int port_mods_set_enabled(const char* modId, int enabled) { (void)modId; (void)enabled; return 0; }
+__attribute__((weak)) int port_mods_has_pending_changes(void) { return 0; }
 __attribute__((weak)) void port_open_url(const char* url) { (void)url; }
 __attribute__((weak)) int port_is_plus_installed(void) { return 0; }
 __attribute__((weak)) void port_install_plus(void) {}
