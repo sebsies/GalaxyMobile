@@ -2940,7 +2940,8 @@ void UIOverlay::render(int screenW, int screenH) {
                 });
             };
 
-            if (mSettingsTab == 0) {
+            if (mInstallerMode == 0) {
+                if (mSettingsTab == 0) {
                 // =====================================================
                 // Tab 0: Controls
                 // =====================================================
@@ -3707,17 +3708,7 @@ void UIOverlay::render(int screenW, int screenH) {
                     drawDonateAndLogCards(1);
                 }
             }
-
-            if (mInstallerMode != 0) {
-                // Reset column heights and render the cohesive Cosmic Observatory Installer Deck
-                colY[0] = 0.0f;
-                colY[1] = 0.0f;
-                mSettingsHits.erase(
-                    std::remove_if(mSettingsHits.begin(), mSettingsHits.end(),
-                                   [](const UiHitbox& h) { return !h.fixed; }),
-                    mSettingsHits.end());
-            }
-            if (mInstallerMode != 0) {
+            } else {
                 bool isBusy = (strcmp(cookSt.state, "running") == 0 || strcmp(cookSt.state, "inspecting") == 0);
                 bool isOptions = (strcmp(cookSt.state, "options") == 0);
                 bool isDone = (strcmp(cookSt.state, "done") == 0);
