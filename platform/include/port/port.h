@@ -120,6 +120,7 @@ void port_host_sleep_ns(int64_t ns);
 // headset session does not have input focus (system menu, headset removed).
 void port_set_paused(int paused);
 int port_is_paused(void);
+void port_audio_set_paused(int paused);
 
 // A video retrace timed by the headset's display (vi.cpp).  While these keep
 // coming, the free-running 59.94 Hz clock stays quiet, so every game frame

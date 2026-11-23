@@ -9,6 +9,17 @@
 
 namespace mobile_ui {
 
+// In-shader vertex for 2D batching
+struct UIVertex {
+    float x, y;
+    float u, v;
+    float r, g, b, a;
+    float mode;   // 0 = rect, 1 = circle/ring, 2 = font glyph, 3 = cogwheel, 4 = close 'X'
+    float param;  // ring: inner ratio; rect: corner radius ratio; cogwheel: rot angle
+    float aspect; // rect aspect ratio (w/h or h/w)
+    float extra;  // rect: 0 = horiz/square, 1 = vert
+};
+
 struct Settings {
     bool showControls = true;
     bool fullscreen = false;
@@ -74,6 +85,7 @@ public:
     void openSettings();
     void setPointer(float x, float y);
     void setFps(float fps);
+    void invalidateStatusCache() { mLastStatusProbeNs = 0; }
     Settings& settings() { return mSettings; }
     void setPlusEdition(bool plus) { mPlusEdition = plus; }
     bool isPlusEdition() const { return mPlusEdition; }
@@ -199,11 +211,22 @@ private:
 
     // GL resources
     unsigned int mProg = 0;
-    unsigned int mVao = 0;
-    unsigned int mVbo = 0;
+    int mProjLoc = -1;
+    static constexpr int kNumVbos = 3;
+    unsigned int mVaos[kNumVbos] = {};
+    unsigned int mVbos[kNumVbos] = {};
+    size_t mVboCaps[kNumVbos] = {};
+    int mVboIdx = 0;
     unsigned int mFontTex = 0;
     int mAtlasW = 0;
     int mAtlasH = 0;
+
+    // Reusable UI vertex staging & cached system probes
+    std::vector<UIVertex> mVerts;
+    bool mCachedHasData = false;
+    bool mCachedHasSave = false;
+    bool mCachedPlusInstalled = false;
+    int64_t mLastStatusProbeNs = 0;
 };
 
 inline UIOverlay& get() {

@@ -45,6 +45,7 @@ struct FstEntry {
     s64 size = -1;
     s64 hdSize = -1;
     int fd = -1;
+    u64 lastUseTick = 0;
 };
 
 static std::vector<FstEntry> sFst;
@@ -408,6 +409,10 @@ static std::deque<DVDCommandBlock*> sDone;     // finished, callbacks pending
 static DVDCommandBlock* sActive = nullptr;     // being read by the worker
 static OSThreadQueue sSyncQueue;
 
+static constexpr int kMaxOpenFds = 64;
+static int sOpenFdCount = 0;
+static u64 sFdAccessSeq = 0;
+
 static int openEntry(u32 entry) {
     PortHostAllocScope scope;
     std::lock_guard<std::mutex> lk(sFstMutex);
@@ -416,15 +421,36 @@ static int openEntry(u32 entry) {
     if (fe.fd >= 0 && fe.activePath != neededPath) {
         close(fe.fd);
         fe.fd = -1;
+        if (sOpenFdCount > 0) sOpenFdCount--;
     }
     if (fe.fd < 0) {
+        while (sOpenFdCount >= kMaxOpenFds) {
+            int lruIdx = -1;
+            u64 minTick = ~0ull;
+            for (size_t i = 0; i < sFst.size(); i++) {
+                if (sFst[i].fd >= 0 && i != entry && sFst[i].lastUseTick < minTick) {
+                    minTick = sFst[i].lastUseTick;
+                    lruIdx = (int)i;
+                }
+            }
+            if (lruIdx < 0) break;
+            close(sFst[lruIdx].fd);
+            sFst[lruIdx].fd = -1;
+            if (sOpenFdCount > 0) sOpenFdCount--;
+        }
         fe.activePath = neededPath;
         fe.fd = open(neededPath.c_str(), O_RDONLY | O_CLOEXEC);
         if (fe.fd < 0) {
             port_log("dvd: open %s failed: %s", neededPath.c_str(), strerror(errno));
-        } else if (!fe.hdPath.empty() && neededPath == fe.hdPath) {
-            port_log("dvd: [Plus HD] loaded %s", neededPath.c_str());
+        } else {
+            sOpenFdCount++;
+            fe.lastUseTick = ++sFdAccessSeq;
+            if (!fe.hdPath.empty() && neededPath == fe.hdPath) {
+                port_log("dvd: [Plus HD] loaded %s", neededPath.c_str());
+            }
         }
+    } else {
+        fe.lastUseTick = ++sFdAccessSeq;
     }
     return fe.fd;
 }
@@ -447,13 +473,24 @@ static void workerMain() {
         } else {
             u8* dst = (u8*)b->addr;
             size_t want = b->length;
-            ssize_t got = pread(fd, dst, want, (off_t)b->offset);
-            if (got < 0) {
+            size_t totalGot = 0;
+            bool ioErr = false;
+            while (totalGot < want) {
+                ssize_t got = pread(fd, dst + totalGot, want - totalGot, (off_t)b->offset + (off_t)totalGot);
+                if (got < 0) {
+                    if (errno == EINTR) continue;
+                    ioErr = true;
+                    break;
+                }
+                if (got == 0) {
+                    memset(dst + totalGot, 0, want - totalGot);  // past EOF the drive returns adjacent data
+                    break;
+                }
+                totalGot += (size_t)got;
+            }
+            if (ioErr) {
                 result = -1;
             } else {
-                if ((size_t)got < want) {
-                    memset(dst + got, 0, want - (size_t)got);  // past EOF the drive returns adjacent data
-                }
                 b->transferredSize = b->length;
                 result = (s32)b->length;
             }

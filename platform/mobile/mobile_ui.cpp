@@ -158,17 +158,6 @@ enum UiHitKind {
     HIT_NET_DIRECT_CONNECT
 };
 
-// In-shader vertex for 2D batching
-struct UIVertex {
-    float x, y;
-    float u, v;
-    float r, g, b, a;
-    float mode;   // 0 = rect, 1 = circle/ring, 2 = font glyph, 3 = cogwheel, 4 = close 'X'
-    float param;  // ring: inner ratio; rect: corner radius ratio; cogwheel: rot angle
-    float aspect; // rect aspect ratio (w/h or h/w)
-    float extra;  // rect: 0 = horiz/square, 1 = vert
-};
-
 struct Color {
     float r, g, b, a;
 };
@@ -588,6 +577,7 @@ void UIOverlay::openSettings() {
         port_play_ui_se(PORT_UI_SE_OPEN);
     }
     mSettingsOpen = true;
+    mLastStatusProbeNs = 0;
     mDirty = true;
 }
 
@@ -660,27 +650,36 @@ bool UIOverlay::init() {
         return false;
     }
 
-    glGenVertexArrays(1, &mVao);
-    glGenBuffers(1, &mVbo);
+    mProjLoc = glGetUniformLocation(mProg, "uProj");
+    GLint fontLoc = glGetUniformLocation(mProg, "uFontTex");
+    if (fontLoc >= 0) {
+        glUseProgram(mProg);
+        glUniform1i(fontLoc, 0);
+    }
 
-    glBindVertexArray(mVao);
-    glBindBuffer(GL_ARRAY_BUFFER, mVbo);
+    glGenVertexArrays(kNumVbos, mVaos);
+    glGenBuffers(kNumVbos, mVbos);
+    for (int i = 0; i < kNumVbos; i++) {
+        mVboCaps[i] = 0;
+        glBindVertexArray(mVaos[i]);
+        glBindBuffer(GL_ARRAY_BUFFER, mVbos[i]);
 
-    // layout 0: pos (vec2)
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(UIVertex), (void*)offsetof(UIVertex, x));
+        // layout 0: pos (vec2)
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(UIVertex), (void*)offsetof(UIVertex, x));
 
-    // layout 1: uv (vec2)
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(UIVertex), (void*)offsetof(UIVertex, u));
+        // layout 1: uv (vec2)
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(UIVertex), (void*)offsetof(UIVertex, u));
 
-    // layout 2: color (vec4)
-    glEnableVertexAttribArray(2);
-    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(UIVertex), (void*)offsetof(UIVertex, r));
+        // layout 2: color (vec4)
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(UIVertex), (void*)offsetof(UIVertex, r));
 
-    // layout 3: params (vec4)
-    glEnableVertexAttribArray(3);
-    glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(UIVertex), (void*)offsetof(UIVertex, mode));
+        // layout 3: params (vec4)
+        glEnableVertexAttribArray(3);
+        glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, sizeof(UIVertex), (void*)offsetof(UIVertex, mode));
+    }
 
     glBindVertexArray(0);
 
@@ -987,6 +986,7 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                     mSettingsTab = hb.arg0;
                     mDrawerScrollY = 0.0f;
                     mDrawerScrollTarget = 0.0f;
+                    mLastStatusProbeNs = 0;
                     port_play_ui_se(PORT_UI_SE_TAB);
                     mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                 }
@@ -1245,11 +1245,13 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                 saveNow = true;
                 break;
             case HIT_OPEN_INSTALLER:
+                mLastStatusProbeNs = 0;
                 port_open_installer();
                 port_play_ui_se(PORT_UI_SE_DECIDE);
                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                 break;
             case HIT_INSTALL_PLUS:
+                mLastStatusProbeNs = 0;
                 port_install_plus();
                 port_play_ui_se(PORT_UI_SE_DECIDE);
                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
@@ -1260,11 +1262,13 @@ bool UIOverlay::handleInput(const AInputEvent* event, PortPadState& pad,
                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                 break;
             case HIT_EXPORT_SAVE:
+                mLastStatusProbeNs = 0;
                 port_export_save();
                 port_play_ui_se(PORT_UI_SE_DECIDE);
                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
                 break;
             case HIT_IMPORT_SAVE:
+                mLastStatusProbeNs = 0;
                 port_import_save();
                 port_play_ui_se(PORT_UI_SE_DECIDE);
                 mobile_haptics::trigger(mobile_haptics::HapticType::Tick);
@@ -1714,8 +1718,11 @@ void UIOverlay::render(int screenW, int screenH) {
     // Ensure OpenGL viewport always matches physical display window for UI overlay
     glViewport(0, 0, screenW, screenH);
 
-    std::vector<UIVertex> verts;
-    verts.reserve(2048);
+    mVerts.clear();
+    if (mVerts.capacity() < 2048) {
+        mVerts.reserve(2048);
+    }
+    std::vector<UIVertex>& verts = mVerts;
 
     float baseDpi = (float)screenH / 650.0f;
     float uiScale = std::min(baseDpi, (float)screenW / 1060.0f);
@@ -1775,6 +1782,17 @@ void UIOverlay::render(int screenW, int screenH) {
 
     int numTabs = mPlusEdition ? 5 : 3;
     if (mSettingsTab < 0 || mSettingsTab >= numTabs) mSettingsTab = 0;
+
+    if (mSettingsOpen && mSettingsTab == (numTabs - 1)) {
+        if (mLastStatusProbeNs == 0 || (now - mLastStatusProbeNs) >= 2000000000LL) {
+            mCachedHasSave = (port_has_save_data() != 0);
+            if (!mPlusEdition) {
+                mCachedHasData = (port_has_game_data() != 0);
+                mCachedPlusInstalled = (port_is_plus_installed() != 0);
+            }
+            mLastStatusProbeNs = now;
+        }
+    }
 
     // Fluid Vertical Observatory Sidebar Indicator Animation
     float headerH = 68.0f * uiScale;
@@ -2584,7 +2602,7 @@ void UIOverlay::render(int screenW, int screenH) {
                 placeCard(col, 126.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
                     drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
                     drawSectionTitle(cX0, y, "SAVE DATA BACKUP & TRANSFER", cHeader, true);
-                    bool hasSave = (port_has_save_data() != 0);
+                    bool hasSave = mCachedHasSave;
                     if (hasSave) {
                         drawStatusChip(cX0 + 14.0f * uiScale, y + 34.0f * uiScale, "Save Active (GameData.bin)", sc(rgba(0.10f, 0.34f, 0.22f, 0.90f)), sc(rgba(0.55f, 0.96f, 0.65f, 1.0f)), sc(rgba(0.290f, 0.871f, 0.502f, 1.0f)));
                     } else {
@@ -3335,7 +3353,7 @@ void UIOverlay::render(int screenW, int screenH) {
                     placeCard(0, 130.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
                         drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorder);
                         drawSectionTitle(cX0, y, "GAME STORAGE & DUMP SETUP", cHeader, true);
-                        bool hasData = (port_has_game_data() != 0);
+                        bool hasData = mCachedHasData;
                         if (hasData) {
                             drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Ready (/sdcard/GalaxyData)", sc(rgba(0.10f, 0.34f, 0.22f, 0.90f)), sc(rgba(0.55f, 0.96f, 0.65f, 1.0f)), sc(rgba(0.290f, 0.871f, 0.502f, 1.0f)));
                         } else {
@@ -3353,7 +3371,7 @@ void UIOverlay::render(int screenW, int screenH) {
                     placeCard(0, 130.0f * uiScale, [&](float cX0, float cX1, float cw, float y, float ch) {
                         drawCard(cX0, y, cX1, y + ch, 18.0f * uiScale, cCardBg, cCardBorderGold);
                         drawSectionTitle(cX0, y, "GALAXYMOBILE+ ALL-STAR EDITION", cGold, true);
-                        bool plusInstalled = (port_is_plus_installed() != 0);
+                        bool plusInstalled = mCachedPlusInstalled;
                         if (plusInstalled) {
                             drawStatusChip(cX0 + 14.0f * uiScale, y + 36.0f * uiScale, "Installed on Device", sc(rgba(0.10f, 0.34f, 0.22f, 0.90f)), sc(rgba(0.55f, 0.96f, 0.65f, 1.0f)), sc(rgba(0.290f, 0.871f, 0.502f, 1.0f)));
                         } else {
@@ -3575,18 +3593,24 @@ void UIOverlay::render(int screenW, int screenH) {
         0.0f,     0.0f,     -1.0f, 0.0f,
         -1.0f,    1.0f,      0.0f, 1.0f
     };
-    GLint uProjLoc = glGetUniformLocation(mProg, "uProj");
-    glUniformMatrix4fv(uProjLoc, 1, GL_FALSE, proj);
+    if (mProjLoc >= 0) {
+        glUniformMatrix4fv(mProjLoc, 1, GL_FALSE, proj);
+    }
 
-    GLint uFontLoc = glGetUniformLocation(mProg, "uFontTex");
-    glUniform1i(uFontLoc, 0);
     glActiveTexture(GL_TEXTURE0);
     glBindSampler(0, 0);
     glBindTexture(GL_TEXTURE_2D, mFontTex);
 
-    glBindVertexArray(mVao);
-    glBindBuffer(GL_ARRAY_BUFFER, mVbo);
-    glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(UIVertex), verts.data(), GL_STREAM_DRAW);
+    int vboIdx = mVboIdx;
+    mVboIdx = (mVboIdx + 1) % kNumVbos;
+    glBindVertexArray(mVaos[vboIdx]);
+    glBindBuffer(GL_ARRAY_BUFFER, mVbos[vboIdx]);
+    size_t needBytes = verts.size() * sizeof(UIVertex);
+    if (needBytes > mVboCaps[vboIdx]) {
+        mVboCaps[vboIdx] = needBytes + needBytes / 4 + 4096;
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)mVboCaps[vboIdx], nullptr, GL_STREAM_DRAW);
+    }
+    glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr)needBytes, verts.data());
 
     glDrawArrays(GL_TRIANGLES, 0, (GLsizei)verts.size());
 

@@ -137,6 +137,7 @@ struct Item {
     // Batch
     u32 uid;           // index into Prepared::uids
     GLuint program;    // resolved by the render thread
+    GLint ordinalLoc;  // cached u_firstOrdinal uniform location
     GLenum prim;       // GL_TRIANGLES, GL_LINES or GL_POINTS
     u8 useVr, hud, hudSafe;
     u8 player;         // between the player markers (SpaceWarp stencil tag)
@@ -350,6 +351,7 @@ struct Renderer::Impl {
     // The frame being replayed.
     std::unique_ptr<Prepared> cur;
     Builder syncBuilder;  // setFrame()
+    std::vector<std::pair<GLuint, GLint>> uploadProgs;
 
     // Background preparation (update()).
     std::thread worker;
@@ -534,16 +536,27 @@ void Renderer::Impl::loadShaderCache() {
     }
     FILE* in = fopen(sShaderCachePath.c_str(), "rb");
     size_t loaded = 0, stale = 0;
+    bool headerValid = false;
+    bool truncated = false;
     if (in) {
         u32 magic = 0;
         if (fread(&magic, 4, 1, in) == 1 && magic == kCacheMagic) {
+            headerValid = true;
             for (;;) {
                 u32 hdr[3];  // key size, binary format, binary length
+                size_t gotHdr = fread(hdr, 4, 3, in);
+                if (gotHdr == 0) break;  // clean EOF
+                if (gotHdr != 3 || hdr[0] != sizeof(ShaderUid) || hdr[2] > (64u << 20)) {
+                    truncated = true;
+                    break;
+                }
                 u64 srcHash = 0;
-                if (fread(hdr, 4, 3, in) != 3 || hdr[0] != sizeof(ShaderUid) || hdr[2] > (64u << 20)) break;
                 ShaderUid uid;
                 std::vector<u8> bin(hdr[2]);
-                if (fread(&srcHash, 8, 1, in) != 1 || fread(&uid, sizeof(uid), 1, in) != 1 || fread(bin.data(), 1, bin.size(), in) != bin.size()) break;
+                if (fread(&srcHash, 8, 1, in) != 1 || fread(&uid, sizeof(uid), 1, in) != 1 || fread(bin.data(), 1, bin.size(), in) != bin.size()) {
+                    truncated = true;
+                    break;
+                }
                 if (srcHash != sourceHash(uid)) {
                     stale++;
                     staleUids.push_back(uid);
@@ -569,13 +582,17 @@ void Renderer::Impl::loadShaderCache() {
         }
         fclose(in);
     }
-    // Rewrite the cache with the entries that loaded; new programs are
-    // appended as they are built.
-    cacheOut = fopen(sShaderCachePath.c_str(), "wb");
-    if (cacheOut) {
-        fwrite(&kCacheMagic, 4, 1, cacheOut);
-        for (auto& kv : programs) {
-            storeBinary(kv.first, kv.second);
+    if (headerValid && stale == 0 && !truncated) {
+        // File already holds the exact valid set of cached programs; append only newly compiled ones.
+        cacheOut = fopen(sShaderCachePath.c_str(), "ab");
+    } else {
+        // Rewrite the cache with the valid entries; new programs are appended as they are built.
+        cacheOut = fopen(sShaderCachePath.c_str(), "wb");
+        if (cacheOut) {
+            fwrite(&kCacheMagic, 4, 1, cacheOut);
+            for (auto& kv : programs) {
+                storeBinary(kv.first, kv.second);
+            }
         }
     }
     port_log("gl: shader cache %s: %zu programs loaded, %zu stale", sShaderCachePath.c_str(), loaded, stale);
@@ -1740,13 +1757,15 @@ void Renderer::Impl::upload(Prepared& p, bool syncPrograms) {
         }
     }
 
-    std::vector<GLuint> progs(p.uids.size());
+    uploadProgs.resize(p.uids.size());
     for (size_t i = 0; i < p.uids.size(); i++) {
-        progs[i] = program(p.uids[i], syncPrograms);
+        GLuint prog = program(p.uids[i], syncPrograms);
+        uploadProgs[i] = {prog, prog ? firstOrdinalLoc(prog) : -1};
     }
     for (Item& it : p.items) {
         if (it.type == IT_DRAW) {
-            it.program = progs[it.uid];
+            it.program = uploadProgs[it.uid].first;
+            it.ordinalLoc = uploadProgs[it.uid].second;
         }
     }
     p.cutProgs.assign(p.uids.size(), 0);
@@ -2004,7 +2023,6 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
     eyeUbo = eyeUbos[eyeUboNext];
     eyeUboNext = (eyeUboNext + 1) % 8;
     glBindBuffer(GL_UNIFORM_BUFFER, eyeUbo);
-    glBufferData(GL_UNIFORM_BUFFER, sizeof(eb), nullptr, GL_STREAM_DRAW);
     glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(eb), &eb);
     glBindBufferBase(GL_UNIFORM_BUFFER, 4, eyeUbo);
     // With the cutaway on, 3D draws use their cutaway variants, compiled in
@@ -2085,6 +2103,19 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
         GLuint tex[8], samp[8];
         int unit;
         void forget() { memset(this, 0xFF, sizeof(*this)); }
+        void invalidateCopy() {
+            memset(vp, 0xFF, sizeof(vp));
+            memset(sc, 0xFF, sizeof(sc));
+            scissorOn = -1;
+            colorMask = -1;
+            blendOn = -1;
+            depthOn = -1;
+            depthMask = -1;
+            cullOn = -1;
+            tex[0] = tex[1] = ~0u;
+            samp[0] = samp[1] = ~0u;
+            unit = -1;
+        }
     } gs;
     gs.forget();
     auto setViewport = [&gs](int x, int y, int w, int h) {
@@ -2282,11 +2313,14 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
             glBindFramebuffer(GL_FRAMEBUFFER, cur->fbo);
             lastProgram = ~0u;
             lastVao = ~0u;
-            gs.forget();
+            gs.invalidateCopy();
             continue;
         }
         if (!it.program && it.type == IT_DRAW && it.uid < frameUids.size()) {
             it.program = program(frameUids[it.uid], false);
+            if (it.program) {
+                it.ordinalLoc = firstOrdinalLoc(it.program);
+            }
         }
         if (!it.program || !it.idxCount) {
             continue;
@@ -2360,8 +2394,10 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
         }
 
         GLuint prog = it.program;
+        bool cutawayProg = false;
         if (cutActive && it.useVr && it.uid < cutProgs.size() && cutProgs[it.uid]) {
             prog = cutProgs[it.uid];
+            cutawayProg = true;
         }
         if (!prog) {
             continue;
@@ -2369,10 +2405,7 @@ void Renderer::Impl::execute(EfbTarget& efb, const EyeView* eye, EfbTarget* hud,
         if (prog != lastProgram) {
             glUseProgram(prog);
             lastProgram = prog;
-            ordinalLoc = firstOrdinalLoc(prog);
-            if (sUseVertexTextures) {
-                ensureVtfUniforms(prog);
-            }
+            ordinalLoc = cutawayProg ? firstOrdinalLoc(prog) : it.ordinalLoc;
         }
         glUniform1ui(ordinalLoc, it.firstOrdinal);
         for (int u = 0; u < 8; u++) {

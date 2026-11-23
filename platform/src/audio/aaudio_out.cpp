@@ -20,7 +20,7 @@ namespace {
 
 std::mutex sLock;  // the stream, the resampler and the WAV file
 AAudioStream* sStream = nullptr;
-bool sOpenFailed = false;
+int64_t sLastOpenFailNs = 0;
 std::atomic<bool> sDisconnected{false};
 int32_t sDeviceRate = 0;
 std::vector<s16> sLR, sOut;
@@ -244,8 +244,15 @@ extern "C" void port_audio_submit(const s16* rightLeft, u32 frames, u32 rate) {
         AAudioStream_close(sStream);
         sStream = nullptr;
     }
-    if (!sStream && !sOpenFailed) {
-        sOpenFailed = !openStream(rate);
+    if (!sStream) {
+        int64_t nowNs = port_host_time_ns();
+        if (sLastOpenFailNs == 0 || (nowNs - sLastOpenFailNs) >= 1000000000ll) {
+            if (openStream(rate)) {
+                sLastOpenFailNs = 0;
+            } else {
+                sLastOpenFailNs = nowNs;
+            }
+        }
     }
     if (!sStream) return;
 
@@ -287,7 +294,24 @@ extern "C" int port_audio_underruns(void) { return sUnderruns.load(); }
 // timer).
 extern "C" int64_t port_audio_queued_ns(void) {
     std::lock_guard<std::mutex> lock(sLock);
-    if (!sStream || sDeviceRate <= 0) return sOpenFailed ? -1 : 0;
+    if (!sStream || sDeviceRate <= 0) return (sLastOpenFailNs != 0) ? -1 : 0;
     u32 queued = sRingWrite.load(std::memory_order_relaxed) - sRingRead.load(std::memory_order_acquire);
     return (int64_t)queued * 1000000000ll / sDeviceRate;
+}
+
+extern "C" void port_audio_set_paused(int paused) {
+    std::lock_guard<std::mutex> lock(sLock);
+    if (!sStream) return;
+    if (paused) {
+        AAudioStream_requestPause(sStream);
+    } else {
+        if (sDisconnected.exchange(false)) {
+            AAudioStream_close(sStream);
+            sStream = nullptr;
+            sLastOpenFailNs = 0;
+        } else {
+            sRingRead.store(sRingWrite.load(std::memory_order_relaxed), std::memory_order_release);
+            AAudioStream_requestStart(sStream);
+        }
+    }
 }

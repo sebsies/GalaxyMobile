@@ -15,6 +15,12 @@
 #include "port/port.h"
 #include "tex_decode.h"
 
+#if defined(__aarch64__) && (defined(__linux__) || defined(__ANDROID__))
+#include <arm_acle.h>
+#include <asm/hwcap.h>
+#include <sys/auxv.h>
+#endif
+
 namespace gpu {
 
 // ---------------------------------------------------------------------------
@@ -410,7 +416,49 @@ u32 loadVertices(WordBuffer& out, const u8* data, u32 count, int vat, u32 stride
 // read, once per FIFO flush: the CPU may rewrite arrays between flushes
 // (CPU skinning, blend shapes), never while a flush is being processed.
 // ---------------------------------------------------------------------------
+#if defined(__aarch64__) && (defined(__linux__) || defined(__ANDROID__))
+__attribute__((target("+crc"))) static u64 hashRangeCrc32(const u8* p, size_t n) {
+    u32 c0 = 0x12345678u, c1 = 0x9ABCDEF0u, c2 = 0xCAFEBABEu, c3 = 0xDEADBEEFu;
+    size_t i = 0;
+    for (; i + 32 <= n; i += 32) {
+        u64 v0, v1, v2, v3;
+        memcpy(&v0, p + i, 8);
+        memcpy(&v1, p + i + 8, 8);
+        memcpy(&v2, p + i + 16, 8);
+        memcpy(&v3, p + i + 24, 8);
+        c0 = __crc32cd(c0, v0);
+        c1 = __crc32cd(c1, v1);
+        c2 = __crc32cd(c2, v2);
+        c3 = __crc32cd(c3, v3);
+    }
+    for (; i + 8 <= n; i += 8) {
+        u64 v;
+        memcpy(&v, p + i, 8);
+        c0 = __crc32cd(c0, v);
+    }
+    for (; i < n; i++) {
+        c1 = __crc32cb(c1, p[i]);
+    }
+    u64 h = ((u64)(c0 ^ c2) << 32) | (u64)(c1 ^ c3);
+    h ^= (u64)n * 0x9E3779B185EBCA87ull;
+    h ^= h >> 30;
+    h *= 0xBF58476D1CE4E5B9ull;
+    h ^= h >> 27;
+    h *= 0x94D049BB133111EBull;
+    return h ^ (h >> 31);
+}
+#endif
+
 u64 hashRange(const u8* p, size_t n) {
+#if defined(__aarch64__) && (defined(__linux__) || defined(__ANDROID__))
+#ifndef HWCAP_CRC32
+#define HWCAP_CRC32 (1u << 7)
+#endif
+    static const bool sHasCrc32 = (getauxval(AT_HWCAP) & HWCAP_CRC32) != 0;
+    if (sHasCrc32) {
+        return hashRangeCrc32(p, n);
+    }
+#endif
     // xxHash64-style rounds on four lanes.
     const u64 k1 = 0x9E3779B185EBCA87ull, k2 = 0xC2B2AE3D27D4EB4Full;
     u64 h[4] = {k1 + k2, k2, 0, 0 - k1};

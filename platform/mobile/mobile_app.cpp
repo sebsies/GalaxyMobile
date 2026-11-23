@@ -180,12 +180,22 @@ std::string findGameData(const std::string& extDir) {
 void promptStoragePermissionIfMissing(ANativeActivity* activity) {
     if (!activity || !activity->vm || !activity->clazz) return;
     JNIEnv* env = nullptr;
-    if (activity->vm->AttachCurrentThread(&env, nullptr) != JNI_OK || !env) return;
+    bool attached = false;
+    if (activity->vm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
+        if (activity->vm->AttachCurrentThread(&env, nullptr) != JNI_OK || !env) return;
+        attached = true;
+    }
 
     jclass versionClass = env->FindClass("android/os/Build$VERSION");
-    if (!versionClass) return;
-    jfieldID sdkIntField = env->GetStaticFieldID(versionClass, "SDK_INT", "I");
-    jint sdkInt = env->GetStaticIntField(versionClass, sdkIntField);
+    jint sdkInt = 0;
+    if (versionClass) {
+        jfieldID sdkIntField = env->GetStaticFieldID(versionClass, "SDK_INT", "I");
+        if (sdkIntField) {
+            sdkInt = env->GetStaticIntField(versionClass, sdkIntField);
+        }
+        env->DeleteLocalRef(versionClass);
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
 
     if (sdkInt >= 30) {
         jclass envClass = env->FindClass("android/os/Environment");
@@ -196,35 +206,48 @@ void promptStoragePermissionIfMissing(ANativeActivity* activity) {
                 if (!isManager) {
                     LOGI("MANAGE_EXTERNAL_STORAGE permission missing, launching settings prompt...");
                     jclass intentClass = env->FindClass("android/content/Intent");
-                    jmethodID intentCtor = env->GetMethodID(intentClass, "<init>", "(Ljava/lang/String;Landroid/net/Uri;)V");
-
                     jclass uriClass = env->FindClass("android/net/Uri");
-                    jmethodID parseMethod = env->GetStaticMethodID(uriClass, "parse", "(Ljava/lang/String;)Landroid/net/Uri;");
-
                     jclass actClass = env->GetObjectClass(activity->clazz);
-                    jmethodID getPackageNameMethod = env->GetMethodID(actClass, "getPackageName", "()Ljava/lang/String;");
-                    jstring pkgName = (jstring)env->CallObjectMethod(activity->clazz, getPackageNameMethod);
+                    if (intentClass && uriClass && actClass) {
+                        jmethodID intentCtor = env->GetMethodID(intentClass, "<init>", "(Ljava/lang/String;Landroid/net/Uri;)V");
+                        jmethodID parseMethod = env->GetStaticMethodID(uriClass, "parse", "(Ljava/lang/String;)Landroid/net/Uri;");
+                        jmethodID getPackageNameMethod = env->GetMethodID(actClass, "getPackageName", "()Ljava/lang/String;");
+                        jstring pkgName = getPackageNameMethod ? (jstring)env->CallObjectMethod(activity->clazz, getPackageNameMethod) : nullptr;
 
-                    const char* pkgChars = env->GetStringUTFChars(pkgName, nullptr);
-                    std::string uriStr = std::string("package:") + (pkgChars ? pkgChars : "");
-                    if (pkgChars) env->ReleaseStringUTFChars(pkgName, pkgChars);
+                        std::string uriStr = "package:";
+                        if (pkgName) {
+                            const char* pkgChars = env->GetStringUTFChars(pkgName, nullptr);
+                            if (pkgChars) {
+                                uriStr += pkgChars;
+                                env->ReleaseStringUTFChars(pkgName, pkgChars);
+                            }
+                            env->DeleteLocalRef(pkgName);
+                        }
 
-                    jstring jUriStr = env->NewStringUTF(uriStr.c_str());
-                    jobject jUri = env->CallStaticObjectMethod(uriClass, parseMethod, jUriStr);
-
-                    jstring actionStr = env->NewStringUTF("android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION");
-                    jobject intent = env->NewObject(intentClass, intentCtor, actionStr, jUri);
-
-                    jmethodID startActivityMethod = env->GetMethodID(actClass, "startActivity", "(Landroid/content/Intent;)V");
-                    env->CallVoidMethod(activity->clazz, startActivityMethod, intent);
-
-                    env->DeleteLocalRef(actionStr);
-                    env->DeleteLocalRef(jUriStr);
-                    env->DeleteLocalRef(jUri);
-                    env->DeleteLocalRef(intent);
+                        jstring jUriStr = env->NewStringUTF(uriStr.c_str());
+                        jobject jUri = (parseMethod && jUriStr) ? env->CallStaticObjectMethod(uriClass, parseMethod, jUriStr) : nullptr;
+                        jstring actionStr = env->NewStringUTF("android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION");
+                        jobject intent = (intentCtor && actionStr && jUri) ? env->NewObject(intentClass, intentCtor, actionStr, jUri) : nullptr;
+                        jmethodID startActivityMethod = env->GetMethodID(actClass, "startActivity", "(Landroid/content/Intent;)V");
+                        if (startActivityMethod && intent) {
+                            env->CallVoidMethod(activity->clazz, startActivityMethod, intent);
+                        }
+                        if (actionStr) env->DeleteLocalRef(actionStr);
+                        if (jUriStr) env->DeleteLocalRef(jUriStr);
+                        if (jUri) env->DeleteLocalRef(jUri);
+                        if (intent) env->DeleteLocalRef(intent);
+                    }
+                    if (actClass) env->DeleteLocalRef(actClass);
+                    if (uriClass) env->DeleteLocalRef(uriClass);
+                    if (intentClass) env->DeleteLocalRef(intentClass);
                 }
             }
+            env->DeleteLocalRef(envClass);
         }
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    if (attached) {
+        activity->vm->DetachCurrentThread();
     }
 }
 
@@ -1003,14 +1026,20 @@ void onAppCmd(android_app* app, int32_t cmd) {
         if (a->tiltSensorEnabled) {
             a->displayRotation = queryDisplayRotation(a->android);
         }
-        if (a->surface != EGL_NO_SURFACE) {
-            destroySurface(*a);
-            createSurface(*a);
+        if (a->surface != EGL_NO_SURFACE && a->android && a->android->window) {
+            int winW = ANativeWindow_getWidth(a->android->window);
+            int winH = ANativeWindow_getHeight(a->android->window);
+            if (winW > 0 && winH > 0 && (winW != a->screenWidth || winH != a->screenHeight)) {
+                destroySurface(*a);
+                createSurface(*a);
+            }
         }
         break;
     case APP_CMD_RESUME:
         LOGI("APP_CMD_RESUME");
         port_set_paused(0);
+        port_audio_set_paused(0);
+        mobile_ui::get().invalidateStatusCache();
         if (a->tiltSensorEnabled) {
             a->displayRotation = queryDisplayRotation(a->android);
         }
@@ -1024,6 +1053,7 @@ void onAppCmd(android_app* app, int32_t cmd) {
         LOGI("APP_CMD_PAUSE");
         setTiltSensorEnabled(*a, false);
         port_set_paused(1);
+        port_audio_set_paused(1);
         break;
     case APP_CMD_DESTROY:
         LOGI("APP_CMD_DESTROY");
@@ -1121,12 +1151,14 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
     }
 
     bool running = true;
+    int nextPollTimeoutMs = 0;
     while (running && !app->destroyRequested) {
         int ident;
         int events;
         int sensorDrains = 0;
         android_poll_source* source = nullptr;
-        int timeout = (a.windowReady) ? 0 : 50;
+        int timeout = (a.windowReady) ? nextPollTimeoutMs : 50;
+        nextPollTimeoutMs = 0;
 
         while ((ident = ALooper_pollOnce(timeout, nullptr, &events, (void**)&source)) >= 0) {
             if (source) {
@@ -1340,7 +1372,7 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
                 glClear(GL_COLOR_BUFFER_BIT);
                 mobile_ui::get().render(a.screenWidth, a.screenHeight);
                 eglSwapBuffers(a.display, a.surface);
-                usleep(16000);
+                nextPollTimeoutMs = 16;
             } else if (mobile_ui::get().isSettingsOpen() || mobile_ui::get().needsRedraw()) {
                 glBindFramebuffer(GL_FRAMEBUFFER, 0);
                 glViewport(0, 0, a.screenWidth, a.screenHeight);
@@ -1362,10 +1394,10 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
                 eglSwapBuffers(a.display, a.surface);
             } else {
                 if (fpsLimit < 60 && !frameDue && a.nextRenderFrameNs > nowRenderNs) {
-                    int64_t waitUs = std::min<int64_t>(2000, std::max<int64_t>(200, (a.nextRenderFrameNs - nowRenderNs) / 1000));
-                    usleep((useconds_t)waitUs);
+                    int64_t waitMs = (a.nextRenderFrameNs - nowRenderNs) / 1000000ll;
+                    nextPollTimeoutMs = (int)std::max<int64_t>(1, std::min<int64_t>(4, waitMs));
                 } else {
-                    usleep(1000);
+                    nextPollTimeoutMs = 2;
                 }
             }
         }
@@ -1375,7 +1407,8 @@ extern "C" __attribute__((visibility("default"))) void port_android_main(struct 
     port_net_shutdown();
     mobile_haptics::shutdown();
     destroySurface(a);
-    exit(0);
+    fflush(nullptr);
+    _exit(0);
 }
 
 extern "C" {
